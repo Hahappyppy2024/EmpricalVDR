@@ -1,0 +1,45 @@
+A) **VulnTypes (deduplicated)**
+
+* VulnTypes: **[R01, R02, R04, R05, R06, R07, R08, R09, R10]**
+
+B) **Locations (requirement-level hints)**
+
+* **R01 ->** Layer:middleware, controller, repo; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:GET /api/courses/:course_id/* -> IDOR via `course_id` or object IDs lets a student read/download other courses’ resources, submissions, or posts if membership checks are incomplete.
+
+* **R02 ->** Layer:config, middleware, view; Surface:API, HTML, Upload
+
+  * AttackHint: Surface:HTML Entry:GET /courses/:course_id/* -> Missing security headers, permissive CORS, or unsafe static/file serving exposes student data or enables browser-based attacks.
+
+* **R04 ->** Layer:middleware, repo, config; Surface:API, URLFetch
+
+  * AttackHint: Surface:API Entry:POST /api/courses/:course_id/join* -> Invite/join tokens are guessable, reusable, or not bound to course/role/expiry, enabling unauthorized enrollment or token replay.
+
+* **R05 ->** Layer:controller, repo, view; Surface:API, HTML
+
+  * AttackHint: Surface:HTML Entry:POST /courses/:course_id/posts/* -> QA post content/comments rendered without escaping enables stored XSS; list/search filters risk SQLi if interpolated into queries.
+
+* **R06 ->** Layer:route, controller, middleware; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/courses/:course_id/submissions/* -> Insecure workflow design (e.g., trusting `attachment_upload_id` ownership) allows attaching others’ uploads or bypassing submission constraints.
+
+* **R07 ->** Layer:middleware, controller; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/*login* -> Weak session handling (fixation, long-lived cookies, missing rate limits) allows student account takeover and misuse of course access.
+
+* **R08 ->** Layer:storage, controller, repo; Surface:Upload, Archive, API
+
+  * AttackHint: Surface:Upload Entry:POST /api/courses/:course_id/uploads -> Upload pipeline lacks strict type/size/ownership validation, enabling malicious files, overwrite-style integrity issues, or unsafe processing later.
+
+* **R09 ->** Layer:controller, storage; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/courses/:course_id/* -> Insufficient logging for joins, uploads, and downloads hinders detecting abuse like mass scraping or repeated unauthorized access attempts.
+
+* **R10 ->** Layer:controller, middleware, view; Surface:API, HTML, Upload
+
+  * AttackHint: Surface:Upload Entry:POST /api/courses/:course_id/uploads -> Error responses from upload/submit/render flows leak stack traces, SQL errors, or filesystem paths.
+
+C) **Summary**
+
+* Summary: **V_types=9; V_location_layers=6; V_location_surfaces=5**

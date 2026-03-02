@@ -1,0 +1,26 @@
+A) **VulnTypes (deduplicated)**
+VulnTypes: **[R01, R02, R04, R05, R06, R07, R08, R09, R10]**
+
+B) **Locations (requirement-level hints)**
+
+* **R01** -> Layer:route, controller, repo, middleware; Surface:API, HTML
+  AttackHint: Surface:API Entry:GET /api/courses/{course_id}/* -> Student endpoints must enforce course membership and object ownership to prevent IDOR (viewing others’ submissions/attachments/resources).
+* **R02** -> Layer:config, middleware, route; Surface:API, HTML
+  AttackHint: Surface:HTML Entry:POST /courses/{course_id}/* -> Missing CSRF defenses, weak cookie flags, or permissive CORS can let attackers trigger student actions or read responses in unsafe deployments.
+* **R04** -> Layer:controller, repo, config; Surface:API, HTML, URLFetch
+  AttackHint: Surface:API Entry:GET /api/courses/{course_id}/invites/* -> Invite/join tokens and any “share/download” tokens must be unguessable and scoped/expiring to avoid unauthorized course entry or data access.
+* **R05** -> Layer:controller, repo, view; Surface:API, HTML
+  AttackHint: Surface:HTML Entry:POST /courses/{course_id}/posts -> QA posts, comments, and submission text must be output-escaped and safely stored/queried to prevent stored XSS and injection via filters/search.
+* **R06** -> Layer:route, controller, repo; Surface:API, HTML
+  AttackHint: Surface:HTML Entry:GET /courses/{course_id}/submissions/* -> Requirements must clearly define visibility rules (who can see what/when) or “reasonable” UI features can accidentally expose grades/submissions.
+* **R07** -> Layer:middleware, controller, config; Surface:API, HTML
+  AttackHint: Surface:API Entry:POST /api/login -> Weak auth (no rate limits, weak session rotation, predictable reset flows) increases account takeover risk and cross-course data exposure.
+* **R08** -> Layer:controller, storage, repo; Surface:Upload, API, HTML
+  AttackHint: Surface:Upload Entry:POST /api/courses/{course_id}/uploads -> Attachment upload must validate type/size, store outside web root, bind files to owner/course, and prevent tampering or unsafe reuse across objects.
+* **R09** -> Layer:controller, repo, storage; Surface:API, HTML
+  AttackHint: Surface:API Entry:POST /api/courses/{course_id}/submissions -> Student-impacting actions (join attempts, uploads, submissions) should generate useful security logs to detect abuse (brute force, scraping, repeated forbidden access).
+* **R10** -> Layer:controller, middleware, view; Surface:API, HTML
+  AttackHint: Surface:API Entry:* /api/courses/{course_id}/* -> Errors from invalid IDs, failed downloads, or malformed inputs must not leak stack traces, SQL details, or filesystem paths.
+
+C) **Summary**
+Summary: **V_types=9; V_location_layers=7; V_location_surfaces=4**

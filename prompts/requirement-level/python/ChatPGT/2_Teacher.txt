@@ -1,0 +1,73 @@
+A) **VulnTypes (deduplicated)**
+VulnTypes: **[R01, R02, R04, R05, R06, R07, R08, R09, R10]**
+
+B) **Locations (at least one tag per type)**
+
+* **R01 Broken Access Control (A01:2025)**
+  Locations:
+
+  * R01 -> Layer:middleware, Surface:API
+  * R01 -> Layer:controller, Surface:HTML
+  * R01 -> Layer:repo, Surface:API
+    AttackHint: Surface:API Entry:`POST /api/courses/{course_id}/members/*` -> Ensure role changes and member actions are strictly limited to teachers of that same course_id (no IDOR/cross-course effects).
+
+* **R02 Security Misconfiguration (A02:2025)**
+  Locations:
+
+  * R02 -> Layer:config, Surface:API
+  * R02 -> Layer:middleware, Surface:HTML
+    AttackHint: Surface:HTML Entry:`GET /courses/{course_id}/*` -> Mis-set headers/CORS/cache controls can leak course data or weaken session protections for teacher pages.
+
+* **R04 Cryptographic Failures (A04:2025)**
+  Locations:
+
+  * R04 -> Layer:controller, Surface:URLFetch
+  * R04 -> Layer:middleware, Surface:API
+    AttackHint: Surface:API Entry:`POST /api/courses/{course_id}/invites` -> Invite tokens and any export links must be high-entropy, time-bounded, and not guessable/reusable.
+
+* **R05 Injection (A05:2025)**
+  Locations:
+
+  * R05 -> Layer:repo, Surface:API
+  * R05 -> Layer:view, Surface:HTML
+    AttackHint: Surface:HTML Entry:`POST /courses/{course_id}/assignments/*` -> Assignment text, QA posts, and grading feedback must prevent SQL injection in queries and XSS in rendered content.
+
+* **R06 Insecure Design (A06:2025)**
+  Locations:
+
+  * R06 -> Layer:controller, Surface:Archive
+  * R06 -> Layer:route, Surface:Upload
+    AttackHint: Surface:Archive Entry:`GET /api/courses/{course_id}/exports/*` -> Bulk export/import workflows need explicit safety rules (scope, least privilege, safe defaults) because they amplify mistakes.
+
+* **R07 Authentication Failures (A07:2025)**
+  Locations:
+
+  * R07 -> Layer:middleware, Surface:API
+  * R07 -> Layer:config, Surface:HTML
+    AttackHint: Surface:API Entry:`POST /api/login` -> Teacher sessions must be protected (secure cookies, rotation on login, timeout) since compromise grants broad in-course power.
+
+* **R08 Software or Data Integrity Failures (A08:2025)**
+  Locations:
+
+  * R08 -> Layer:controller, Surface:Upload
+  * R08 -> Layer:storage, Surface:Archive
+  * R08 -> Layer:repo, Surface:API
+    AttackHint: Surface:Upload Entry:`POST /api/courses/{course_id}/grades/import` -> CSV/zip handling must validate schema/content, prevent tampering, and avoid trusting filenames/paths inside archives.
+
+* **R09 Security Logging & Alerting Failures (A09:2025)**
+  Locations:
+
+  * R09 -> Layer:controller, Surface:API
+  * R09 -> Layer:storage, Surface:Admin
+    AttackHint: Surface:API Entry:`POST /api/courses/{course_id}/*` -> Log high-impact teacher actions (role changes, grade imports/exports, bulk downloads) with enough context to detect abuse.
+
+* **R10 Mishandling of Exceptional Conditions (A10:2025)**
+  Locations:
+
+  * R10 -> Layer:middleware, Surface:API
+  * R10 -> Layer:controller, Surface:Upload
+  * R10 -> Layer:view, Surface:HTML
+    AttackHint: Surface:Upload Entry:`POST /api/courses/{course_id}/uploads` -> Parsing/import errors must return safe 4xx/5xx without leaking stack traces, SQL details, or filesystem paths.
+
+C) **Summary**
+Summary: **V_types=9; V_location_layers=6; V_location_surfaces=6**

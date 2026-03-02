@@ -1,0 +1,47 @@
+A) **VulnTypes (deduplicated)**
+VulnTypes: **[R01, R02, R04, R05, R06, R07, R08, R09, R10]**
+
+---
+
+B) **Locations (layer + surface hints)**
+
+* **R01 Broken Access Control (A01:2025)**
+  Locations: Layer:route|controller|middleware|repo, Surface:API|HTML|Admin|Upload|Archive
+  AttackHint: Surface:API Entry: `GET /api/courses/{course_id}/*` -> Try cross-course IDOR by swapping `{course_id}` / object IDs to access another tenant’s data.
+
+* **R02 Security Misconfiguration (A02:2025)**
+  Locations: Layer:config|route|middleware, Surface:API|HTML|Admin
+  AttackHint: Surface:Admin Entry: `GET /admin/*` -> Look for exposed debug/admin actions, missing hardening headers, or overly permissive CORS/session settings.
+
+* **R04 Cryptographic Failures (A04:2025)**
+  Locations: Layer:controller|repo|storage|config, Surface:URLFetch|API|HTML
+  AttackHint: Surface:URLFetch Entry: `GET /invite?token=...` -> Probe invite token confidentiality/guessability and leakage via logs/URLs/referers; validate hash-only storage and TTL enforcement.
+
+* **R05 Injection (A05:2025)**
+  Locations: Layer:controller|repo|view, Surface:API|HTML
+  AttackHint: Surface:HTML Entry: `GET /courses/{course_id}/posts?query=...` -> Attempt SQL injection via search/filter parameters and XSS via post/content rendering.
+
+* **R06 Insecure Design (A06:2025)**
+  Locations: Layer:controller|middleware|repo, Surface:API|HTML|Upload|Archive|Admin
+  AttackHint: Surface:Upload Entry: `POST /courses/{course_id}/uploads` -> Check whether the design enforces course isolation + role gating consistently across all workflows (upload, export, moderation).
+
+* **R07 Authentication Failures (A07:2025)**
+  Locations: Layer:route|controller|middleware|config, Surface:API|HTML|Admin
+  AttackHint: Surface:API Entry: `POST /api/login` -> Test for weak session handling (fixation, missing rotation), missing brute-force protections, and improper auth checks on privileged routes.
+
+* **R08 Software or Data Integrity Failures (A08:2025)**
+  Locations: Layer:controller|storage|repo, Surface:Upload|Archive|API
+  AttackHint: Surface:Archive Entry: `POST /courses/{course_id}/assignments/{id}/import` -> Try malicious imports/exports (zip/csv/package) to tamper with grades/resources or trigger unsafe processing.
+
+* **R09 Security Logging & Alerting Failures (A09:2025)**
+  Locations: Layer:middleware|controller|repo|storage, Surface:Admin|API|HTML
+  AttackHint: Surface:Admin Entry: `GET /admin/audit*` -> Verify audit coverage for sensitive actions (membership changes, invite issuance/use, upload/download, grade import/export) and detection-ready logs.
+
+* **R10 Mishandling of Exceptional Conditions (A10:2025)**
+  Locations: Layer:controller|repo|view|middleware, Surface:API|HTML|Upload|Archive|Admin
+  AttackHint: Surface:API Entry: `POST /api/*` -> Send malformed inputs (bad JSON, missing fields, oversized uploads) and check for stack traces, path/SQL errors, or inconsistent error codes leaking internals.
+
+---
+
+C) **Summary**
+Summary: **V_types=9; V_location_layers=7; V_location_surfaces=6**

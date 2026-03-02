@@ -1,0 +1,21 @@
+### A) VulnTypes
+- VulnTypes: [R01, R04, R05, R06, R07, R10]
+
+### B) Locations
+- R01 -> Layer:middleware, Layer:route, Surface:API, Surface:HTML, Surface:Admin
+- R04 -> Layer:repo, Layer:controller, Surface:API
+- R05 -> Layer:repo, Layer:view, Surface:API, Surface:HTML
+- R06 -> Layer:controller, Surface:API
+- R07 -> Layer:controller, Layer:middleware, Surface:API, Surface:HTML
+- R10 -> Layer:controller, Layer:view, Surface:API, Surface:HTML
+
+### C) Summary
+- Summary: V_types=6; V_location_layers=5; V_location_surfaces=3
+
+### Attack Hints
+- R01 -> AttackHint: Surface:API Entry:GET /api/courses/{id}/members -> Unauthenticated user accesses a course-scoped endpoint due to a missing authentication check in the routing middleware.
+- R04 -> AttackHint: Surface:API Entry:POST /api/register -> User password is stored using a weak hashing algorithm (e.g., MD5) in the repository layer instead of modern algorithms like bcrypt/Argon2.
+- R05 -> AttackHint: Surface:HTML Entry:POST /login -> Malicious SQL payload submitted in the username field bypasses authentication due to lack of prepared statements in the custom PDO repository.
+- R06 -> AttackHint: Surface:API Entry:POST /api/invites/redeem -> Concurrent requests allow an unauthenticated user to redeem a single-use invite token multiple times, violating the consumption constraint.
+- R07 -> AttackHint: Surface:API Entry:POST /api/login -> Attacker performs a brute-force attack against user accounts because the login controller lacks rate limiting or account lockout mechanisms.
+- R10 -> AttackHint: Surface:API Entry:POST /api/register -> Invalid input triggers an unhandled exception, causing the custom PHP framework to expose verbose stack traces or system paths to the public.

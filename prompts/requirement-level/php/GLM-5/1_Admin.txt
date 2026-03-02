@@ -1,0 +1,23 @@
+### A) VulnTypes
+- VulnTypes: [R01, R02, R04, R05, R08, R09, R10]
+
+### B) Locations
+- R01 -> Layer:middleware, Layer:route, Surface:Admin
+- R02 -> Layer:config, Layer:view, Surface:Admin
+- R04 -> Layer:view, Layer:repo, Surface:Admin
+- R05 -> Layer:repo, Layer:controller, Surface:Admin, Surface:API
+- R08 -> Layer:controller, Layer:storage, Surface:Admin, Surface:Archive
+- R09 -> Layer:controller, Layer:storage, Surface:Admin
+- R10 -> Layer:controller, Layer:view, Surface:Admin
+
+### C) Summary
+- Summary: V_types=7; V_location_layers=7; V_location_surfaces=3
+
+### Attack Hints
+- R01 -> AttackHint: Surface:Admin Entry:GET /admin/users -> A non-admin user accesses the global user management list due to missing role verification middleware.
+- R02 -> AttackHint: Surface:Admin Entry:GET /admin/config -> The configuration interface exposes sensitive environment variables (e.g., database credentials) in the HTML view.
+- R04 -> AttackHint: Surface:Admin Entry:GET /admin/audit -> The audit log viewer displays sensitive session tokens or password hashes in cleartext.
+- R05 -> AttackHint: Surface:Admin Entry:POST /admin/search -> Global search input allows SQL injection via unsanitized input in the repository layer.
+- R08 -> AttackHint: Surface:Archive Entry:POST /admin/import -> Administrator imports a malicious course archive triggering a path traversal (Zip Slip) or code execution vulnerability.
+- R09 -> AttackHint: Surface:Admin Entry:DELETE /admin/logs -> Administrator permanently deletes security audit logs, violating non-repudiation requirements.
+- R10 -> AttackHint: Surface:Admin Entry:GET /admin/dashboard -> Unhandled exception during dashboard statistics calculation reveals system internals via verbose error reporting.

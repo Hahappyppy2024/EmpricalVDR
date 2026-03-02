@@ -1,0 +1,63 @@
+### A) VulnTypes (deduplicated)
+
+VulnTypes: **[R01, R02, R03, R04, R05, R06, R07, R08, R09, R10]**
+
+---
+
+### B) Locations (Layer + Surface)
+
+**R01 Broken Access Control (A01:2025)**
+
+* Locations: Layer:route|controller|middleware|repo, Surface:API|HTML|Upload|Archive|Admin
+* AttackHint: Surface:API Entry:GET /api/courses/{course_id}/... -> try cross-course IDOR by swapping `{course_id}` or object IDs to access another tenant’s data.
+
+**R02 Security Misconfiguration (A02:2025)**
+
+* Locations: Layer:config|middleware|route, Surface:API|HTML|Admin
+* AttackHint: Surface:Admin Entry:GET /admin/... -> mis-set debug/CORS/session/cookie/security headers can expose admin surfaces or weaken isolation.
+
+**R03 Software Supply Chain Failures (A03:2025)**
+
+* Locations: Layer:config, Surface:API|HTML|Admin
+* AttackHint: Surface:HTML Entry:GET /... -> vulnerable/typosquatted dependencies (Flask extensions, auth libs, upload libs) widen attack surface across all routes.
+
+**R04 Cryptographic Failures (A04:2025)**
+
+* Locations: Layer:repo|storage|config|controller, Surface:URLFetch|API|HTML
+* AttackHint: Surface:URLFetch Entry:POST /api/courses/{course_id}/invites -> weak token generation/validation or improper hashing/storage enables token guessing/replay.
+
+**R05 Injection (A05:2025)**
+
+* Locations: Layer:controller|repo|view, Surface:API|HTML|Upload|Archive
+* AttackHint: Surface:Upload Entry:POST /api/courses/{course_id}/uploads -> malicious filenames/metadata/content can trigger SQLi via query building or template injection/XSS via rendering.
+
+**R06 Insecure Design (A06:2025)**
+
+* Locations: Layer:controller|middleware|route, Surface:API|HTML|Upload|Archive|Admin
+* AttackHint: Surface:Archive Entry:POST /api/courses/{course_id}/.../export -> insecure multi-tenant workflow design (export/import, moderation, delegation) enables privilege drift or boundary bypass.
+
+**R07 Authentication Failures (A07:2025)**
+
+* Locations: Layer:route|controller|middleware|config, Surface:API|HTML|Admin
+* AttackHint: Surface:API Entry:POST /api/login -> session fixation/weak session handling or missing rate limits enables credential stuffing or auth bypass.
+
+**R08 Software or Data Integrity Failures (A08:2025)**
+
+* Locations: Layer:controller|storage|repo, Surface:Upload|Archive|API
+* AttackHint: Surface:Archive Entry:POST /api/courses/{course_id}/.../import -> importing grades/packages without integrity checks enables tampering (e.g., altered CSV/zip contents affecting state).
+
+**R09 Security Logging & Alerting Failures (A09:2025)**
+
+* Locations: Layer:middleware|controller|repo, Surface:Admin|API|HTML
+* AttackHint: Surface:Admin Entry:GET /admin/audit... -> missing/insufficient audit events for joins, role delegation, uploads, grading changes reduces detection and response.
+
+**R10 Mishandling of Exceptional Conditions (A10:2025)**
+
+* Locations: Layer:controller|middleware|view, Surface:API|HTML|Upload|Archive|Admin
+* AttackHint: Surface:API Entry:POST /api/... -> unhandled exceptions (parsing CSV/zip, DB errors) can leak stack traces/internal paths or cause inconsistent partial updates.
+
+---
+
+### C) Summary
+
+Summary: **V_types=10; V_location_layers=7; V_location_surfaces=6**

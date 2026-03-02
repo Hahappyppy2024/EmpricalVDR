@@ -1,0 +1,88 @@
+A) **VulnTypes (deduplicated)**
+VulnTypes: **[R01, R02, R04, R05, R06, R07, R08, R09, R10]**
+
+B) **Locations (at least one tag per type)**
+
+* **R01 Broken Access Control (A01:2025)**
+  Locations:
+
+  * R01 -> Layer:middleware, Surface:Admin
+  * R01 -> Layer:route, Surface:API
+  * R01 -> Layer:controller, Surface:API
+
+  AttackHint: Surface:API Entry: `GET /api/admin/*` -> Verify every admin route enforces admin session/role and does not rely on “hidden links” or UI-only checks.
+
+* **R02 Security Misconfiguration (A02:2025)**
+  Locations:
+
+  * R02 -> Layer:config, Surface:Admin
+  * R02 -> Layer:middleware, Surface:API
+  * R02 -> Layer:view, Surface:HTML
+
+  AttackHint: Surface:Admin Entry: `GET /admin/*` -> Mis-set debug/CORS/session/cookie/security headers can expose admin data or weaken protections globally.
+
+* **R04 Cryptographic Failures (A04:2025)**
+  Locations:
+
+  * R04 -> Layer:middleware, Surface:Admin
+  * R04 -> Layer:controller, Surface:API
+  * R04 -> Layer:config, Surface:API
+
+  AttackHint: Surface:API Entry: `POST /api/admin/*` -> Weak session cookie settings or insecure token generation for admin workflows can enable hijacking or privilege abuse.
+
+* **R05 Injection (A05:2025)**
+  Locations:
+
+  * R05 -> Layer:repo, Surface:API
+  * R05 -> Layer:controller, Surface:API
+  * R05 -> Layer:view, Surface:HTML
+
+  AttackHint: Surface:API Entry: `GET /api/admin/*?q=...` -> Admin search/filter/export endpoints must parameterize DB queries and avoid string-built SQL.
+
+* **R06 Insecure Design (A06:2025)**
+  Locations:
+
+  * R06 -> Layer:route, Surface:Admin
+  * R06 -> Layer:controller, Surface:Admin
+  * R06 -> Layer:repo, Surface:API
+
+  AttackHint: Surface:Admin Entry: `POST /admin/*` -> Cross-course “global power” actions need explicit tenant-boundary rules (when admin bypass is allowed) and safe defaults.
+
+* **R07 Authentication Failures (A07:2025)**
+  Locations:
+
+  * R07 -> Layer:middleware, Surface:Admin
+  * R07 -> Layer:controller, Surface:API
+  * R07 -> Layer:config, Surface:Admin
+
+  AttackHint: Surface:Admin Entry: `POST /login` -> Weak admin auth controls (rate limiting, lockout, MFA absence, session rotation) increase takeover impact.
+
+* **R08 Software or Data Integrity Failures (A08:2025)**
+  Locations:
+
+  * R08 -> Layer:controller, Surface:Upload
+  * R08 -> Layer:storage, Surface:Archive
+  * R08 -> Layer:repo, Surface:Admin
+
+  AttackHint: Surface:Archive Entry: `POST /api/admin/*/import` -> Admin-driven imports (CSV/zip/material packs) must validate content, prevent tampering, and avoid trusting metadata.
+
+* **R09 Security Logging & Alerting Failures (A09:2025)**
+  Locations:
+
+  * R09 -> Layer:controller, Surface:Admin
+  * R09 -> Layer:repo, Surface:Admin
+  * R09 -> Layer:storage, Surface:API
+
+  AttackHint: Surface:Admin Entry: `GET /api/admin/audit*` -> Ensure high-privilege actions are logged with who/what/when/where, protected from alteration, and monitored for anomalies.
+
+* **R10 Mishandling of Exceptional Conditions (A10:2025)**
+  Locations:
+
+  * R10 -> Layer:middleware, Surface:API
+  * R10 -> Layer:controller, Surface:Admin
+  * R10 -> Layer:view, Surface:HTML
+
+  AttackHint: Surface:API Entry: `ANY /api/admin/*` -> Error handlers must avoid leaking stack traces/paths/SQL details and return consistent safe 4xx/5xx responses.
+
+C) **Summary**
+Summary: **V_types=9; V_location_layers=6; V_location_surfaces=5**

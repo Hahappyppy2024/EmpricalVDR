@@ -1,0 +1,26 @@
+A) **VulnTypes (deduplicated)**
+VulnTypes: **[R01, R02, R04, R05, R06, R07, R08, R09, R10]**
+
+B) **Locations (requirement-level hints)**
+
+* **R01** -> Layer:route, controller, repo, middleware; Surface:API, HTML
+  AttackHint: Surface:API Entry:POST /api/courses/{course_id}/members/* -> Role changes and member ops must enforce course scoping + teacher-only rules to prevent IDOR and privilege escalation (e.g., making self admin).
+* **R02** -> Layer:config, middleware, route; Surface:API, HTML
+  AttackHint: Surface:HTML Entry:GET /courses/{course_id}/* -> Missing CSRF protection, insecure session cookie flags, or permissive CORS can make teacher actions (grade ops, role ops) silently triggerable.
+* **R04** -> Layer:controller, repo, config; Surface:API, HTML, URLFetch
+  AttackHint: Surface:URLFetch Entry:GET /courses/{course_id}/exports/* -> Export/download links and any “share links” must use unguessable tokens + expiry to prevent unauthorized access to grades/submissions.
+* **R05** -> Layer:controller, repo, view; Surface:API, HTML, Upload
+  AttackHint: Surface:Upload Entry:POST /api/courses/{course_id}/grades/import -> CSV fields (names/feedback), assignment text, and search filters must be parameterized/escaped to avoid SQLi and stored XSS via course content.
+* **R06** -> Layer:controller, route, repo; Surface:API, HTML, Archive
+  AttackHint: Surface:Archive Entry:POST /courses/{course_id}/submissions/export -> Bulk export/zip workflows need explicit safety design (scoping, rate limits, redaction options) to avoid “one click” mass data exposure.
+* **R07** -> Layer:middleware, controller, config; Surface:API, HTML
+  AttackHint: Surface:API Entry:POST /api/login -> Weak auth/session handling (no rotation, no re-auth for sensitive actions, no rate limits) increases risk of teacher takeover and grade tampering.
+* **R08** -> Layer:controller, storage, repo; Surface:Upload, Archive, API, HTML
+  AttackHint: Surface:Upload Entry:POST /api/courses/{course_id}/resources -> File/zip handling must validate type/size/path and prevent zip-slip or content tampering when importing course materials or grading bundles.
+* **R09** -> Layer:controller, repo, storage; Surface:API, HTML
+  AttackHint: Surface:HTML Entry:POST /courses/{course_id}/grades/* -> High-impact actions (role changes, grade import/export, bulk download) must be logged with who/what/when/target + anomaly alerting.
+* **R10** -> Layer:controller, middleware, view; Surface:API, HTML
+  AttackHint: Surface:API Entry:* /api/courses/{course_id}/* -> Batch workflows must return safe errors (no stack traces/SQL) while logging server-side details for debugging and incident response.
+
+C) **Summary**
+Summary: **V_types=9; V_location_layers=7; V_location_surfaces=5**

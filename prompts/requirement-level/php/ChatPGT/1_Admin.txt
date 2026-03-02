@@ -1,0 +1,26 @@
+A) **VulnTypes (deduplicated)**
+VulnTypes: **[R01, R02, R04, R05, R06, R07, R08, R09, R10]**
+
+B) **Locations (requirement-level hints)**
+
+* **R01** -> Layer:route, controller, repo, middleware; Surface:API, HTML, Admin
+  AttackHint: Surface:Admin Entry:GET /admin/* -> Admin-only pages that accept `course_id` or `user_id` must re-check authorization and tenant scope on every action to avoid cross-course IDOR.
+* **R02** -> Layer:config, route, middleware; Surface:API, HTML, Admin
+  AttackHint: Surface:Admin Entry:GET /admin/* -> Misconfigured debug/error display, missing security headers, or permissive CORS on admin/API endpoints can turn minor bugs into full data exposure.
+* **R04** -> Layer:controller, repo, config; Surface:URLFetch, Admin, API
+  AttackHint: Surface:Admin Entry:POST /admin/* -> Invite links/tokens and any “export/import/download” URLs must use strong randomness and safe token handling to prevent guessing or reuse.
+* **R05** -> Layer:controller, repo, view; Surface:API, HTML, Admin, URLFetch
+  AttackHint: Surface:API Entry:POST /api/* -> Any admin/global search/filter/sort that feeds into SQL, template output, or redirects must be parameterized/escaped to prevent SQLi/XSS/open-redirect style injection.
+* **R06** -> Layer:route, controller, repo; Surface:Admin, API, HTML
+  AttackHint: Surface:Admin Entry:POST /admin/* -> Cross-course “global management” features need explicit design constraints (tenant scoping, least privilege, approval steps) or admin mistakes become platform-wide incidents.
+* **R07** -> Layer:middleware, controller, config; Surface:Admin, API, HTML
+  AttackHint: Surface:Admin Entry:POST /login -> Weak session handling (no rotation, long-lived sessions, missing CSRF) and lack of MFA/rate limits makes admin takeover much easier.
+* **R08** -> Layer:controller, storage, repo; Surface:Upload, Archive, Admin, API
+  AttackHint: Surface:Upload Entry:POST /api/courses/{course_id}/* -> Admin-triggered imports (CSV/zip) must verify type/size/paths and integrity (hash/signature if applicable) to avoid tampered data or zip-slip style write.
+* **R09** -> Layer:controller, repo, storage, config; Surface:Admin, API, HTML
+  AttackHint: Surface:Admin Entry:GET /admin/audit* -> Audit views must be complete and tamper-resistant (who/what/when/tenant), and sensitive admin actions must always generate logs + alerts.
+* **R10** -> Layer:controller, middleware, view, config; Surface:API, HTML, Admin
+  AttackHint: Surface:API Entry:* /api/* -> Error handling must return generic messages while logging server-side; admin endpoints are especially risky if stack traces/SQL errors leak internals.
+
+C) **Summary**
+Summary: **V_types=9; V_location_layers=7; V_location_surfaces=6**

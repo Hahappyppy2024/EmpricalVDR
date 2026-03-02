@@ -1,0 +1,19 @@
+### A) VulnTypes
+- VulnTypes: [R01, R05, R06, R08, R09]
+
+### B) Locations
+- R01 -> Layer:middleware, Layer:controller, Surface:API, Surface:HTML
+- R05 -> Layer:repo, Layer:view, Surface:Upload, Surface:API
+- R06 -> Layer:controller, Surface:API
+- R08 -> Layer:controller, Layer:storage, Surface:Archive, Surface:Upload
+- R09 -> Layer:controller, Surface:API
+
+### C) Summary
+- Summary: V_types=5; V_location_layers=4; V_location_surfaces=4
+
+### Attack Hints
+- R01 -> AttackHint: Surface:API Entry:POST /api/courses/{id}/members -> Assistant exploits missing granular policy checks to promote a student to Teacher or access restricted member management endpoints.
+- R05 -> AttackHint: Surface:Upload Entry:POST /api/courses/{id}/grades/import -> Assistant uploads a CSV file containing SQL injection payloads that exploit a vulnerability in the PDO repository layer during grade processing.
+- R06 -> AttackHint: Surface:API Entry:PUT /api/courses/{id}/permissions -> Senior-assistant exploits a flaw in the role delegation logic to assign themselves or others permissions exceeding their authorized scope.
+- R08 -> AttackHint: Surface:Archive Entry:GET /api/submissions/export -> Assistant triggers a bulk export that packages student submissions into a malicious archive (Zip Slip) capable of overwriting files on the server during extraction.
+- R09 -> AttackHint: Surface:API Entry:POST /api/courses/{id}/grades -> Assistant modifies student grades via the API without generating an immutable audit log entry, bypassing accountability controls.

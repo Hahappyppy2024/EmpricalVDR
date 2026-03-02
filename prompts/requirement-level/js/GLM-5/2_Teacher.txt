@@ -1,0 +1,21 @@
+### A) VulnTypes
+- VulnTypes: [R01, R05, R06, R08, R09, R10]
+
+### B) Locations
+- R01 -> Layer:middleware, Layer:controller, Surface:API, Surface:HTML
+- R05 -> Layer:repo, Layer:view, Surface:Upload, Surface:API
+- R06 -> Layer:controller, Surface:API
+- R08 -> Layer:controller, Layer:storage, Surface:Upload, Surface:Archive
+- R09 -> Layer:controller, Surface:API
+- R10 -> Layer:controller, Surface:API
+
+### C) Summary
+- Summary: V_types=6; V_location_layers=5; V_location_surfaces=4
+
+### Attack Hints
+- R01 -> AttackHint: Surface:API Entry:POST /api/courses/{id}/members -> Teacher promotes a student to a role with higher privileges than allowed by policy or accesses member data across course boundaries.
+- R05 -> AttackHint: Surface:Upload Entry:POST /api/courses/{id}/grades/import -> Maliciously crafted CSV file imported by the Teacher triggers a SQL injection in the backend SQLite query.
+- R06 -> AttackHint: Surface:API Entry:POST /api/courses/{id}/assistants -> The role delegation logic allows assigning inconsistent permissions, leading to privilege escalation within the course.
+- R08 -> AttackHint: Surface:Archive Entry:POST /api/courses/{id}/resources/import -> Teacher uploads a malicious zip archive (Zip Slip) causing the application to write files outside the designated storage directory.
+- R09 -> AttackHint: Surface:API Entry:POST /api/courses/{id}/grades -> Teacher modifies student grades in bulk without generating an immutable audit log entry.
+- R10 -> AttackHint: Surface:API Entry:POST /api/courses/{id}/submissions/export -> Attempting to export submissions with malformed parameters triggers an unhandled exception, revealing stack traces.

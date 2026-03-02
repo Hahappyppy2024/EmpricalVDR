@@ -1,0 +1,82 @@
+## Requirement-level risks (Role: Unauthenticated, PHP MVC)
+
+### A) VulnTypes
+
+[R01, R02, R03, R04, R05, R06, R07, R08, R09, R10]
+
+---
+
+### B) Locations (Layer + Surface)
+
+**R01 (Broken Access Control)**
+
+* R01 -> Layer:middleware, Surface:API
+* R01 -> Layer:middleware, Surface:HTML
+* R01 -> Layer:route, Surface:API
+* R01 -> Layer:route, Surface:HTML
+  AttackHint: Surface:API Entry:GET /api/courses/{course_id}/* -> Probe any course-scoped endpoint without session and confirm consistent 401/403 without revealing existence.
+
+**R02 (Cryptographic Failures)**
+
+* R02 -> Layer:controller, Surface:URLFetch
+* R02 -> Layer:storage, Surface:URLFetch
+  AttackHint: Surface:URLFetch Entry:GET /invite?token={token} -> Try guessing/short tokens or token reuse; weak token entropy or predictable generation enables unauthorized joining.
+
+**R03 (Injection)**
+
+* R03 -> Layer:repo, Surface:API
+* R03 -> Layer:repo, Surface:HTML
+  AttackHint: Surface:API Entry:POST /api/login -> Attempt SQLi-style payloads in username/email fields; missing parameterized queries in auth lookups is catastrophic.
+
+**R04 (Insecure Design)**
+
+* R04 -> Layer:route, Surface:HTML
+* R04 -> Layer:route, Surface:API
+* R04 -> Layer:controller, Surface:URLFetch
+  AttackHint: Surface:HTML Entry:GET /invite?token={token} -> If the design allows token actions without binding to an authenticated identity (or without confirmation), token theft becomes full course access.
+
+**R05 (Security Misconfiguration)**
+
+* R05 -> Layer:config, Surface:API
+* R05 -> Layer:config, Surface:HTML
+* R05 -> Layer:config, Surface:Admin
+  AttackHint: Surface:HTML Entry:GET /login -> Check for missing security headers, verbose PHP errors, or debug modes exposed on public pages.
+
+**R06 (Vulnerable and Outdated Components)**
+
+* R06 -> Layer:config, Surface:API
+* R06 -> Layer:config, Surface:HTML
+  AttackHint: Surface:HTML Entry:GET / -> Identify disclosed versions/banners; outdated PHP/libs increase exploitability of otherwise minor bugs.
+
+**R07 (Identification and Authentication Failures)**
+
+* R07 -> Layer:controller, Surface:API
+* R07 -> Layer:controller, Surface:HTML
+* R07 -> Layer:middleware, Surface:API
+* R07 -> Layer:middleware, Surface:HTML
+  AttackHint: Surface:API Entry:POST /api/login -> Try brute-force/credential stuffing patterns; weak session handling or inconsistent auth checks across API/HTML breaks the boundary.
+
+**R08 (Software and Data Integrity Failures)**
+
+* R08 -> Layer:storage, Surface:Archive
+* R08 -> Layer:controller, Surface:Archive
+  AttackHint: Surface:Archive Entry:POST /api/*import* -> If any import is reachable pre-auth (or partially), tampered archives/CSVs can poison data or trigger unsafe processing.
+
+**R09 (Security Logging and Monitoring Failures)**
+
+* R09 -> Layer:controller, Surface:API
+* R09 -> Layer:controller, Surface:HTML
+* R09 -> Layer:storage, Surface:Admin
+  AttackHint: Surface:API Entry:POST /api/login -> Repeated failed logins should be logged and rate-limited; absence enables stealthy brute-force and token probing.
+
+**R10 (SSRF)**
+
+* R10 -> Layer:controller, Surface:URLFetch
+* R10 -> Layer:repo, Surface:URLFetch
+  AttackHint: Surface:URLFetch Entry:POST /api/* -> If any public endpoint fetches URLs (e.g., imports by URL), attempt internal-address targets; lack of allowlist/blocklist enables SSRF.
+
+---
+
+### C) Summary
+
+V_types=10; V_location_layers=6 (route, controller, repo, middleware, storage, config); V_location_surfaces=6 (API, HTML, URLFetch, Archive, Admin, Upload)

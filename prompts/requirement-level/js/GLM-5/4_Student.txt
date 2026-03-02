@@ -1,0 +1,19 @@
+### A) VulnTypes
+- VulnTypes: [R01, R05, R06, R08, R10]
+
+### B) Locations
+- R01 -> Layer:middleware, Layer:controller, Surface:API, Surface:HTML
+- R05 -> Layer:view, Layer:repo, Surface:HTML, Surface:API
+- R06 -> Layer:controller, Surface:API
+- R08 -> Layer:storage, Layer:controller, Surface:Upload
+- R10 -> Layer:middleware, Surface:API
+
+### C) Summary
+- Summary: V_types=5; V_location_layers=5; V_location_surfaces=3
+
+### Attack Hints
+- R01 -> AttackHint: Surface:API Entry:GET /api/submissions/{id} -> Student accesses another student's submission by guessing the ID due to missing ownership validation in the controller.
+- R05 -> AttackHint: Surface:HTML Entry:GET /course/{id}/qa -> Student posts a Q&A message containing malicious JavaScript which executes in other users' browsers due to improper escaping in the EJS template.
+- R06 -> AttackHint: Surface:API Entry:POST /api/invites/redeem -> Concurrent requests allow a student to redeem a single-use invite link multiple times, violating the consumption constraint.
+- R08 -> AttackHint: Surface:Upload Entry:POST /api/upload -> Student uploads a malicious file (e.g., polyglot image) that bypasses extension validation, potentially leading to code execution or stored XSS.
+- R10 -> AttackHint: Surface:API Entry:POST /api/submissions -> Submitting malformed input causes an unhandled exception in the grading logic, resulting in a denial of service or information leakage.

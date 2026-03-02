@@ -1,0 +1,45 @@
+A) **VulnTypes (deduplicated)**
+
+* VulnTypes: **[R01, R02, R04, R05, R06, R07, R08, R09, R10]**
+
+B) **Locations (requirement-level hints)**
+
+* **R01 ->** Layer:middleware, controller, repo; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/courses/:course_id/members/* -> Role changes or member actions miss course-scoped authorization checks (e.g., teacher acting on non-members or wrong `course_id`).
+
+* **R02 ->** Layer:config, middleware, view; Surface:API, HTML
+
+  * AttackHint: Surface:HTML Entry:GET /courses/:course_id/* -> Mis-set caching/CORS/headers or permissive upload/download settings expose course data via browser or proxy behaviors.
+
+* **R04 ->** Layer:middleware, repo, config; Surface:API, URLFetch
+
+  * AttackHint: Surface:API Entry:POST /api/courses/:course_id/invites -> Invite links/tokens have weak TTL/entropy/reuse controls, enabling unauthorized joins or privilege drift in a course.
+
+* **R05 ->** Layer:controller, repo, view; Surface:API, HTML
+
+  * AttackHint: Surface:HTML Entry:POST /courses/:course_id/assignments/* -> Assignment text, QA posts, or grade comments are stored/rendered unsafely (XSS) or query params reach SQL contexts (SQLi).
+
+* **R06 ->** Layer:route, controller, middleware; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/courses/:course_id/roles/* -> Course workflows allow high-impact delegation (assistant/senior-assistant) without safeguards (least privilege, approvals, separation of duties).
+
+* **R07 ->** Layer:middleware, controller; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/*login* -> Weak session controls (fixation, long-lived cookies) or missing re-auth for sensitive teacher actions enables account/session takeover impact.
+
+* **R08 ->** Layer:storage, controller, repo; Surface:Upload, Archive, API
+
+  * AttackHint: Surface:Upload Entry:POST /api/courses/:course_id/grades/import -> CSV/zip batch inputs lack integrity/validation and safe parsing, enabling tampered files, formula injection, or unsafe bundle content.
+
+* **R09 ->** Layer:controller, storage; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/courses/:course_id/grades/* -> Missing audit trails for role changes, grade edits, exports, and bulk downloads reduces accountability and incident response.
+
+* **R10 ->** Layer:controller, middleware, view; Surface:API, HTML, Upload
+
+  * AttackHint: Surface:Upload Entry:POST /api/courses/:course_id/* -> Errors from parsing CSV/zip/uploads leak stack traces, SQL errors, or filesystem paths in responses.
+
+C) **Summary**
+
+* Summary: **V_types=9; V_location_layers=7; V_location_surfaces=5**

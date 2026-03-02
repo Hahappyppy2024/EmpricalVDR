@@ -1,0 +1,23 @@
+### A) VulnTypes
+- R01 Broken Access Control (A01:2025)
+- R05 Injection (A05:2025)
+- R06 Insecure Design (A06:2025)
+- R09 Security Logging & Alerting Failures (A09:2025)
+- R10 Mishandling of Exceptional Conditions (A10:2025)
+
+### B) Locations
+- R01 -> Layer:middleware, Layer:route, Surface:Admin, Surface:API
+- R05 -> Layer:controller, Layer:storage, Surface:Upload, Surface:Admin
+- R06 -> Layer:controller, Layer:route, Surface:Admin, Surface:API
+- R09 -> Layer:controller, Layer:config, Surface:Admin
+- R10 -> Layer:controller, Layer:view, Surface:Admin, Surface:API
+
+### C) Summary
+- Summary: V_types=5; V_location_layers=6; V_location_surfaces=3
+
+### D) AttackHint
+- R01: Surface:API Entry:GET /api/admin/users -> Non-admin user accesses global list due to missing role check in middleware.
+- R05: Surface:Upload Entry:POST /api/admin/import -> Malicious filename or path in archive import triggers path traversal or command injection.
+- R06: Surface:Admin Entry:POST /api/admin/courses/{id} -> Admin modifies cross-tenant resource without validating state constraints, causing integrity issues.
+- R09: Surface:Admin Entry:GET /admin/logs -> Admin views audit logs but the access event itself is not recorded, breaking accountability.
+- R10: Surface:API Entry:GET /api/admin/audit -> Unhandled exception on invalid parameter reveals stack trace or sensitive config data.

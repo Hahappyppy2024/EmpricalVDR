@@ -1,0 +1,25 @@
+### A) VulnTypes
+- VulnTypes: [R01, R02, R04, R05, R06, R08, R09, R10]
+
+### B) Locations
+- R01 -> Layer:middleware, Layer:controller, Surface:API, Surface:HTML
+- R02 -> Layer:config, Layer:middleware, Surface:API
+- R04 -> Layer:repo, Layer:controller, Surface:Storage, Surface:API
+- R05 -> Layer:repo, Layer:view, Surface:API, Surface:Upload
+- R06 -> Layer:controller, Surface:API, Surface:URLFetch
+- R08 -> Layer:controller, Surface:Upload, Surface:Archive
+- R09 -> Layer:middleware, Surface:Admin
+- R10 -> Layer:middleware, Layer:controller, Surface:API
+
+### C) Summary
+- Summary: V_types=8; V_location_layers=5; V_location_surfaces=6
+
+### Attack Hints
+- R01 -> AttackHint: Surface:API Entry:GET /api/courses/{id}/members -> Student retrieves membership list of a different course tenant by manipulating the course ID.
+- R02 -> AttackHint: Surface:API Entry:GET /api/debug -> Attacker accesses exposed default admin endpoints or verbose error stack traces due to misconfigured Express environment.
+- R04 -> AttackHint: Surface:API Entry:POST /api/invites -> Attacker enumerates predictable invite tokens or exploits weak token hashing to gain unauthorized course access.
+- R05 -> AttackHint: Surface:Upload Entry:POST /api/assignments/import -> Malicious CSV payload exploits SQL injection in the grade import parser or XSS in file metadata.
+- R06 -> AttackHint: Surface:API Entry:POST /api/invites/redeem -> Attacker redeems a single-use invite link multiple times due to race conditions in the redemption logic.
+- R08 -> AttackHint: Surface:Archive Entry:POST /api/submissions/export -> Teacher imports a maliciously crafted grade archive causing path traversal (Zip Slip) or code execution.
+- R09 -> AttackHint: Surface:Admin Entry:POST /api/admin/config -> Global admin changes critical system configuration without generating an audit log entry.
+- R10 -> AttackHint: Surface:Upload Entry:POST /api/resources -> Uploading a file with a disallowed extension triggers an unhandled exception leading to a denial of service.

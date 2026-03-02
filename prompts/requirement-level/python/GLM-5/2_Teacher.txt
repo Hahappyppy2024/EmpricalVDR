@@ -1,0 +1,23 @@
+### A) VulnTypes
+- R01 Broken Access Control (A01:2025)
+- R05 Injection (A05:2025)
+- R06 Insecure Design (A06:2025)
+- R09 Security Logging & Alerting Failures (A09:2025)
+- R10 Mishandling of Exceptional Conditions (A10:2025)
+
+### B) Locations
+- R01 -> Layer:controller, Layer:middleware, Surface:API, Surface:HTML
+- R05 -> Layer:controller, Layer:storage, Surface:Upload, Surface:Archive
+- R06 -> Layer:controller, Layer:route, Surface:API
+- R09 -> Layer:controller, Layer:middleware, Surface:API
+- R10 -> Layer:controller, Layer:storage, Surface:Upload, Surface:Archive
+
+### C) Summary
+- Summary: V_types=5; V_location_layers=4; V_location_surfaces=4
+
+### D) AttackHint
+- R01: Surface:API Entry:PUT /api/courses/{course_id}/members/{user_id} -> Teacher modifies membership or roles in a different course via parameter tampering (IDOR).
+- R05: Surface:Upload Entry:POST /api/courses/{course_id}/grades/import -> Malicious CSV payload or filename triggers command injection or path traversal during grade parsing.
+- R06: Surface:API Entry:POST /api/courses/{course_id}/assistants -> Teacher delegates permissions with insecure logic, allowing unintended privilege escalation within the course.
+- R09: Surface:API Entry:POST /api/courses/{course_id}/grades/export -> Teacher exports sensitive student PII without generating an audit log entry.
+- R10: Surface:Archive Entry:GET /api/courses/{course_id}/submissions/download -> Processing a maliciously crafted submission archive triggers a decompression bomb or unhandled exception.

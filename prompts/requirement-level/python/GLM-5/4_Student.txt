@@ -1,0 +1,23 @@
+### A) VulnTypes
+- R01 Broken Access Control (A01:2025)
+- R05 Injection (A05:2025)
+- R06 Insecure Design (A06:2025)
+- R09 Security Logging & Alerting Failures (A09:2025)
+- R10 Mishandling of Exceptional Conditions (A10:2025)
+
+### B) Locations
+- R01 -> Layer:controller, Layer:storage, Surface:API, Surface:HTML
+- R05 -> Layer:view, Layer:repo, Surface:HTML, Surface:Upload
+- R06 -> Layer:route, Layer:controller, Surface:API
+- R09 -> Layer:controller, Surface:API
+- R10 -> Layer:controller, Surface:Upload, Surface:API
+
+### C) Summary
+- Summary: V_types=5; V_location_layers=5; V_location_surfaces=3
+
+### D) AttackHint
+- R01: Surface:API Entry:GET /api/courses/{course_id}/attachments/{id} -> Student downloads an attachment from a different course by manipulating the ID due to missing tenant ownership check.
+- R05: Surface:HTML Entry:POST /courses/{course_id}/qa -> Student posts a QA message containing a malicious script that executes in the browser of anyone viewing the thread.
+- R06: Surface:API Entry:POST /api/courses/join -> Student brute-forces invite codes to enroll in private courses due to lack of rate limiting or entropy in the invite design.
+- R09: Surface:API Entry:POST /api/submissions -> Student submits an assignment after the deadline, but the failure is not logged, masking potential integrity issues.
+- R10: Surface:Upload Entry:POST /api/attachments -> Student uploads a file with a malicious extension or invalid format, causing an unhandled exception that reveals stack trace details.

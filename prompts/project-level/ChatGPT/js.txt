@@ -1,0 +1,41 @@
+### A) VulnTypes (deduplicated)
+
+VulnTypes: [R01, R02, R03, R04, R05, R06, R07, R08, R09, R10]
+
+---
+
+### B) Locations (Layer + Surface)
+
+* R01 -> Layer:middleware|route|controller|repo, Surface:API|HTML|Admin|Upload|Archive
+  AttackHint: Surface:API Entry:GET /api/courses/{course_id}/... -> try cross-course ID tampering and role bypass to access another course’s members/files/grades.
+
+* R02 -> Layer:config|middleware|route, Surface:API|HTML|Admin|Upload|Archive
+  AttackHint: Surface:Admin Entry:GET /api/admin/... -> check for insecure defaults (debug, verbose headers, permissive CORS/session cookies) enabling unintended exposure.
+
+* R03 -> Layer:config, Surface:API|HTML
+  AttackHint: Surface:HTML Entry:GET /... -> dependency compromise risk in Node/Express ecosystem (unreviewed packages, vulnerable transitive deps) impacting runtime.
+
+* R04 -> Layer:controller|repo|storage|config, Surface:API|HTML|URLFetch
+  AttackHint: Surface:API Entry:POST /api/courses/{course_id}/invites -> validate invite-token design (randomness, TTL, single-use, hash-only storage, no leakage in logs/URLs).
+
+* R05 -> Layer:controller|repo|view, Surface:API|HTML|URLFetch
+  AttackHint: Surface:HTML Entry:POST /courses/{course_id}/posts -> attempt injection via post content / search / filter fields (SQLi in queries, XSS in rendered EJS).
+
+* R06 -> Layer:controller|middleware|route, Surface:API|HTML|Upload|Archive|Admin
+  AttackHint: Surface:Archive Entry:POST /api/courses/{course_id}/.../export -> design-level gaps (missing invariant checks for tenant boundary, unsafe “export/import package” workflows).
+
+* R07 -> Layer:middleware|controller|config, Surface:API|HTML
+  AttackHint: Surface:API Entry:POST /api/login -> probe auth/session weaknesses (weak rate limits, session fixation, missing CSRF for cookie sessions on state-changing routes).
+
+* R08 -> Layer:controller|storage|repo, Surface:Upload|Archive|API
+  AttackHint: Surface:Upload Entry:POST /api/courses/{course_id}/uploads -> check integrity of imported grades/resources/packages (tampered files, unsafe parsing, missing content validation).
+
+* R09 -> Layer:middleware|controller|config|storage, Surface:Admin|API|HTML
+  AttackHint: Surface:Admin Entry:GET /api/admin/audit... -> verify security-event coverage/quality (authz failures, token use, uploads/imports) and admin visibility.
+
+* R10 -> Layer:controller|repo|middleware|config, Surface:API|HTML|Upload|Archive
+  AttackHint: Surface:API Entry:POST /api/... -> send malformed inputs/files to trigger errors and confirm responses don’t leak stack traces, SQL errors, paths, or secrets.
+
+---
+
+Summary: V_types=10; V_location_layers=6; V_location_surfaces=6

@@ -1,0 +1,40 @@
+### Requirement-level Analysis (Role: Student)
+
+System context:
+EduCollab is a course-centric, multi-tenant collaboration platform. A Course is the tenant boundary (course_id). The system exposes both Web UI and `/api/*` endpoints. Core modules include membership management, invite links, file upload/download, assignments/submissions/grading (import/export), and QA posts. Architecture: MVC.
+
+Tech stack (PHP):
+- Language: PHP 8+
+- Framework: Custom/Plain MVC (controllers + views + routing)
+- Web UI: PHP templates
+- Database: SQLite via PDO
+- Architecture: MVC
+
+Role and permissions (Student):
+- Normal course member.
+- Views course content, submits assignments (text + optional attachment_upload_id), uploads attachments, downloads permitted resources, creates/views QA posts within a course.
+
+Task (OWASP Top 10:2025 reported as R01–R10):
+Analyze security risks at the REQUIREMENT level from the Student perspective. Focus on student-accessible workflows, especially:
+- Joining/participating in a course (course isolation boundary)
+- Creating QA posts and viewing rendered content (content handling)
+- Submitting assignments and uploading attachments (file handling)
+- Downloading resources/attachments (authorization + path safety)
+- Any student-accessible search/filter/list pages (input handling)
+
+Use ONLY R01–R10 labels and ONLY the controlled location tags:
+- Layer: route | controller | repo | view | middleware | storage | config
+- Surface: API | HTML | Upload | Archive | URLFetch | Admin
+
+Output Requirements (for counting V_types and V_location):
+A) VulnTypes: [Rxx, ...]
+B) Locations:
+  - Rxx -> Layer:<...>, Surface:<...>
+C) Summary: V_types=<N>; V_location_layers=<X>; V_location_surfaces=<Y>
+
+Optional (keep it short):
+- For each Rxx, add exactly ONE AttackHint:
+  - AttackHint: Surface:<...> Entry:<METHOD + generic path pattern> -> <one sentence>
+Do NOT invent concrete filenames or tests.
+
+Keep the response concise and structured. No long essay.

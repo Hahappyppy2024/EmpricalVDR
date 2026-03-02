@@ -1,0 +1,26 @@
+A) **VulnTypes (deduplicated)**
+VulnTypes: **[R01, R02, R04, R05, R06, R07, R08, R09, R10]**
+
+B) **Locations (requirement-level hints)**
+
+* **R01** -> Layer:route, controller, repo, middleware; Surface:API, HTML
+  AttackHint: Surface:API Entry:GET /api/courses/{course_id}/* -> Assistant-accessible “view/manage” actions must enforce least-privilege (per-action checks), not just “is staff”, to prevent IDOR and over-broad access to grades/submissions.
+* **R02** -> Layer:config, middleware, route; Surface:API, HTML
+  AttackHint: Surface:HTML Entry:POST /courses/{course_id}/* -> If CSRF, session cookie flags, or CORS are misconfigured, assistants can be tricked into executing policy-sensitive actions (imports/exports, grading actions) via browser.
+* **R04** -> Layer:controller, repo, config; Surface:URLFetch, API, HTML
+  AttackHint: Surface:URLFetch Entry:GET /courses/{course_id}/download/* -> Any staff-visible download/share links must be unguessable, scoped, and expiring to avoid leaking other students’ artifacts.
+* **R05** -> Layer:controller, repo, view; Surface:API, HTML, Upload
+  AttackHint: Surface:Upload Entry:POST /api/courses/{course_id}/* -> Staff-entered feedback/comments and uploaded content can become stored XSS or trigger SQLi if not escaped/parameterized.
+* **R06** -> Layer:route, controller, repo; Surface:API, HTML
+  AttackHint: Surface:API Entry:POST /api/courses/{course_id}/staff/* -> Delegation and permission-configuration requirements are high-risk if not explicitly designed (clear policy matrix, defaults, and separation of duties).
+* **R07** -> Layer:middleware, controller, config; Surface:API, HTML
+  AttackHint: Surface:API Entry:POST /api/login -> Weak session management (no rotation, long sessions) makes assistant accounts a stepping stone to course-wide data exposure, especially when staff rights are broad.
+* **R08** -> Layer:controller, storage, repo; Surface:Upload, Archive, API, HTML
+  AttackHint: Surface:Archive Entry:POST /courses/{course_id}/export/* -> Staff-permitted bulk export/import must validate integrity and paths (e.g., archive extraction safety) to prevent tampering or writing outside intended storage.
+* **R09** -> Layer:controller, repo, storage; Surface:API, HTML
+  AttackHint: Surface:API Entry:POST /api/courses/{course_id}/* -> Staff actions (grading edits, submission handling, exports, role changes if allowed) need auditable logs with actor/target/policy decision for accountability.
+* **R10** -> Layer:controller, middleware, view; Surface:API, HTML
+  AttackHint: Surface:API Entry:* /api/courses/{course_id}/* -> Policy-denied or malformed staff requests must fail safely (generic errors) without leaking SQL/schema/paths, while logging details server-side.
+
+C) **Summary**
+Summary: **V_types=9; V_location_layers=7; V_location_surfaces=5**

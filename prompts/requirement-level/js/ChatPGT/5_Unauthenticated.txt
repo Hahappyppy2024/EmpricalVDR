@@ -1,0 +1,41 @@
+A) **VulnTypes (deduplicated)**
+
+* VulnTypes: **[R01, R02, R04, R05, R06, R07, R09, R10]**
+
+B) **Locations (requirement-level hints)**
+
+* **R01 ->** Layer:middleware, route, controller; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:GET /api/courses/:course_id/* -> Missing “require login” gate or inconsistent guards lets unauthenticated users reach course-scoped endpoints via direct URL access.
+
+* **R02 ->** Layer:config, middleware, view; Surface:API, HTML
+
+  * AttackHint: Surface:HTML Entry:GET /* -> Misconfigured CORS, security headers, cache controls, or static serving exposes sensitive responses or widens attack surface for public pages.
+
+* **R04 ->** Layer:middleware, repo, config; Surface:API, URLFetch
+
+  * AttackHint: Surface:API Entry:GET /invite/* -> Invite tokens are predictable/reusable/not expiring, enabling unauthorized course entry or enumeration without prior authentication.
+
+* **R05 ->** Layer:controller, repo, view; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/login -> Injection via auth/registration inputs (SQLi) or unsafe rendering of echoed fields (XSS) if inputs are interpolated or reflected.
+
+* **R06 ->** Layer:route, controller; Surface:API, HTML
+
+  * AttackHint: Surface:HTML Entry:GET /register -> Insecure design choices (account enumeration signals, weak password policy, no step-up checks for invite acceptance) increase public-entry risk.
+
+* **R07 ->** Layer:middleware, controller, config; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/login -> Missing rate limiting, lockouts, MFA/2FA options, and session hardening enables brute force/credential stuffing and session fixation.
+
+* **R09 ->** Layer:controller, storage; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/login -> Lack of logging/alerting for repeated failed logins, token probing, and suspicious registration patterns reduces detection of active attacks.
+
+* **R10 ->** Layer:controller, middleware, view; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:ANY /api/* -> Public error responses leak stack traces, SQL errors, or internal paths during malformed requests or auth failures.
+
+C) **Summary**
+
+* Summary: **V_types=8; V_location_layers=6; V_location_surfaces=4**

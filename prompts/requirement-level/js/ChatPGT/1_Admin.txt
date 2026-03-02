@@ -1,0 +1,49 @@
+A) **VulnTypes (deduplicated)**
+
+* VulnTypes: **[R01, R02, R03, R04, R05, R06, R07, R08, R09, R10]**
+
+B) **Locations (requirement-level hints)**
+
+* **R01 ->** Layer:middleware, controller, repo; Surface:Admin, API, HTML
+
+  * AttackHint: Surface:Admin Entry:GET /admin/* -> Admin “global” views accidentally accept/derive `course_id` from URL/body without strict tenant scoping, enabling cross-course data access.
+
+* **R02 ->** Layer:config, middleware, route, view; Surface:Admin, API, HTML
+
+  * AttackHint: Surface:Admin Entry:GET /admin/* -> Debug/error/headers/CORS/caching settings leak sensitive data or widen access to admin-only endpoints.
+
+* **R03 ->** Layer:config, storage; Surface:Admin, URLFetch, Archive
+
+  * AttackHint: Surface:URLFetch Entry:POST /admin/* -> Admin-triggered “import/install/fetch” workflows pull remote/third-party code or assets without provenance checks, enabling dependency/plugin compromise.
+
+* **R04 ->** Layer:middleware, repo, config; Surface:Admin, API, URLFetch
+
+  * AttackHint: Surface:API Entry:POST /api/admin/* -> Invite tokens/session cookies/export links use weak secrets/TTL/rotation, allowing token guessing/reuse or insecure transport assumptions.
+
+* **R05 ->** Layer:controller, repo, view; Surface:Admin, API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/admin/* -> Admin dashboards/filters/search/export endpoints pass untrusted params into SQL/template/command-like contexts (e.g., query filters), enabling injection.
+
+* **R06 ->** Layer:route, controller, middleware; Surface:Admin, API, HTML
+
+  * AttackHint: Surface:Admin Entry:POST /admin/* -> High-impact “global manage” actions (cross-course member ops, mass export/import) lack safe-by-design constraints (scoping, approvals, least privilege).
+
+* **R07 ->** Layer:middleware, controller, config; Surface:Admin, API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/login -> Weak admin auth flows (no MFA/rate limit/session hardening) allow brute-force/session fixation/account takeover.
+
+* **R08 ->** Layer:storage, repo, controller; Surface:Upload, Archive, Admin, API
+
+  * AttackHint: Surface:Archive Entry:POST /admin/* -> Admin-run imports (zip/csv/material packs) lack integrity checks and safe extraction rules, enabling tampered bundles or overwrite-style integrity failures.
+
+* **R09 ->** Layer:middleware, controller, storage; Surface:Admin, API, HTML
+
+  * AttackHint: Surface:Admin Entry:GET /admin/audit* -> Audit/log views miss critical events (cross-course actions, auth failures, imports), or lack alerting and tamper resistance.
+
+* **R10 ->** Layer:controller, middleware, view; Surface:API, HTML, Admin
+
+  * AttackHint: Surface:API Entry:ANY /api/* -> Error handling returns stack traces/SQL errors/path details for failed admin operations (imports, exports, downloads), leaking internals.
+
+C) **Summary**
+
+* Summary: **V_types=10; V_location_layers=7; V_location_surfaces=6**

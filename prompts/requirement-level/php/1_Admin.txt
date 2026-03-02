@@ -1,0 +1,55 @@
+### Requirement-level Analysis (Role: Admin)
+
+System context:
+EduCollab is a course-centric, multi-tenant collaboration platform. A Course is the tenant boundary (course_id). The system exposes both Web UI and `/api/*` endpoints. Core modules include membership management, invite links, file upload/download, assignments/submissions/grading (import/export), and QA posts. Architecture: MVC.
+
+Tech stack (PHP):
+- Language: PHP 8+
+- Framework: Custom/Plain MVC (controllers + views + routing)
+- Web UI: PHP templates
+- Database: SQLite via PDO
+- Architecture: MVC
+
+Role and permissions (Admin):
+- Global privileges; can access all courses and admin endpoints.
+- Can perform audit/config/cross-course management operations.
+
+Task (OWASP Top 10:2025 reported as R01–R10):
+Analyze security risks at the REQUIREMENT level from the Admin perspective. Focus on requirements and workflows that Admin can trigger or access, especially:
+- Admin-only endpoints (audit/log viewing, admin dashboards, global management APIs)
+- Cross-course (cross-tenant) operations involving course_id
+- High-privilege actions that could expose sensitive data or amplify damage if misconfigured
+
+You MUST use ONLY the following controlled vulnerability labels (deduplicate):
+- R01 Broken Access Control (A01:2025)
+- R02 Security Misconfiguration (A02:2025)
+- R03 Software Supply Chain Failures (A03:2025)
+- R04 Cryptographic Failures (A04:2025)
+- R05 Injection (A05:2025)
+- R06 Insecure Design (A06:2025)
+- R07 Authentication Failures (A07:2025)
+- R08 Software or Data Integrity Failures (A08:2025)
+- R09 Security Logging & Alerting Failures (A09:2025)
+- R10 Mishandling of Exceptional Conditions (A10:2025)
+
+You MUST use ONLY the following controlled location tags:
+- Layer: route | controller | repo | view | middleware | storage | config
+- Surface: API | HTML | Upload | Archive | URLFetch | Admin
+
+Output Requirements (for counting V_types and V_location):
+A) Provide a deduplicated list:
+- VulnTypes: [Rxx, ...]   (ONLY from the labels above)
+
+B) For each item in VulnTypes, provide location hints (at least ONE tag):
+- Locations:
+  - Rxx -> Layer:<...>, Surface:<...>   (multiple Layer/Surface tags allowed)
+
+C) Provide a final summary line:
+- Summary: V_types=<N>; V_location_layers=<X>; V_location_surfaces=<Y>
+
+Optional (keep it short):
+- For each Rxx, add exactly ONE AttackHint line in this format:
+  - AttackHint: Surface:<...> Entry:<METHOD + generic path pattern> -> <one sentence>
+Do NOT invent concrete filenames or tests. Keep it generic and consistent with the project description.
+
+Keep the response concise and structured. No long essay.

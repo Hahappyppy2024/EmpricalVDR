@@ -1,0 +1,65 @@
+A) **VulnTypes (deduplicated)**
+VulnTypes: **[R01, R02, R04, R05, R06, R07, R09, R10]**
+
+B) **Locations (at least one tag per type)**
+
+* **R01 Broken Access Control (A01:2025)**
+  Locations:
+
+  * R01 -> Layer:middleware, Surface:API
+  * R01 -> Layer:route, Surface:HTML
+    AttackHint: Surface:API Entry:`GET /api/courses/{course_id}/*` -> Ensure all course-scoped APIs are unreachable without a valid session, regardless of URL guessing.
+
+* **R02 Security Misconfiguration (A02:2025)**
+  Locations:
+
+  * R02 -> Layer:config, Surface:HTML
+  * R02 -> Layer:middleware, Surface:API
+    AttackHint: Surface:HTML Entry:`GET /login` -> Debug mode, weak cookie flags, missing headers, or permissive CORS on public pages can weaken the entire boundary.
+
+* **R04 Cryptographic Failures (A04:2025)**
+  Locations:
+
+  * R04 -> Layer:controller, Surface:URLFetch
+  * R04 -> Layer:storage, Surface:API
+    AttackHint: Surface:URLFetch Entry:`GET /join?token=...` -> Invite tokens must be high-entropy, time-limited, and bound to course+intended role; never log or expose them.
+
+* **R05 Injection (A05:2025)**
+  Locations:
+
+  * R05 -> Layer:controller, Surface:API
+  * R05 -> Layer:repo, Surface:API
+  * R05 -> Layer:view, Surface:HTML
+    AttackHint: Surface:API Entry:`POST /api/login` -> Public inputs (username/email) must not reach string-built SQL; rendered error pages must not reflect unsafe content.
+
+* **R06 Insecure Design (A06:2025)**
+  Locations:
+
+  * R06 -> Layer:route, Surface:HTML
+  * R06 -> Layer:controller, Surface:URLFetch
+    AttackHint: Surface:HTML Entry:`POST /register` -> Registration/invite flows need explicit threat-driven rules (abuse prevention, token scope, safe defaults) because they’re open to everyone.
+
+* **R07 Authentication Failures (A07:2025)**
+  Locations:
+
+  * R07 -> Layer:middleware, Surface:API
+  * R07 -> Layer:controller, Surface:HTML
+  * R07 -> Layer:config, Surface:API
+    AttackHint: Surface:API Entry:`POST /api/login` -> Enforce brute-force resistance (rate limiting), consistent auth errors, and secure session creation/rotation.
+
+* **R09 Security Logging & Alerting Failures (A09:2025)**
+  Locations:
+
+  * R09 -> Layer:controller, Surface:API
+  * R09 -> Layer:storage, Surface:Admin
+    AttackHint: Surface:API Entry:`POST /api/login` -> Log auth failures, repeated token misuse, and abnormal request bursts with enough context to alert on attacks.
+
+* **R10 Mishandling of Exceptional Conditions (A10:2025)**
+  Locations:
+
+  * R10 -> Layer:middleware, Surface:API
+  * R10 -> Layer:view, Surface:HTML
+    AttackHint: Surface:HTML Entry:`ANY /` -> Public-facing errors must return safe messages (no stack traces/paths/SQL) and consistent 4xx/5xx behavior.
+
+C) **Summary**
+Summary: **V_types=8; V_location_layers=6; V_location_surfaces=4**

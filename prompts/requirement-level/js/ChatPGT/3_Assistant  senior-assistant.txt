@@ -1,0 +1,45 @@
+A) **VulnTypes (deduplicated)**
+
+* VulnTypes: **[R01, R02, R04, R05, R06, R07, R08, R09, R10]**
+
+B) **Locations (requirement-level hints)**
+
+* **R01 ->** Layer:middleware, controller, repo; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:GET /api/courses/:course_id/submissions/* -> Staff endpoints allow IDOR (view/grade/download other students) if checks don’t enforce “within-course + allowed-by-policy” access.
+
+* **R02 ->** Layer:config, middleware, view; Surface:API, HTML
+
+  * AttackHint: Surface:HTML Entry:GET /courses/:course_id/* -> Misconfigured caching/headers or overly broad route guards expose staff-only pages/data to non-staff users.
+
+* **R04 ->** Layer:middleware, repo, config; Surface:API, URLFetch
+
+  * AttackHint: Surface:API Entry:POST /api/courses/:course_id/invites -> Invite token policy (TTL, reuse, role binding) is weak, letting staff mint or reuse links that escalate access.
+
+* **R05 ->** Layer:controller, repo, view; Surface:API, HTML
+
+  * AttackHint: Surface:HTML Entry:POST /courses/:course_id/posts/* -> Staff-created feedback/comments/QA content is rendered unsafely (stored XSS) or search/filter params reach SQL contexts.
+
+* **R06 ->** Layer:route, controller, middleware; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/courses/:course_id/members/* -> Role delegation and staff “policy-dependent” permissions are underspecified, enabling privilege creep (assistant performs teacher-level bulk actions).
+
+* **R07 ->** Layer:middleware, controller; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/*login* -> Weak session hardening lets attackers hijack a staff account, amplifying impact via delegated privileges (grading/export/download).
+
+* **R08 ->** Layer:storage, controller, repo; Surface:Upload, Archive, API
+
+  * AttackHint: Surface:Upload Entry:POST /api/courses/:course_id/*import* -> Staff-accessible imports/exports accept untrusted CSV/zip without strict validation and safe handling, risking tampered artifacts and integrity loss.
+
+* **R09 ->** Layer:controller, storage; Surface:API, HTML
+
+  * AttackHint: Surface:API Entry:POST /api/courses/:course_id/* -> Missing audit trails for staff actions (grade edits, downloads, membership ops) reduces accountability and detection.
+
+* **R10 ->** Layer:controller, middleware, view; Surface:API, HTML, Upload
+
+  * AttackHint: Surface:API Entry:ANY /api/courses/:course_id/* -> Error paths in staff workflows (upload/parse/export) leak stack traces, SQL errors, or filesystem paths.
+
+C) **Summary**
+
+* Summary: **V_types=9; V_location_layers=6; V_location_surfaces=5**
