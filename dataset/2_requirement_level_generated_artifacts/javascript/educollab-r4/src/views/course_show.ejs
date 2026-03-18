@@ -1,0 +1,16 @@
+<%- include('partials/header') %>
+<h1><%= course.title %></h1>
+<p><%= course.description %></p>
+<p>
+  <a href="/courses/<%= course.course_id %>/edit">Edit Course</a> |
+  <a href="/courses/<%= course.course_id %>/members">Members</a> |
+  <a href="/courses/<%= course.course_id %>/posts">Posts</a> |
+  <a href="/courses/<%= course.course_id %>/assignments">Assignments</a> |
+  <a href="/courses/<%= course.course_id %>/uploads">Uploads</a> |
+  <a href="/courses/<%= course.course_id %>/search?keyword=">Search Posts</a> |
+  <a href="/courses/<%= course.course_id %>/search/comments?keyword=">Search Comments</a>
+</p>
+<form method="post" action="/courses/<%= course.course_id %>/delete">
+  <button type="submit">Delete Course</button>
+</form>
+<%- include('partials/footer') %>

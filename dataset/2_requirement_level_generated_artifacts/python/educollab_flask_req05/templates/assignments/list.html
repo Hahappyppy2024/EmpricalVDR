@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Assignments in {{ course['title'] }}</h1>
+<p><a href="{{ url_for('assignments.new_assignment_page', course_id=course['course_id']) }}">New assignment</a></p>
+{% for assignment in assignments %}
+<div class="card">
+  <h3><a href="{{ url_for('assignments.get_assignment_page', course_id=course['course_id'], assignment_id=assignment['assignment_id']) }}">{{ assignment['title'] }}</a></h3>
+  <p>{{ assignment['description'] }}</p>
+  <p>Due: {{ assignment['due_at'] or 'n/a' }}</p>
+</div>
+{% else %}
+<p>No assignments yet.</p>
+{% endfor %}
+{% endblock %}

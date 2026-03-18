@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block content %}
+<h1>Assignments (Course {{course_id}})</h1>
+{% if my_role in ['teacher','assistant','senior-assistant','admin'] %}<p><a class="btn" href="/courses/{{course_id}}/assignments/new">New Assignment</a></p>{% endif %}
+<table><tr><th>ID</th><th>Title</th><th>Due</th><th>Updated</th></tr>
+{% for a in assignments %}
+<tr><td>{{a.assignment_id}}</td><td><a href="/courses/{{course_id}}/assignments/{{a.assignment_id}}">{{a.title}}</a></td><td>{{a.due_at}}</td><td>{{a.updated_at}}</td></tr>
+{% endfor %}
+</table>
+{% endblock %}

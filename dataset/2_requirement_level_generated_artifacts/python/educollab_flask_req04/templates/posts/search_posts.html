@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Search Posts in {{ course['title'] }}</h1>
+<form method="get" action="{{ url_for('posts.search_posts_page', course_id=course['course_id']) }}">
+  <label for="keyword">Keyword</label>
+  <input id="keyword" name="keyword" value="{{ keyword }}">
+  <button type="submit">Search</button>
+</form>
+{% for post in posts %}
+<div class="card">
+  <h3><a href="{{ url_for('posts.get_post_page', course_id=course['course_id'], post_id=post['post_id']) }}">{{ post['title'] }}</a></h3>
+  <p>{{ post['body'] }}</p>
+</div>
+{% else %}
+  {% if keyword %}<p>No matching posts.</p>{% endif %}
+{% endfor %}
+{% endblock %}

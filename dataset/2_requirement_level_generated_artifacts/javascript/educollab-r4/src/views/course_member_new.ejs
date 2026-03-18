@@ -1,0 +1,23 @@
+<%- include('partials/header') %>
+<h1>Add Member: <%= course.title %></h1>
+<% if (error) { %><p style="color:red;"><%= error %></p><% } %>
+<form method="post" action="/courses/<%= course.course_id %>/members">
+  <div>
+    <label>User</label>
+    <select name="user_id">
+      <% users.forEach(function(user) { %>
+        <option value="<%= user.user_id %>"><%= user.display_name %> (@<%= user.username %>)</option>
+      <% }) %>
+    </select>
+  </div>
+  <div>
+    <label>Role</label>
+    <select name="role_in_course">
+      <% roles.forEach(function(role) { %>
+        <option value="<%= role %>"><%= role %></option>
+      <% }) %>
+    </select>
+  </div>
+  <button type="submit">Add</button>
+</form>
+<%- include('partials/footer') %>

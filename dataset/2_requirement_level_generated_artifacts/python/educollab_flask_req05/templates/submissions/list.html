@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Submissions for {{ assignment['title'] }}</h1>
+{% for submission in submissions %}
+<div class="card">
+  <h3>{{ submission['display_name'] }} ({{ submission['username'] }})</h3>
+  <p>{{ submission['content_text'] }}</p>
+  <p>Attachment: {{ submission['attachment_name'] or 'none' }}</p>
+  <p>Updated at {{ submission['updated_at'] }}</p>
+</div>
+{% else %}
+<p>No submissions yet.</p>
+{% endfor %}
+{% endblock %}

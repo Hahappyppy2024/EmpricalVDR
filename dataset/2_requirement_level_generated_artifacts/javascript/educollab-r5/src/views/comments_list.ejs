@@ -1,0 +1,8 @@
+<%- include('partials/header') %>
+<h1>Comments for: <%= post.title %></h1>
+<ul>
+  <% comments.forEach(function(comment) { %>
+    <li><%= comment.author_display_name %>: <%= comment.body %></li>
+  <% }) %>
+</ul>
+<%- include('partials/footer') %>

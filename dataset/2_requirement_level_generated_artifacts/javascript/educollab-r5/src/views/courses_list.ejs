@@ -1,0 +1,9 @@
+<%- include('partials/header') %>
+<h1>Courses</h1>
+<p><a href="/courses/new">Create a course</a></p>
+<ul>
+  <% courses.forEach(function(course) { %>
+    <li><a href="/courses/<%= course.course_id %>"><%= course.title %></a></li>
+  <% }) %>
+</ul>
+<%- include('partials/footer') %>

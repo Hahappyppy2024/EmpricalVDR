@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block content %}
+<h1>My Submissions</h1>
+<table><tr><th>Course</th><th>Assignment</th><th>Updated</th><th>Content</th></tr>
+{% for s in submissions %}
+<tr><td>{{s.course_title}} ({{s.course_id}})</td><td>{{s.assignment_title}} ({{s.assignment_id}})</td><td>{{s.updated_at}}</td><td><pre style="white-space:pre-wrap;">{{s.content_text}}</pre></td></tr>
+{% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Users</h1>
+{% for item in users %}
+<div class="card">
+  <p><strong>{{ item['display_name'] }}</strong> ({{ item['username'] }})</p>
+  <p>User ID: {{ item['user_id'] }}</p>
+  <p>Created At: {{ item['created_at'] }}</p>
+</div>
+{% else %}
+<p>No users found.</p>
+{% endfor %}
+{% endblock %}

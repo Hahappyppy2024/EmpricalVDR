@@ -1,0 +1,12 @@
+<%- include('partials/header') %>
+
+<h1>EduCollab</h1>
+<p>Requirement 01: Bootstrapping + Auth + User + Course</p>
+
+<% if (currentUser) { %>
+  <p>Signed in as <strong><%= currentUser.display_name %></strong> (@<%= currentUser.username %>)</p>
+<% } else { %>
+  <p>Please register or log in.</p>
+<% } %>
+
+<%- include('partials/footer') %>

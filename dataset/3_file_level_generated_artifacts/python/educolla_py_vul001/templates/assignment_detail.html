@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block content %}
+<h1>Assignment: {{assignment.title}}</h1>
+<p><i>due {{assignment.due_at}}</i></p>
+<pre style="white-space:pre-wrap;">{{assignment.description}}</pre>
+
+{% if my_role in ['teacher','assistant','senior-assistant','admin'] %}
+<p>
+<a class="btn" href="/courses/{{course_id}}/assignments/{{assignment.assignment_id}}/edit">Edit</a>
+<form class="inline" method="post" action="/courses/{{course_id}}/assignments/{{assignment.assignment_id}}/delete"><button class="btn" type="submit">Delete</button></form>
+<a class="btn" href="/courses/{{course_id}}/assignments/{{assignment.assignment_id}}/submissions">View submissions</a>
+</p>
+{% endif %}
+
+{% if my_role == 'student' %}
+  {% if my_submission %}
+    <p><b>Your submission exists.</b> <a class="btn" href="/courses/{{course_id}}/assignments/{{assignment.assignment_id}}/submit">Update</a></p>
+  {% else %}
+    <p><a class="btn" href="/courses/{{course_id}}/assignments/{{assignment.assignment_id}}/submit">Submit</a></p>
+  {% endif %}
+{% endif %}
+{% endblock %}

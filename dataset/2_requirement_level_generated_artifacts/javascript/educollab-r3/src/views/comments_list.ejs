@@ -1,0 +1,21 @@
+<%- include('partials/header') %>
+
+<h1>Comments for <%= post.title %></h1>
+
+<p><a href="/courses/<%= course.course_id %>/posts/<%= post.post_id %>">Back to Post</a></p>
+
+<% if (!comments.length) { %>
+  <p>No comments yet.</p>
+<% } %>
+
+<ul>
+  <% comments.forEach(function(comment) { %>
+    <li>
+      <strong><%= comment.author_display_name %> (@<%= comment.author_username %>)</strong>
+      — <%= comment.created_at %>
+      <div><%= comment.body %></div>
+    </li>
+  <% }) %>
+</ul>
+
+<%- include('partials/footer') %>

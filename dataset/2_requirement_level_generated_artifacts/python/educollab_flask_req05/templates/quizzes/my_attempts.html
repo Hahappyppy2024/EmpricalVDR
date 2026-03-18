@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block content %}<h1>My Quiz Attempts</h1><ul>{% for item in attempts %}<li>{{ item.course_title }} - {{ item.quiz_title }} | started {{ item.started_at }} | submitted {{ item.submitted_at or 'not yet' }}</li>{% else %}<li>No attempts.</li>{% endfor %}</ul>{% endblock %}

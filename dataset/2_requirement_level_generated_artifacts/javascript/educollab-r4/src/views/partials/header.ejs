@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>EduCollab</title>
+</head>
+<body>
+<nav>
+  <a href="/">Home</a>
+  <% if (currentUser) { %>
+    | <a href="/me">Me</a>
+    | <a href="/courses">Courses</a>
+    | <a href="/memberships">My Memberships</a>
+    | <a href="/my/submissions">My Submissions</a>
+    <% if (currentUser.username === 'admin') { %>
+      | <a href="/admin/users">Users</a>
+    <% } %>
+    | <form action="/logout" method="post" style="display:inline;">
+        <button type="submit">Logout</button>
+      </form>
+  <% } else { %>
+    | <a href="/register">Register</a>
+    | <a href="/login">Login</a>
+  <% } %>
+</nav>
+<hr>

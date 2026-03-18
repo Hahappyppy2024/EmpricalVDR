@@ -1,0 +1,14 @@
+<%- include('partials/header') %>
+<h1>Submissions: <%= assignment.title %></h1>
+<table border="1" cellpadding="6">
+  <tr><th>ID</th><th>Student</th><th>Content</th><th>Attachment</th></tr>
+  <% submissions.forEach(function(s) { %>
+    <tr>
+      <td><%= s.submission_id %></td>
+      <td><%= s.student_display_name %> (@<%= s.student_username %>)</td>
+      <td><%= s.content_text %></td>
+      <td><%= s.attachment_original_name || '' %></td>
+    </tr>
+  <% }) %>
+</table>
+<%- include('partials/footer') %>

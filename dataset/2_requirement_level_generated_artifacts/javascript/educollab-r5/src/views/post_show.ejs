@@ -1,0 +1,34 @@
+<%- include('partials/header') %>
+<h1><%= post.title %></h1>
+<p><%= post.body %></p>
+<p>By <%= post.author_display_name %> (@<%= post.author_username %>)</p>
+<p>
+  <a href="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/edit">Edit Post</a> |
+  <a href="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/comments">Comments View</a>
+</p>
+<form method="post" action="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/delete">
+  <button type="submit">Delete Post</button>
+</form>
+
+<h2>Comments</h2>
+<ul>
+  <% comments.forEach(function(comment) { %>
+    <li>
+      <strong><%= comment.author_display_name %></strong>: <%= comment.body %>
+      <form method="post" action="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/comments/<%= comment.comment_id %>" style="margin-top:6px;">
+        <input type="text" name="body" value="<%= comment.body %>">
+        <button type="submit">Update Comment</button>
+      </form>
+      <form method="post" action="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/comments/<%= comment.comment_id %>/delete">
+        <button type="submit">Delete Comment</button>
+      </form>
+    </li>
+  <% }) %>
+</ul>
+
+<h3>Add Comment</h3>
+<form method="post" action="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/comments">
+  <textarea name="body" required></textarea>
+  <button type="submit">Add Comment</button>
+</form>
+<%- include('partials/footer') %>

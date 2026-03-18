@@ -1,0 +1,28 @@
+<%- include('partials/header') %>
+<h1>Members: <%= course.title %></h1>
+<p><a href="/courses/<%= course.course_id %>/members/new">Add Member</a></p>
+<table border="1" cellpadding="6">
+  <tr><th>ID</th><th>User</th><th>Role</th><th>Actions</th></tr>
+  <% members.forEach(function(member) { %>
+    <tr>
+      <td><%= member.membership_id %></td>
+      <td><%= member.display_name %> (@<%= member.username %>)</td>
+      <td>
+        <form method="post" action="/courses/<%= course.course_id %>/members/<%= member.membership_id %>">
+          <select name="role_in_course">
+            <% roles.forEach(function(role) { %>
+              <option value="<%= role %>" <%= role === member.role_in_course ? 'selected' : '' %>><%= role %></option>
+            <% }) %>
+          </select>
+          <button type="submit">Update</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/courses/<%= course.course_id %>/members/<%= member.membership_id %>/delete">
+          <button type="submit">Remove</button>
+        </form>
+      </td>
+    </tr>
+  <% }) %>
+</table>
+<%- include('partials/footer') %>

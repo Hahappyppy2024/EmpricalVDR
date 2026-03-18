@@ -1,0 +1,8 @@
+<%- include('partials/header') %>
+<h1>My Memberships</h1>
+<ul>
+  <% memberships.forEach(function(m) { %>
+    <li><%= m.course_title %> — <%= m.role_in_course %></li>
+  <% }) %>
+</ul>
+<%- include('partials/footer') %>

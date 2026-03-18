@@ -1,0 +1,9 @@
+<%- include('partials/header') %>
+<h1>Submit: <%= assignment.title %></h1>
+<% if (error) { %><p style="color:red;"><%= error %></p><% } %>
+<form method="post" action="/courses/<%= course.course_id %>/assignments/<%= assignment.assignment_id %>/submissions">
+  <div><label>Content</label><textarea name="content_text"></textarea></div>
+  <div><label>Attachment Upload ID</label><input type="text" name="attachment_upload_id"></div>
+  <button type="submit">Submit</button>
+</form>
+<%- include('partials/footer') %>

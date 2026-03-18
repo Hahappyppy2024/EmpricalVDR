@@ -1,0 +1,9 @@
+<%- include('partials/header') %>
+<h1>Question #<%= question.question_id %></h1>
+<p><strong>Type:</strong> <%= question.qtype %></p>
+<p><strong>Prompt:</strong> <%= question.prompt %></p>
+<p><strong>Options JSON:</strong> <%= question.options_json || '' %></p>
+<p><strong>Answer JSON:</strong> <%= question.answer_json || '' %></p>
+<p><a href="/courses/<%= course.course_id %>/questions/<%= question.question_id %>/edit">Edit</a></p>
+<form method="post" action="/courses/<%= course.course_id %>/questions/<%= question.question_id %>/delete"><button type="submit">Delete</button></form>
+<%- include('partials/footer') %>

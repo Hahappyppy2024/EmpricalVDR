@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>My Memberships</h1>
+{% for item in memberships %}
+<div class="card">
+  <p><strong>{{ item['course_title'] }}</strong></p>
+  <p>Course ID: {{ item['course_id'] }}</p>
+  <p>Role: {{ item['role_in_course'] }}</p>
+  <p>Created At: {{ item['created_at'] }}</p>
+</div>
+{% else %}
+<p>No memberships found.</p>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block content %}
+<h1>Take Quiz: {{quiz.title}}</h1>
+<p>Attempt #{{attempt.attempt_id}} | started {{attempt.started_at}} | submitted {{attempt.submitted_at}}</p>
+{% for item in questions %}
+<hr/>
+<h3>#{{item.qq.position}} ({{item.qq.points}} pts) - Q{{item.q.question_id}} ({{item.q.qtype}})</h3>
+<pre style="white-space:pre-wrap;">{{item.q.prompt}}</pre>
+{% if item.q.options_obj %}<pre>options: {{item.q.options_obj}}</pre>{% endif %}
+<form method="post" action="/courses/{{course_id}}/quizzes/{{quiz.quiz_id}}/attempts/{{attempt.attempt_id}}/answers">
+<input type="hidden" name="question_id" value="{{item.q.question_id}}"/>
+<label>answer_json (JSON string)</label>
+<input name="answer_json" placeholder='"A" or {"choice":"A"}'/>
+<button class="btn" type="submit">Save Answer</button>
+</form>
+{% endfor %}
+<hr/>
+<form method="post" action="/courses/{{course_id}}/quizzes/{{quiz.quiz_id}}/attempts/{{attempt.attempt_id}}/submit"><button class="btn" type="submit">Submit Attempt</button></form>
+{% endblock %}
