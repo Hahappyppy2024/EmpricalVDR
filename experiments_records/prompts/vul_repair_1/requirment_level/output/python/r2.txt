@@ -1,0 +1,235 @@
+1. Unified diff patch (git apply compatible)
+
+```diff
+--- a/controllers/membership_controller.py
++++ b/controllers/membership_controller.py
+@@ -14,8 +14,11 @@
+ )
+ from models.user_repo import list_users
+ from utils.auth import (
++    get_csrf_token,
+     get_current_user,
+     login_required,
++    require_course_member,
++    require_csrf,
+     require_teacher_or_admin,
+ )
+ 
+@@ -51,6 +54,7 @@
+         course=course,
+         users=list_users(),
+         roles=sorted(ALLOWED_ROLES),
++        csrf_token=get_csrf_token(),
+         current_user=get_current_user(),
+     )
+ 
+@@ -58,6 +62,7 @@
+ @membership_bp.route('/courses/<int:course_id>/members', methods=['POST'])
+ @login_required
+ @require_teacher_or_admin
++@require_csrf
+ def add_member_submit(course_id):
+     course = get_course_by_id(course_id)
+     if course is None:
+@@ -72,6 +77,7 @@
+             users=list_users(),
+             roles=sorted(ALLOWED_ROLES),
+             error='Valid user and role are required.',
++            csrf_token=get_csrf_token(),
+             current_user=get_current_user(),
+         ), 400
+ 
+@@ -84,6 +90,7 @@
+             users=list_users(),
+             roles=sorted(ALLOWED_ROLES),
+             error='Membership already exists or target user is invalid.',
++            csrf_token=get_csrf_token(),
+             current_user=get_current_user(),
+         ), 400
+     return redirect(url_for('memberships.list_members_page', course_id=course_id))
+@@ -109,6 +116,7 @@
+ 
+ @membership_bp.route('/courses/<int:course_id>/members', methods=['GET'])
+ @login_required
++@require_course_member
+ def list_members_page(course_id):
+     course = get_course_by_id(course_id)
+     if course is None:
+@@ -118,12 +126,14 @@
+         course=course,
+         members=list_members(course_id),
+         roles=sorted(ALLOWED_ROLES),
++        csrf_token=get_csrf_token(),
+         current_user=get_current_user(),
+     )
+ 
+ 
+ @membership_bp.route('/api/courses/<int:course_id>/members', methods=['GET'])
+ @login_required
++@require_course_member
+ def api_list_members(course_id):
+     if get_course_by_id(course_id) is None:
+         return jsonify({'success': False, 'error': 'course_not_found'}), 404
+@@ -134,6 +144,7 @@
+ @membership_bp.route('/courses/<int:course_id>/members/<int:membership_id>', methods=['POST'])
+ @login_required
+ @require_teacher_or_admin
++@require_csrf
+ def update_member_role_submit(course_id, membership_id):
+     course = get_course_by_id(course_id)
+     membership = get_membership_by_id(membership_id)
+@@ -164,6 +175,7 @@
+ @membership_bp.route('/courses/<int:course_id>/members/<int:membership_id>/delete', methods=['POST'])
+ @login_required
+ @require_teacher_or_admin
++@require_csrf
+ def remove_member_submit(course_id, membership_id):
+     membership = get_membership_by_id(membership_id)
+     if membership is None or membership['course_id'] != course_id:
+--- a/utils/auth.py
++++ b/utils/auth.py
+@@ -1,4 +1,5 @@
+ from functools import wraps
++import secrets
+ 
+ from flask import jsonify, redirect, request, session, url_for
+ 
+@@ -7,6 +8,7 @@
+ 
+ 
+ SESSION_USER_KEY = 'current_user_id'
++CSRF_TOKEN_KEY = 'csrf_token'
+ 
+ 
+ def get_current_user():
+@@ -22,10 +24,37 @@
+ def logout_user():
+     session.pop(SESSION_USER_KEY, None)
++    session.pop(CSRF_TOKEN_KEY, None)
+ 
+ 
+ def is_api_request():
+     return request.path.startswith('/api/')
++
++
++def get_csrf_token():
++    token = session.get(CSRF_TOKEN_KEY)
++    if not token:
++        token = secrets.token_urlsafe(32)
++        session[CSRF_TOKEN_KEY] = token
++    return token
++
++
++def _has_valid_csrf_token():
++    expected = session.get(CSRF_TOKEN_KEY)
++    provided = request.form.get('csrf_token', '')
++    return bool(expected) and bool(provided) and secrets.compare_digest(expected, provided)
++
++
++def require_csrf(view_func):
++    @wraps(view_func)
++    def wrapped(*args, **kwargs):
++        if not _has_valid_csrf_token():
++            if is_api_request():
++                return jsonify({'success': False, 'error': 'invalid_csrf_token'}), 400
++            return 'Invalid CSRF token', 400
++        return view_func(*args, **kwargs)
++
++    return wrapped
+ 
+ 
+ def login_required(view_func):
+--- a/templates/memberships/new.html
++++ b/templates/memberships/new.html
+@@ -4,6 +4,7 @@
+ <p>Course: <strong>{{ course['title'] }}</strong></p>
+ {% if error %}<p class="error">{{ error }}</p>{% endif %}
+ <form method="post" action="{{ url_for('memberships.add_member_submit', course_id=course['course_id']) }}">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+   <label>User</label>
+   <select name="user_id" required>
+     {% for item in users %}
+--- a/templates/memberships/list.html
++++ b/templates/memberships/list.html
+@@ -8,6 +8,7 @@
+   <p><strong>{{ item['display_name'] }}</strong> ({{ item['username'] }})</p>
+   <p>User ID: {{ item['user_id'] }} | Role: {{ item['role_in_course'] }}</p>
+   <form method="post" action="{{ url_for('memberships.update_member_role_submit', course_id=course['course_id'], membership_id=item['membership_id']) }}">
++    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+     <label>Change role</label>
+     <select name="role_in_course">
+       {% for role in roles %}
+@@ -17,6 +18,7 @@
+     <button type="submit">Update Role</button>
+   </form>
+   <form method="post" action="{{ url_for('memberships.remove_member_submit', course_id=course['course_id'], membership_id=item['membership_id']) }}">
++    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+     <button type="submit">Remove Member</button>
+   </form>
+ </div>
+```
+
+2. Per-vulnerability summary
+
+**VULN-005**
+
+* files changed
+
+  * `controllers/membership_controller.py`
+  * `utils/auth.py`
+* key checks added
+
+  * Added `@require_course_member` to:
+
+    * `GET /courses/:course_id/members`
+    * `GET /api/courses/:course_id/members`
+* why the vulnerability is mitigated
+
+  * Roster enumeration now requires an actual membership in the target course, so an authenticated outsider can no longer read another course’s member list by guessing `course_id`.
+
+**VULN-006**
+
+* files changed
+
+  * `controllers/membership_controller.py`
+  * `utils/auth.py`
+  * `templates/memberships/new.html`
+  * `templates/memberships/list.html`
+* key checks added
+
+  * Added per-session CSRF token generation in `utils/auth.py`
+  * Added `@require_csrf` to browser form handlers:
+
+    * `POST /courses/:course_id/members`
+    * `POST /courses/:course_id/members/:membership_id`
+    * `POST /courses/:course_id/members/:membership_id/delete`
+  * Embedded hidden `csrf_token` fields in the add/update/delete membership forms
+  * Passed `csrf_token` into the membership templates when rendering
+* why the vulnerability is mitigated
+
+  * Cookie-authenticated membership-management POST requests now require a valid session-bound token, so cross-site forged form submissions are rejected server-side.
+
+3. Functional verification commands (copy-paste)
+
+Run the full functional test suite:
+
+```bash
+PYTHONPATH=. pytest -q
+```
+
+Run the functional tests relevant to the current requirement:
+
+```bash
+PYTHONPATH=. pytest -q tests/test_r2_functional.py
+```
+
+Minimal functional smoke command:
+
+```bash
+PYTHONPATH=. pytest -q tests/test_r2_functional.py::test_r2_membership_crud_flow
+```
+
+Verification note:
+
+* Patch was prepared against the provided repository structure.
+* In this container, import-time execution was blocked because `Flask` is not installed, so runtime verification could not be completed here without first installing `requirements.txt`.

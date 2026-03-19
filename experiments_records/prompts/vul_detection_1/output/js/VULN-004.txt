@@ -1,0 +1,71 @@
+{
+  "vulnerability_id": "VULN-004",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.1,
+  "severity_level": "high",
+  "confidence_score": 94,
+  "confidence_level": "high",
+  "summary": "A student can overwrite another student's assignment submission by sending that submission's identifier to the update endpoint. This lets one student alter or replace another student's submitted work inside the same course and assignment.",
+  "entry_points": [
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id/assignments/:assignment_id/submissions/:submission_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/assignments/:assignment_id/submissions/:submission_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 68,
+      "line_end": 71,
+      "function_name": null,
+      "code": "router.post('/courses/:course_id/assignments/:assignment_id/submissions', auth.requireLogin, auth.requireCourseMember, auth.requireStudent, submissionCtrl.createSubmission);\nrouter.put('/courses/:course_id/assignments/:assignment_id/submissions/:submission_id', auth.requireLogin, auth.requireCourseMember, auth.requireStudent, submissionCtrl.updateMySubmission);\nrouter.get('/my/submissions', auth.requireLogin, submissionCtrl.listMySubmissions);\nrouter.get('/courses/:course_id/assignments/:assignment_id/submissions', auth.requireLogin, auth.requireCourseMember, auth.requireCourseStaff, submissionCtrl.listForAssignment);",
+      "reason": "The update endpoint is reachable by any student member of the course and takes submission_id directly from the request."
+    },
+    {
+      "file_path": "src/controllers/submissionController.js",
+      "line_start": 36,
+      "line_end": 42,
+      "function_name": "updateMySubmission",
+      "code": "const submission_id = Number(req.params.submission_id);\nconst { content_text, attachment_upload_id } = req.body;\nconst submission = submissionRepo.updateSubmission(course_id, assignment_id, submission_id, { content_text, attachment_upload_id });",
+      "reason": "The controller performs no check that submission_id belongs to req.session.user even though the method is named updateMySubmission."
+    },
+    {
+      "file_path": "src/repos/submissionRepo.js",
+      "line_start": 28,
+      "line_end": 32,
+      "function_name": "updateSubmission",
+      "code": "db.prepare(\n  'UPDATE submissions SET content_text=?, attachment_upload_id=?, updated_at=? WHERE course_id=? AND assignment_id=? AND submission_id=?'\n).run(content_text, attachment_upload_id || null, nowIso(), course_id, assignment_id, submission_id);",
+      "reason": "The update query omits student_id, so possession of a valid submission_id is sufficient to overwrite another student's row."
+    }
+  ],
+  "root_cause_code": 7,
+  "root_cause": "The update path for submissions trusts a user-supplied submission_id and fails to bind the mutation to the authenticated student's own submission.",
+  "patch_locations": [
+    {
+      "file_path": "src/controllers/submissionController.js",
+      "line_start": 36,
+      "line_end": 43,
+      "function_name": "updateMySubmission"
+    },
+    {
+      "file_path": "src/repos/submissionRepo.js",
+      "line_start": 20,
+      "line_end": 32,
+      "function_name": "getMySubmission / updateSubmission"
+    }
+  ],
+  "repair_plan": "Resolve the target submission from the authenticated user and assignment rather than trusting an arbitrary submission_id from the client. Add a lookup that confirms student_id matches the session user, and scope the update query by student_id as well as course_id and assignment_id.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

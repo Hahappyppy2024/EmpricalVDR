@@ -1,0 +1,451 @@
+You are a senior software engineer fixing vulnerabilities in a web application.
+
+Repository input
+- The full project codebase is provided as a ZIP archive.
+- Assume you can read and modify files inside the ZIP repository.
+- Do NOT ask for files outside the ZIP.
+
+Task
+- Implement code changes guided by the vulnerability detection (VD) report below.
+- This is a requirement-level vulnerability repair task.
+- Treat the repository as the full runnable codebase produced after implementing the current requirement increment.
+- Focus only on vulnerabilities reported for the current requirement scope.
+- The current requirement may interact with functionality introduced earlier, but do not perform unrelated hardening, cleanup, or broad refactors outside the reported issue.
+- Apply minimal, correct patches while preserving intended functionality.
+
+Hard constraints
+- Keep the project runnable.
+- Do NOT rename routes, database tables, or response JSON fields.
+- Do NOT change authentication/session key names or role names.
+- No new dependencies. Avoid refactors unrelated to the fixes.
+- Only change files necessary for the fixes.
+- Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or docs.
+
+Primary verification goal (must satisfy)
+- The functional test suite must PASS after the patch (no regressions).
+- Prioritize preserving the intended behavior of the current requirement.
+- Do not over-fix in ways that risk breaking valid workflows.
+
+Authoritative input: Vulnerability Detection Report (VD)
+
+
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 10,
+  "vulnerability_type": "Session Weakness",
+  "cwe_id": "CWE-321",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.7,
+  "severity_level": "high",
+  "confidence_score": 88,
+  "confidence_level": "high",
+  "summary": "The application uses a hard-coded Flask SECRET_KEY to protect its session cookie. Anyone who obtains the source code or otherwise learns this fixed secret can forge a signed session containing an arbitrary current_user_id and impersonate other users, including the seeded administrator.",
+  "entry_points": [
+    {
+      "type": "other",
+      "method": "COOKIE",
+      "route": "Flask session cookie"
+    },
+    {
+      "type": "background trigger",
+      "method": "INIT",
+      "route": "application bootstrap"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app.py",
+      "line_start": 9,
+      "line_end": 12,
+      "function_name": "create_app",
+      "code": "def create_app():\n    app = Flask(__name__)\n    app.config['SECRET_KEY'] = 'educollab-dev-secret-key'\n    app.config['DATABASE'] = 'data/app.db'",
+      "reason": "The secret used to protect Flask session state is hard-coded and constant across deployments."
+    },
+    {
+      "file_path": "utils/auth.py",
+      "line_start": 8,
+      "line_end": 20,
+      "function_name": "login_user",
+      "code": "SESSION_USER_KEY = 'current_user_id'\n\n\ndef get_current_user():\n    user_id = session.get(SESSION_USER_KEY)\n    if not user_id:\n        return None\n    return get_user_by_id(user_id)\n\n\ndef login_user(user):\n    session[SESSION_USER_KEY] = user['user_id']",
+      "reason": "Authentication state depends directly on the session cookie value current_user_id, so forged signed session data would control the effective logged-in identity."
+    }
+  ],
+  "root_cause_code": 8,
+  "root_cause": "Session integrity relies on a static application secret embedded in source code instead of a unique deployment-time secret managed outside the repository.",
+  "patch_locations": [
+    {
+      "file_path": "app.py",
+      "line_start": 9,
+      "line_end": 12,
+      "function_name": "create_app"
+    },
+    {
+      "file_path": "utils/auth.py",
+      "line_start": 8,
+      "line_end": 20,
+      "function_name": "login_user"
+    }
+  ],
+  "repair_plan": "Load the Flask SECRET_KEY from a strong deployment-specific secret source such as environment configuration, refuse startup when the secret is missing or still set to a known default, and rotate any existing sessions created under the exposed key. Keep authentication decisions bound to server-trusted session material only after the signing key has been secured.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+
+{
+  "vulnerability_id": "VULN-003",
+  "vulnerability_type_code": 3,
+  "vulnerability_type": "Broken Access Control",
+  "cwe_id": "CWE-862",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.8,
+  "severity_level": "medium",
+  "confidence_score": 97,
+  "confidence_level": "high",
+  "summary": "Any authenticated user can access the user-listing endpoints that appear administrative. This exposes all registered usernames, display names, user IDs, and account creation timestamps without any administrator role check.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/admin/users"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/users"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "controllers/auth_controller.py",
+      "line_start": 122,
+      "line_end": 132,
+      "function_name": "users_page / api_users",
+      "code": "@auth_bp.route('/admin/users', methods=['GET'])\n@login_required\ndef users_page():\n    return render_template('admin/users.html', users=list_users(), current_user=get_current_user())\n\n\n@auth_bp.route('/api/users', methods=['GET'])\n@login_required\ndef api_users():\n    users = [_user_to_dict(user) for user in list_users()]\n    return jsonify({'success': True, 'users': users})",
+      "reason": "Both endpoints require only authentication and do not enforce any administrator or privileged-role authorization check."
+    },
+    {
+      "file_path": "models/user_repo.py",
+      "line_start": 30,
+      "line_end": 34,
+      "function_name": "list_users",
+      "code": "def list_users():\n    db = get_db()\n    return db.execute(\n        'SELECT user_id, username, display_name, created_at FROM users ORDER BY user_id ASC'\n    ).fetchall()",
+      "reason": "The repository returns a full account listing, so the missing role check in the controller directly exposes all user records to any logged-in account."
+    }
+  ],
+  "root_cause_code": 2,
+  "root_cause": "Administrative user enumeration functionality is guarded only by a generic login check and not by a dedicated authorization rule for privileged users.",
+  "patch_locations": [
+    {
+      "file_path": "controllers/auth_controller.py",
+      "line_start": 122,
+      "line_end": 132,
+      "function_name": "users_page / api_users"
+    },
+    {
+      "file_path": "models/user_repo.py",
+      "line_start": 30,
+      "line_end": 34,
+      "function_name": "list_users"
+    }
+  ],
+  "repair_plan": "Restrict these endpoints to explicitly authorized administrators. Add a server-side role check before calling list_users, return 403 for non-admin users, and keep any non-admin directory functionality limited to the minimum fields and scope actually required.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+{
+  "vulnerability_id": "VULN-004",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.6,
+  "severity_level": "high",
+  "confidence_score": 98,
+  "confidence_level": "high",
+  "summary": "Any authenticated user can edit or delete another user's course by supplying a different course_id. The application checks only that the caller is logged in and never verifies that the caller created the target course or otherwise has authority over it.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/edit"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/delete"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "DELETE",
+      "route": "/api/courses/:course_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 79,
+      "line_end": 85,
+      "function_name": "edit_course_page",
+      "code": "@course_bp.route('/courses/<int:course_id>/edit', methods=['GET'])\n@login_required\ndef edit_course_page(course_id):\n    course = get_course_by_id(course_id)\n    if course is None:\n        return render_template('404.html', current_user=get_current_user()), 404\n    return render_template('courses/edit.html', course=course, current_user=get_current_user())",
+      "reason": "Any logged-in user can open the edit page for an arbitrary course_id; there is no ownership or role verification."
+    },
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 88,
+      "line_end": 114,
+      "function_name": "update_course_submit / api_update_course",
+      "code": "@course_bp.route('/courses/<int:course_id>', methods=['POST'])\n@login_required\ndef update_course_submit(course_id):\n    course = get_course_by_id(course_id)\n    ...\n    update_course(course_id, title, description)\n\n@course_bp.route('/api/courses/<int:course_id>', methods=['PUT'])\n@login_required\ndef api_update_course(course_id):\n    course = get_course_by_id(course_id)\n    ...\n    updated = update_course(course_id, title, description)\n    return jsonify({'success': True, 'course': _course_to_dict(updated)})",
+      "reason": "Both update paths require only authentication, then write to the user-supplied course_id without verifying that the current user owns that course."
+    },
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 117,
+      "line_end": 134,
+      "function_name": "delete_course_submit / api_delete_course",
+      "code": "@course_bp.route('/courses/<int:course_id>/delete', methods=['POST'])\n@login_required\ndef delete_course_submit(course_id):\n    course = get_course_by_id(course_id)\n    if course is None:\n        return render_template('404.html', current_user=get_current_user()), 404\n    delete_course(course_id)\n    return redirect(url_for('courses.list_courses_page'))\n\n@course_bp.route('/api/courses/<int:course_id>', methods=['DELETE'])\n@login_required\ndef api_delete_course(course_id):\n    ...\n    delete_course(course_id)\n    return jsonify({'success': True, 'deleted_course_id': course_id})",
+      "reason": "Deletion is performed for any existing course_id once the caller is logged in; no creator or admin authorization is enforced."
+    },
+    {
+      "file_path": "models/course_repo.py",
+      "line_start": 31,
+      "line_end": 44,
+      "function_name": "update_course / delete_course",
+      "code": "def update_course(course_id, title, description):\n    db = get_db()\n    db.execute(\n        'UPDATE courses SET title = ?, description = ? WHERE course_id = ?',\n        (title, description, course_id),\n    )\n    db.commit()\n    return get_course_by_id(course_id)\n\n\ndef delete_course(course_id):\n    db = get_db()\n    db.execute('DELETE FROM courses WHERE course_id = ?', (course_id,))\n    db.commit()",
+      "reason": "The underlying write operations are scoped only by course_id and rely entirely on the controller for authorization, which is absent."
+    }
+  ],
+  "root_cause_code": 7,
+  "root_cause": "Course mutation endpoints trust a user-controlled course identifier and do not verify that the authenticated user owns the targeted course or has an explicitly authorized elevated role.",
+  "patch_locations": [
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 79,
+      "line_end": 134,
+      "function_name": "edit_course_page / update_course_submit / api_update_course / delete_course_submit / api_delete_course"
+    },
+    {
+      "file_path": "models/course_repo.py",
+      "line_start": 31,
+      "line_end": 44,
+      "function_name": "update_course / delete_course"
+    }
+  ],
+  "repair_plan": "Before serving the edit page or applying update and delete operations, load the target course and verify that the current user is the course creator or an explicitly authorized administrator. Enforce this authorization in the controller and, where practical, scope repository writes by both course_id and created_by so unauthorized cross-user mutations cannot succeed even if a controller check is missed.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+{
+  "vulnerability_id": "VULN-005",
+  "vulnerability_type_code": 7,
+  "vulnerability_type": "CSRF",
+  "cwe_id": "CWE-352",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.1,
+  "severity_level": "high",
+  "confidence_score": 93,
+  "confidence_level": "high",
+  "summary": "The server-rendered state-changing auth and course forms do not include any CSRF token or equivalent anti-CSRF validation. A malicious site can cause a victim's browser to submit authenticated requests such as logout, course update, or course deletion using the victim's existing session.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/logout"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/delete"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/login"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/register"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "templates/base.html",
+      "line_start": 21,
+      "line_end": 27,
+      "function_name": null,
+      "code": "{% if current_user or user %}\n  <a href=\"{{ url_for('auth.me_page') }}\">Me</a>\n  <a href=\"{{ url_for('auth.users_page') }}\">Users</a>\n  <a href=\"{{ url_for('courses.new_course_page') }}\">New Course</a>\n  <form action=\"{{ url_for('auth.logout_submit') }}\" method=\"post\">\n    <button type=\"submit\">Logout</button>\n  </form>",
+      "reason": "The logout form performs a state-changing POST but contains no CSRF token or nonce."
+    },
+    {
+      "file_path": "templates/courses/new.html",
+      "line_start": 5,
+      "line_end": 10,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"{{ url_for('courses.create_course_submit') }}\">\n  <label>Title</label>\n  <input name=\"title\" required>\n  <label>Description</label>\n  <textarea name=\"description\"></textarea>\n  <button type=\"submit\">Create Course</button>",
+      "reason": "The course-creation form submits a privileged state change without any anti-CSRF field."
+    },
+    {
+      "file_path": "templates/courses/edit.html",
+      "line_start": 5,
+      "line_end": 10,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"{{ url_for('courses.update_course_submit', course_id=course['course_id']) }}\">\n  <label>Title</label>\n  <input name=\"title\" value=\"{{ course['title'] }}\" required>\n  <label>Description</label>\n  <textarea name=\"description\">{{ course['description'] }}</textarea>\n  <button type=\"submit\">Save</button>",
+      "reason": "The course-update form lacks any request authenticity token despite changing server-side data."
+    },
+    {
+      "file_path": "templates/courses/detail.html",
+      "line_start": 9,
+      "line_end": 13,
+      "function_name": null,
+      "code": "{% if current_user %}\n<p><a href=\"{{ url_for('courses.edit_course_page', course_id=course['course_id']) }}\">Edit course</a></p>\n<form method=\"post\" action=\"{{ url_for('courses.delete_course_submit', course_id=course['course_id']) }}\">\n  <button type=\"submit\">Delete course</button>\n</form>",
+      "reason": "The course-deletion form is directly forgeable because no CSRF token or same-request verifier is present."
+    },
+    {
+      "file_path": "controllers/auth_controller.py",
+      "line_start": 29,
+      "line_end": 44,
+      "function_name": "register_submit",
+      "code": "@auth_bp.route('/register', methods=['POST'])\ndef register_submit():\n    username = request.form.get('username', '').strip()\n    password = request.form.get('password', '')\n    display_name = request.form.get('display_name', '').strip()\n    ...\n    login_user(user)\n    return redirect(url_for('auth.me_page'))",
+      "reason": "The server accepts state-changing form submissions without performing any CSRF validation."
+    },
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 29,
+      "line_end": 37,
+      "function_name": "create_course_submit",
+      "code": "@course_bp.route('/courses', methods=['POST'])\n@login_required\ndef create_course_submit():\n    title = request.form.get('title', '').strip()\n    description = request.form.get('description', '').strip()\n    ...\n    course = create_course(title, description, get_current_user()['user_id'])",
+      "reason": "The course creation handler processes authenticated POST requests using only cookie-based session state and does not verify a CSRF token."
+    },
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 88,
+      "line_end": 99,
+      "function_name": "update_course_submit",
+      "code": "@course_bp.route('/courses/<int:course_id>', methods=['POST'])\n@login_required\ndef update_course_submit(course_id):\n    ...\n    title = request.form.get('title', '').strip()\n    description = request.form.get('description', '').strip()\n    ...\n    update_course(course_id, title, description)",
+      "reason": "The course update handler accepts browser POST requests without verifying request origin or a per-session anti-CSRF token."
+    },
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 117,
+      "line_end": 124,
+      "function_name": "delete_course_submit",
+      "code": "@course_bp.route('/courses/<int:course_id>/delete', methods=['POST'])\n@login_required\ndef delete_course_submit(course_id):\n    course = get_course_by_id(course_id)\n    if course is None:\n        return render_template('404.html', current_user=get_current_user()), 404\n    delete_course(course_id)\n    return redirect(url_for('courses.list_courses_page'))",
+      "reason": "The deletion handler is a state-changing POST that relies solely on the browser's authenticated cookies and has no CSRF defenses."
+    }
+  ],
+  "root_cause_code": 9,
+  "root_cause": "Server-rendered state-changing endpoints rely on cookie-based authentication but do not require a request authenticity token or equivalent CSRF defense.",
+  "patch_locations": [
+    {
+      "file_path": "templates/base.html",
+      "line_start": 21,
+      "line_end": 27,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/courses/new.html",
+      "line_start": 5,
+      "line_end": 10,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/courses/edit.html",
+      "line_start": 5,
+      "line_end": 10,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/courses/detail.html",
+      "line_start": 9,
+      "line_end": 13,
+      "function_name": null
+    },
+    {
+      "file_path": "controllers/auth_controller.py",
+      "line_start": 29,
+      "line_end": 44,
+      "function_name": "register_submit"
+    },
+    {
+      "file_path": "controllers/auth_controller.py",
+      "line_start": 98,
+      "line_end": 101,
+      "function_name": "logout_submit"
+    },
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 29,
+      "line_end": 37,
+      "function_name": "create_course_submit"
+    },
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 88,
+      "line_end": 99,
+      "function_name": "update_course_submit"
+    },
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 117,
+      "line_end": 124,
+      "function_name": "delete_course_submit"
+    }
+  ],
+  "repair_plan": "Introduce server-side CSRF protection for all browser form workflows by generating a per-session token, embedding it in each state-changing form, and rejecting requests whose token is missing or invalid. Apply this to auth and course POST routes, including logout, create, update, and delete operations; JSON API endpoints should either remain non-browser endpoints or use a separate header-based anti-CSRF mechanism if they are intended to be called from browsers with cookies.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+Repair requirements
+- Implement each vulnerability’s repair_plan consistent with its root_cause and evidence_snippets.
+- Apply fixes at the patch_locations specified in the VD report.
+- Enforce authorization, ownership, and relationship checks server-side (not client-side).
+- Where applicable, scope read/write operations to the authorized parent resource (e.g., course_id + membership_id, course_id + post_id, quiz_id + question_id).
+- Do not introduce client-side-only protections as the primary fix.
+- Do not change unrelated behavior, response schemas, or persistence semantics unless required by the fix.
+- Do not fix additional speculative vulnerabilities that are not supported by the VD report.
+- If a vulnerability spans earlier and current requirement logic, patch the narrowest correct server-side boundary that removes the exploit path and preserves intended behavior.
+- Keep error handling consistent with existing patterns in the repo (e.g., 401/403/404) and do not leak sensitive details.
+- Preserve compatibility with the existing functional test expectations.
+
+Output format (strict)
+1) Unified diff patch (git apply compatible). Include only changed files.
+2) Per-vulnerability summary (group by vulnerability_id):
+   - files changed
+   - key checks added
+   - why the vulnerability is mitigated (brief)
+3) Functional verification commands (copy-paste):
+   - run the full functional test suite (exact command)
+   - run the functional tests relevant to the current requirement (exact command)
+   - (optional) a minimal functional smoke command if full suite is slow

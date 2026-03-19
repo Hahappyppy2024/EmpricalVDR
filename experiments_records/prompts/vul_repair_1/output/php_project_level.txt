@@ -1,0 +1,125 @@
+1. Unified diff patch
+
+[Download the git-apply-compatible patch](sandbox:/mnt/data/educollab_php_v0_security_fix.patch)
+
+2. Per-vulnerability summary
+
+**VULN-001**
+
+* files changed: `src/bootstrap.php`, `src/helpers.php`, `src/repos/UserRepo.php`, `src/controllers/AuthController.php`, `views/auth/login.php`
+* key checks added:
+
+  * removed hard-coded seeded password
+  * admin bootstrap now requires `INITIAL_ADMIN_PASSWORD`
+  * added durable `is_global_admin` server-side flag on `users`
+  * `is_global_admin()` now checks stored privilege state, not username
+  * existing `admin` account is re-keyed from the environment password when bootstrapped
+* why mitigated:
+
+  * there is no longer a shipped reusable `admin/admin123` credential, and admin privilege is no longer inferred from the fixed username alone
+
+**VULN-002**
+
+* files changed: `src/bootstrap.php`, `src/helpers.php`, `src/controllers/AuthController.php`
+* key checks added:
+
+  * session cookie params hardened with `HttpOnly`, `SameSite=Lax`, and conditional `Secure`
+  * `session_login_user()` regenerates the session ID on successful login/registration
+  * all login/register paths now use the rotated authenticated session
+* why mitigated:
+
+  * pre-auth session identifiers are no longer reused after authentication, blocking session fixation
+
+**VULN-003**
+
+* files changed: `public/index.php`, `src/helpers.php`, `src/controllers/AuthController.php`, `src/controllers/CourseController.php`, `src/controllers/MembershipController.php`, `src/controllers/PostController.php`, `src/controllers/CommentController.php`, `src/controllers/TakeQuizController.php`, and POST form views under `views/`
+* key checks added:
+
+  * centralized CSRF token generation/validation helpers
+  * global non-API POST CSRF enforcement in `public/index.php`
+  * hidden CSRF fields injected into server-rendered POST forms
+  * explicit CSRF validation also kept in sensitive auth/resource handlers
+* why mitigated:
+
+  * state-changing HTML requests now require a valid server-issued token instead of trusting the session cookie alone
+
+**VULN-004**
+
+* files changed: `src/controllers/MembershipController.php`, `src/repos/MembershipRepo.php`
+* key checks added:
+
+  * target membership row is loaded before update/delete
+  * controller verifies target `course_id` matches route `course_id`
+  * repository writes are now scoped by both `course_id` and `membership_id`
+* why mitigated:
+
+  * a teacher/admin in one course can no longer mutate membership records from another course by passing a foreign `membership_id`
+
+**VULN-005**
+
+* files changed: `src/controllers/_guards.php`, `src/controllers/PostController.php`, `src/repos/PostRepo.php`
+* key checks added:
+
+  * post edit/delete now require either post ownership or staff/global-admin privilege
+  * repository update/delete can be constrained by `author_id` for non-staff callers
+* why mitigated:
+
+  * ordinary course members can no longer edit/delete another member’s post by guessing `post_id`
+
+**VULN-006**
+
+* files changed: `src/controllers/_guards.php`, `src/controllers/CommentController.php`, `src/repos/CommentRepo.php`
+* key checks added:
+
+  * comment edit/delete now require either comment ownership or staff/global-admin privilege
+  * repository update/delete can be constrained by `author_id` for non-staff callers
+* why mitigated:
+
+  * ordinary course members can no longer edit/delete another member’s comment by guessing `comment_id`
+
+**VULN-007**
+
+* files changed: `src/controllers/QuestionController.php`, `views/questions/detail.php`
+* key checks added:
+
+  * question-bank list/detail API and HTML routes are restricted to course staff
+  * staff-only rendering remains the only path that exposes `answer_json`
+* why mitigated:
+
+  * students and other ordinary members can no longer retrieve assessment answers from question-bank endpoints
+
+**VULN-008**
+
+* files changed: `src/controllers/TakeQuizController.php`, `src/repos/QuizRepo.php`
+* key checks added:
+
+  * answer submission now verifies attempt ownership, `course_id`, and `quiz_id`
+  * answer submission verifies `question_id` is bound to the quiz
+  * answer writes are rejected after `submitted_at` is set
+  * duplicate submit after finalization is rejected
+* why mitigated:
+
+  * students can no longer submit answers for arbitrary questions or modify answers after final submission
+
+3. Functional verification commands (copy-paste)
+
+Full functional suite:
+
+```bash
+# No functional test suite is present in the ZIP archive, so there is no exact in-repo test command to run.
+# If your external functional suite targets this repo, run it with INITIAL_ADMIN_PASSWORD set, for example:
+export INITIAL_ADMIN_PASSWORD=adminpass
+# then run your existing external test command here
+```
+
+Minimal functional smoke:
+
+```bash
+export INITIAL_ADMIN_PASSWORD=adminpass
+php -S 127.0.0.1:8000 -t public
+```
+
+A few notes from validation:
+
+* All modified PHP files pass `php -l`.
+* I could not execute end-to-end functional requests in this container because the installed PHP runtime here does not have the PDO SQLite driver enabled (`could not find driver`).

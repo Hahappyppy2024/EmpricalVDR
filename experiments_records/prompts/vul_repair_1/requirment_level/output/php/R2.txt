@@ -1,0 +1,279 @@
+1. Unified diff patch (git apply compatible)
+
+[Download the patch](sandbox:/mnt/data/req02_csrf.patch)
+
+```diff
+--- req02_orig/educollab_php_req01/app/core/Auth.php	2026-03-06 18:53:41.000000000 +0000
++++ req02/educollab_php_req01/app/core/Auth.php	2026-03-12 01:45:09.133875451 +0000
+@@ -34,6 +34,36 @@
+     unset($_SESSION[$config['session_user_key']]);
+ }
+ 
++
++function csrf_token(): string
++{
++    if (empty($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token'])) {
++        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
++    }
++
++    return $_SESSION['csrf_token'];
++}
++
++function verify_csrf(bool $api = false): void
++{
++    $token = (string) ($_POST['_csrf'] ?? '');
++    $knownToken = isset($_SESSION['csrf_token']) && is_string($_SESSION['csrf_token'])
++        ? $_SESSION['csrf_token']
++        : '';
++
++    if ($token !== '' && $knownToken !== '' && hash_equals($knownToken, $token)) {
++        return;
++    }
++
++    if ($api) {
++        json_response(['success' => false, 'error' => 'Forbidden'], 403);
++    }
++
++    http_response_code(403);
++    echo 'Forbidden';
++    exit;
++}
++
+ function ensure_course_creator_membership(MembershipRepository $membershipRepo, CourseRepository $courseRepo, int $courseId, int $userId): void
+ {
+     $course = $courseRepo->findById($courseId);
+--- req02_orig/educollab_php_req01/app/controllers/AuthController.php	2026-03-06 18:40:38.000000000 +0000
++++ req02/educollab_php_req01/app/controllers/AuthController.php	2026-03-12 01:45:09.134315056 +0000
+@@ -20,6 +20,7 @@
+ 
+     public function registerHtml(): void
+     {
++        verify_csrf(false);
+         $data = request_data();
+         $result = $this->register($data);
+         if (!$result['success']) {
+@@ -72,6 +73,7 @@
+ 
+     public function loginHtml(): void
+     {
++        verify_csrf(false);
+         $result = $this->login(request_data());
+         if (!$result['success']) {
+             render('auth/login', ['title' => 'Login', 'error' => $result['error']]);
+@@ -112,6 +114,7 @@
+ 
+     public function logoutHtml(): void
+     {
++        verify_csrf(false);
+         logout_user($this->config);
+         redirect_to('/login');
+     }
+--- req02_orig/educollab_php_req01/app/controllers/CourseController.php	2026-03-06 18:53:41.000000000 +0000
++++ req02/educollab_php_req01/app/controllers/CourseController.php	2026-03-12 01:45:09.134593680 +0000
+@@ -22,6 +22,7 @@
+ 
+     public function createHtml(): void
+     {
++        verify_csrf(false);
+         $userId = require_login($this->config, false);
+         $result = $this->create(request_data(), $userId);
+         if (!$result['success']) {
+@@ -107,6 +108,7 @@
+ 
+     public function updateHtml(int $courseId): void
+     {
++        verify_csrf(false);
+         require_teacher_or_admin($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+         $result = $this->update($courseId, request_data());
+         if (!$result['success']) {
+@@ -147,6 +149,7 @@
+ 
+     public function deleteHtml(int $courseId): void
+     {
++        verify_csrf(false);
+         require_teacher_or_admin($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+         $this->delete($courseId);
+         redirect_to('/courses');
+--- req02_orig/educollab_php_req01/app/controllers/MembershipController.php	2026-03-06 18:53:41.000000000 +0000
++++ req02/educollab_php_req01/app/controllers/MembershipController.php	2026-03-12 01:45:09.134827741 +0000
+@@ -30,6 +30,7 @@
+ 
+     public function addMemberHtml(int $courseId): void
+     {
++        verify_csrf(false);
+         require_teacher_or_admin($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+         $result = $this->addMember($courseId, request_data());
+         if (!$result['success']) {
+@@ -119,6 +120,7 @@
+ 
+     public function updateMemberRoleHtml(int $courseId, int $membershipId): void
+     {
++        verify_csrf(false);
+         require_teacher_or_admin($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+         $result = $this->updateMemberRole($courseId, $membershipId, request_data());
+         if (!$result['success']) {
+@@ -164,6 +166,7 @@
+ 
+     public function removeMemberHtml(int $courseId, int $membershipId): void
+     {
++        verify_csrf(false);
+         require_teacher_or_admin($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+         $this->removeMember($courseId, $membershipId);
+         redirect_to('/courses/' . $courseId . '/members');
+--- req02_orig/educollab_php_req01/app/views/auth/register.php	2026-03-06 18:40:38.000000000 +0000
++++ req02/educollab_php_req01/app/views/auth/register.php	2026-03-12 01:45:09.135283802 +0000
+@@ -3,6 +3,7 @@
+     <p class="error"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></p>
+ <?php endif; ?>
+ <form method="post" action="/register">
++    <input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+     <label>Username</label>
+     <input type="text" name="username" required>
+     <label>Password</label>
+--- req02_orig/educollab_php_req01/app/views/auth/login.php	2026-03-06 18:40:38.000000000 +0000
++++ req02/educollab_php_req01/app/views/auth/login.php	2026-03-12 01:45:09.135615152 +0000
+@@ -3,6 +3,7 @@
+     <p class="error"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></p>
+ <?php endif; ?>
+ <form method="post" action="/login">
++    <input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+     <label>Username</label>
+     <input type="text" name="username" required>
+     <label>Password</label>
+--- req02_orig/educollab_php_req01/app/views/courses/new.php	2026-03-06 18:40:38.000000000 +0000
++++ req02/educollab_php_req01/app/views/courses/new.php	2026-03-12 01:45:09.135917654 +0000
+@@ -3,6 +3,7 @@
+     <p class="error"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></p>
+ <?php endif; ?>
+ <form method="post" action="/courses">
++    <input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+     <label>Title</label>
+     <input type="text" name="title" required>
+     <label>Description</label>
+--- req02_orig/educollab_php_req01/app/views/courses/edit.php	2026-03-06 18:40:38.000000000 +0000
++++ req02/educollab_php_req01/app/views/courses/edit.php	2026-03-12 01:45:09.136354215 +0000
+@@ -3,6 +3,7 @@
+     <p class="error"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></p>
+ <?php endif; ?>
+ <form method="post" action="/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>">
++    <input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+     <label>Title</label>
+     <input type="text" name="title" value="<?= htmlspecialchars($course['title'], ENT_QUOTES, 'UTF-8') ?>" required>
+     <label>Description</label>
+--- req02_orig/educollab_php_req01/app/views/courses/show.php	2026-03-06 18:53:42.000000000 +0000
++++ req02/educollab_php_req01/app/views/courses/show.php	2026-03-12 01:45:09.136567389 +0000
+@@ -14,6 +14,7 @@
+         <a href="/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>/edit">Edit</a>
+         <p><a href="/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>/members/new">Add member</a></p>
+         <form method="post" action="/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>/delete">
++        <input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+             <button type="submit">Delete course</button>
+         </form>
+     <?php endif; ?>
+--- req02_orig/educollab_php_req01/app/views/courses/members/new.php	2026-03-06 18:53:42.000000000 +0000
++++ req02/educollab_php_req01/app/views/courses/members/new.php	2026-03-12 01:45:09.136741434 +0000
+@@ -6,6 +6,7 @@
+     <p class="error"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></p>
+ <?php endif; ?>
+ <form method="post" action="/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>/members">
++    <input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+     <label>User</label>
+     <select name="user_id" required>
+         <option value="">Select a user</option>
+--- req02_orig/educollab_php_req01/app/views/courses/members/index.php	2026-03-06 18:53:42.000000000 +0000
++++ req02/educollab_php_req01/app/views/courses/members/index.php	2026-03-12 01:45:09.137017769 +0000
+@@ -16,6 +16,7 @@
+         <p><strong>Created At:</strong> <?= htmlspecialchars($member['created_at'], ENT_QUOTES, 'UTF-8') ?></p>
+         <?php if (!empty($can_manage)): ?>
+             <form method="post" action="/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>/members/<?= htmlspecialchars((string) $member['membership_id'], ENT_QUOTES, 'UTF-8') ?>">
++                <input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+                 <label>Update role</label>
+                 <select name="role_in_course">
+                     <?php foreach ($roles as $role): ?>
+@@ -25,6 +26,7 @@
+                 <button type="submit">Save role</button>
+             </form>
+             <form method="post" action="/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>/members/<?= htmlspecialchars((string) $member['membership_id'], ENT_QUOTES, 'UTF-8') ?>/delete">
++                <input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+                 <button type="submit">Remove member</button>
+             </form>
+         <?php endif; ?>
+--- req02_orig/educollab_php_req01/app/views/layouts/header.php	2026-03-06 18:53:41.000000000 +0000
++++ req02/educollab_php_req01/app/views/layouts/header.php	2026-03-12 01:45:09.137362741 +0000
+@@ -25,6 +25,7 @@
+     <a href="/me">Me</a>
+     <a href="/admin/users">Users</a>
+     <form action="/logout" method="post" style="display:inline;">
++        <input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+         <button type="submit">Logout</button>
+     </form>
+ </nav>
+```
+
+2. Per-vulnerability summary
+
+**VULN-003**
+
+* files changed
+
+  * `app/core/Auth.php`
+  * `app/controllers/AuthController.php`
+  * `app/controllers/CourseController.php`
+  * `app/controllers/MembershipController.php`
+  * `app/views/auth/register.php`
+  * `app/views/auth/login.php`
+  * `app/views/courses/new.php`
+  * `app/views/courses/edit.php`
+  * `app/views/courses/show.php`
+  * `app/views/courses/members/new.php`
+  * `app/views/courses/members/index.php`
+  * `app/views/layouts/header.php`
+* key checks added
+
+  * Added centralized `csrf_token()` generator in `app/core/Auth.php`.
+  * Added centralized `verify_csrf(false)` validator for HTML POST handlers.
+  * Enforced CSRF validation before:
+
+    * register
+    * login
+    * logout
+    * course create
+    * course update
+    * course delete
+    * membership add
+    * membership role update
+    * membership remove
+  * Embedded hidden `_csrf` inputs in every affected server-rendered form.
+* why the vulnerability is mitigated
+
+  * HTML state-changing requests now require a valid session-bound CSRF token, so a third-party site cannot successfully forge those POST actions using only the victim’s cookie.
+
+3. Functional verification commands (copy-paste)
+
+This ZIP does not include a bundled `tests/` directory, so there is no repository-local exact functional test command to run from this archive alone.
+
+* run the full functional test suite
+
+```bash
+# No bundled functional test suite exists in this ZIP archive.
+```
+
+* run the functional tests relevant to the current requirement
+
+```bash
+# No bundled requirement-level functional test files exist in this ZIP archive.
+```
+
+* minimal functional smoke command
+
+```bash
+cd educollab_php_req01 && find app public scripts config -name "*.php" -print0 | xargs -0 -n1 php -l
+```
+
+```bash
+cd educollab_php_req01 && php scripts/init.php
+```
+
+```bash
+cd educollab_php_req01 && php -S 127.0.0.1:8000 -t public
+```

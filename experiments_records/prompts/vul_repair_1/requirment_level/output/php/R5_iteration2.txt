@@ -1,0 +1,75 @@
+1. Unified diff patch (git apply compatible). Include only changed files.
+
+```diff
+--- a/app/controllers/QuizController.php
++++ b/app/controllers/QuizController.php
+@@ -245,13 +245,15 @@ final class QuizController
+     public function configureQuestionsApi(int $courseId, int $quizId): void
+     {
+         require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+-        $result = $this->configureQuestion($courseId, $quizId, request_data());
++        $data = request_data();
++        $result = $this->configureQuestion($courseId, $quizId, $data);
+         if (!$result['success']) {
+             $status = in_array($result['error'], ['Quiz not found', 'Question not found'], true) ? 404 : 422;
+             json_response($result, $status);
+         }
+-        json_response($result, 200);
++        $status = (($data['action'] ?? 'add') === 'remove') ? 200 : 201;
++        json_response($result, $status);
+     }
+ 
+     private function configureQuestion(int $courseId, int $quizId, array $data): array
+```
+
+2. Per-vulnerability summary (group by vulnerability_id):
+
+**VULN-001 / VULN-002 (requirement-stage R5 fixes preserved; regression repair only)**
+
+* files changed
+
+  * `app/controllers/QuizController.php`
+* key checks added
+
+  * No security boundary was relaxed.
+  * Course-staff authorization for quiz-question configuration remains enforced.
+  * Course/question scoping remains unchanged through `findById($courseId, $quizId)` and `findById($courseId, $questionId)`.
+* regression restored (if any)
+
+  * Restored the intended API contract for quiz-question attachment creation by returning `201 Created` on add/configure operations.
+  * Preserved `200 OK` for remove actions.
+* why the vulnerability is mitigated (brief)
+
+  * The repair addresses a response-contract regression only. Existing server-side authorization, course scoping, answer-visibility restrictions, and post-submission mutation protection remain intact.
+
+3. Functional verification commands (copy-paste):
+
+* run the full functional test suite (exact command)
+
+```bash
+pytest -q tests/test_api_functional_r5.py
+```
+
+* optional minimal functional smoke command if full suite is slow
+
+```bash
+php -l app/controllers/QuizController.php && pytest -q tests/test_api_functional_r5.py -k configure_quiz_question
+```
+
+4. Security verification commands (copy-paste):
+
+* run the relevant security tests affected by the repaired vulnerabilities
+
+```bash
+pytest -q tests/test_api_exploit_r5.py
+```
+
+* optional single-test commands for the most relevant repaired paths
+
+```bash
+pytest -q tests/test_api_exploit_r5.py -k correct_answers
+```
+
+```bash
+pytest -q tests/test_api_exploit_r5.py -k past_due
+```

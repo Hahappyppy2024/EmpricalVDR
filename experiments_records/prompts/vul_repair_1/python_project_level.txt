@@ -1,0 +1,638 @@
+You are a senior software engineer fixing vulnerabilities in a web application.
+
+Repository input
+- The full project codebase is provided as a ZIP archive.
+- Assume you can read and modify files inside the ZIP repository.
+- Do NOT ask for files outside the ZIP.
+
+Task
+- Implement code changes guided by the vulnerability detection (VD) report below.
+- Apply minimal, correct patches while preserving intended functionality.
+
+Hard constraints
+- Keep the project runnable.
+- Do NOT rename routes, database tables, or response JSON fields.
+- Do NOT change authentication/session key names or role names.
+- No new dependencies. Avoid refactors unrelated to the fixes.
+- Only change files necessary for the fixes.
+- Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or docs.
+
+Primary verification goal (must satisfy)
+- The functional test suite must PASS after the patch (no regressions).
+
+Authoritative input: Vulnerability Detection Report (VD)
+[
+{
+"vulnerability_id": "VULN-002",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.8,
+"severity_level": "medium",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "Any authenticated user can enumerate all registered users through endpoints that appear administrative. This exposes account inventory and profile metadata without requiring an administrator role.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/users"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/admin/users"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 215,
+"line_end": 225,
+"function_name": "users_list / api_users_list",
+"code": "@app.get("/admin/users")\n@require_login\ndef users_list():\n    db = get_db()\n    return render_template("users_list.html", users=UsersRepo(db).list_users())\n\[n@app.get](mailto:n@app.get)("/api/users")\n@require_login\ndef api_users_list():\n    db = get_db()\n    return jsonify({"users": UsersRepo(db).list_users()})",
+"reason": "Both endpoints require only authentication and do not enforce an administrator or staff authorization check before returning all users."
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 39,
+"line_end": 40,
+"function_name": "list_users",
+"code": "rows = self.db.execute("SELECT user_id,username,display_name,created_at FROM users ORDER BY user_id").fetchall()",
+"reason": "The repository returns the full user listing to callers, so the missing role check in the route directly exposes all accounts."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Administrative listing endpoints are protected only by authentication and do not enforce a role-based authorization boundary before exposing user data.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 215,
+"line_end": 225,
+"function_name": "users_list / api_users_list"
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 39,
+"line_end": 40,
+"function_name": "list_users"
+}
+],
+"repair_plan": "Restrict these endpoints to explicitly authorized administrators. Add a server-side admin-role check before invoking list_users, and return 403 for non-admin users. If non-admin account discovery is needed, expose only a minimal, scoped directory view rather than the full user table.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-003",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.8,
+"severity_level": "high",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "Any authenticated user can edit or delete any course by calling the course management endpoints directly. This allows unauthorized modification or destruction of course data across tenants without membership or staff privileges.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 293,
+"line_end": 339,
+"function_name": "course_edit_form / course_update / api_course_update / course_delete / api_course_delete",
+"code": "@app.get("/courses/[int:course_id](int:course_id)/edit")\n@require_login\ndef course_edit_form(course_id):\n    ...\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)")\n@require_login\ndef course_update(course_id):\n    ...\n    CoursesRepo(db).update_course(course_id, title, description)\n\[n@app.put](mailto:n@app.put)("/api/courses/[int:course_id](int:course_id)")\n@require_login\ndef api_course_update(course_id):\n    ...\n    CoursesRepo(db).update_course(course_id, title, description)\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)/delete")\n@require_login\ndef course_delete(course_id):\n    CoursesRepo(db).delete_course(course_id)\n\[n@app.delete](mailto:n@app.delete)("/api/courses/[int:course_id](int:course_id)")\n@require_login\ndef api_course_delete(course_id):\n    CoursesRepo(db).delete_course(course_id)",
+"reason": "Course modification and deletion routes require only login and never verify that the caller owns the course or holds a staff role in that course."
+},
+{
+"file_path": "repos/courses_repo.py",
+"line_start": 28,
+"line_end": 33,
+"function_name": "update_course / delete_course",
+"code": "def update_course(self, course_id, title, description):\n    self.db.execute("UPDATE courses SET title=?, description=? WHERE course_id=?", (title, description, course_id))\n    self.db.commit()\n\ndef delete_course(self, course_id):\n    self.db.execute("DELETE FROM courses WHERE course_id=?", (course_id,))\n    self.db.commit()",
+"reason": "The repository write operations are scoped only by course_id and rely entirely on the caller for authorization."
+}
+],
+"root_cause_code": 2,
+"root_cause": "The application fails to enforce course-level authorization on edit and delete operations, allowing any logged-in user to act on arbitrary course identifiers.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 293,
+"line_end": 339,
+"function_name": "course_edit_form / course_update / api_course_update / course_delete / api_course_delete"
+},
+{
+"file_path": "repos/courses_repo.py",
+"line_start": 28,
+"line_end": 33,
+"function_name": "update_course / delete_course"
+}
+],
+"repair_plan": "Require an explicit course-specific staff or owner check before serving edit pages or performing updates and deletes. Load the course, verify the current user is the creator or has an allowed elevated membership role in that course, and reject unauthorized requests before calling the repository write methods.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-004",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.6,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "A teacher or admin in one course can change or remove memberships belonging to a different course by supplying a foreign membership_id. The route checks privileges only against the course_id in the URL, while the database write uses membership_id alone.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 392,
+"line_end": 429,
+"function_name": "member_update / api_member_update / member_remove / api_member_remove",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)")\n@require_login\n@require_teacher_or_admin\ndef member_update(course_id, membership_id):\n    ...\n    MembershipsRepo(db).update_role(membership_id, role)\n\[n@app.put](mailto:n@app.put)("/api/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)")\n@require_login\n@require_teacher_or_admin\ndef api_member_update(course_id, membership_id):\n    ...\n    MembershipsRepo(db).update_role(membership_id, role)\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)/delete")\n@require_login\n@require_teacher_or_admin\ndef member_remove(course_id, membership_id):\n    MembershipsRepo(db).remove_member(membership_id)\n\[n@app.delete](mailto:n@app.delete)("/api/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)")\n@require_login\n@require_teacher_or_admin\ndef api_member_remove(course_id, membership_id):\n    MembershipsRepo(db).remove_member(membership_id)",
+"reason": "Authorization is evaluated against the URL course_id, but the target membership record is never verified to belong to that course before update or delete."
+},
+{
+"file_path": "repos/memberships_repo.py",
+"line_start": 29,
+"line_end": 34,
+"function_name": "update_role / remove_member",
+"code": "def update_role(self, membership_id, role_in_course):\n    self.db.execute("UPDATE memberships SET role_in_course=? WHERE membership_id=?", (role_in_course, membership_id))\n    self.db.commit()\n\ndef remove_member(self, membership_id):\n    self.db.execute("DELETE FROM memberships WHERE membership_id=?", (membership_id,))\n    self.db.commit()",
+"reason": "The write queries are keyed only by membership_id, so a membership from another course can be modified or removed once its identifier is known."
+}
+],
+"root_cause_code": 11,
+"root_cause": "The code trusts a user-supplied membership identifier across a course trust boundary and fails to bind that identifier to the authorized course context before performing the write.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 392,
+"line_end": 429,
+"function_name": "member_update / api_member_update / member_remove / api_member_remove"
+},
+{
+"file_path": "repos/memberships_repo.py",
+"line_start": 29,
+"line_end": 34,
+"function_name": "update_role / remove_member"
+}
+],
+"repair_plan": "Load the target membership record first, verify that its course_id matches the route course_id, and then enforce that the current user has permission to manage that specific course membership. Repository updates and deletes should be scoped by both membership_id and course_id, or use a fetched membership object that has already passed authorization.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-005",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.8,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "Any member of a course can edit or delete another member's post by referencing that post_id. The application verifies only course membership and never checks that the caller owns the targeted post or has a higher moderation role.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 529,
+"line_end": 562,
+"function_name": "post_update / api_post_update / post_delete / api_post_delete",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)")\n@require_login\n@require_course_member\ndef post_update(course_id, post_id):\n    ...\n    PostsRepo(db).update_post(course_id, post_id, title, body)\n\[n@app.put](mailto:n@app.put)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)")\n@require_login\n@require_course_member\ndef api_post_update(course_id, post_id):\n    ...\n    PostsRepo(db).update_post(course_id, post_id, ...)\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/delete")\n@require_login\n@require_course_member\ndef post_delete(course_id, post_id):\n    PostsRepo(db).delete_post(course_id, post_id)\n\[n@app.delete](mailto:n@app.delete)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)")\n@require_login\n@require_course_member\ndef api_post_delete(course_id, post_id):\n    PostsRepo(db).delete_post(course_id, post_id)",
+"reason": "The routes require only membership in the course and perform no owner or moderator authorization check on the targeted post."
+},
+{
+"file_path": "repos/posts_repo.py",
+"line_start": 30,
+"line_end": 38,
+"function_name": "update_post / delete_post",
+"code": "def update_post(self, course_id, post_id, title, body):\n    self.db.execute(\n        "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?",\n        (title, body, now_iso(), course_id, post_id),\n    )\n    self.db.commit()\n\ndef delete_post(self, course_id, post_id):\n    self.db.execute("DELETE FROM posts WHERE course_id=? AND post_id=?", (course_id, post_id))",
+"reason": "The repository constrains the write only by course_id and post_id and does not require author_id or another ownership predicate."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Post mutation endpoints treat course membership as sufficient authorization and omit an ownership or moderator check for the specific post being edited or deleted.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 529,
+"line_end": 562,
+"function_name": "post_update / api_post_update / post_delete / api_post_delete"
+},
+{
+"file_path": "repos/posts_repo.py",
+"line_start": 30,
+"line_end": 38,
+"function_name": "update_post / delete_post"
+}
+],
+"repair_plan": "Load the target post before modification or deletion, verify that the caller is the post author or has an explicitly authorized moderation role in that course, and scope write queries by both post_id and the authorized principal. Reject requests that target posts owned by other users without elevated privilege.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-006",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.6,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "Any course member can edit or delete another member's comment by specifying that comment_id. The application never verifies comment ownership or moderator permission before applying the write.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 598,
+"line_end": 633,
+"function_name": "comment_update / api_comment_update / comment_delete / api_comment_delete",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)")\n@require_login\n@require_course_member\ndef comment_update(course_id, post_id, comment_id):\n    ...\n    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body)\n\[n@app.put](mailto:n@app.put)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)")\n@require_login\n@require_course_member\ndef api_comment_update(course_id, post_id, comment_id):\n    ...\n    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body)\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)/delete")\n@require_login\n@require_course_member\ndef comment_delete(course_id, post_id, comment_id):\n    CommentsRepo(db).delete_comment(course_id, post_id, comment_id)\n\[n@app.delete](mailto:n@app.delete)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)")\n@require_login\n@require_course_member\ndef api_comment_delete(course_id, post_id, comment_id):\n    CommentsRepo(db).delete_comment(course_id, post_id, comment_id)",
+"reason": "Only course membership is checked. The code does not verify that the current user authored the comment or has a moderator/staff role."
+},
+{
+"file_path": "repos/comments_repo.py",
+"line_start": 23,
+"line_end": 31,
+"function_name": "update_comment / delete_comment",
+"code": "def update_comment(self, course_id, post_id, comment_id, body):\n    self.db.execute(\n        "UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?",\n        (body, now_iso(), course_id, post_id, comment_id),\n    )\n    self.db.commit()\n\ndef delete_comment(self, course_id, post_id, comment_id):\n    self.db.execute("DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?", (course_id, post_id, comment_id))",
+"reason": "The repository uses only the comment identifier and parent resource identifiers, without any author_id constraint."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Comment mutation logic omits ownership enforcement and assumes any member of the course may modify or delete any comment within that course.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 598,
+"line_end": 633,
+"function_name": "comment_update / api_comment_update / comment_delete / api_comment_delete"
+},
+{
+"file_path": "repos/comments_repo.py",
+"line_start": 23,
+"line_end": 31,
+"function_name": "update_comment / delete_comment"
+}
+],
+"repair_plan": "Fetch the target comment before mutating it, verify that the caller is the comment author or holds an explicitly allowed staff role for the course, and scope update and delete queries to the authorized owner or moderator context. Deny same-course peer-to-peer modification by default.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-007",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.0,
+"severity_level": "high",
+"confidence_score": 94,
+"confidence_level": "high",
+"summary": "Students and other ordinary course members can retrieve question bank records that include answer_json, exposing correct answers for quizzes. This allows unauthorized disclosure of assessment answers and undermines quiz integrity.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions/:question_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions/:question_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 975,
+"line_end": 989,
+"function_name": "questions_list / api_questions_list",
+"code": "@app.get("/courses/[int:course_id](int:course_id)/questions")\n@require_login\n@require_course_member\ndef questions_list(course_id):\n    db = get_db()\n    items = QuestionsRepo(db).list_questions(course_id)\n    ...\n\[n@app.get](mailto:n@app.get)("/api/courses/[int:course_id](int:course_id)/questions")\n@require_login\n@require_course_member\ndef api_questions_list(course_id):\n    db = get_db()\n    return jsonify({"questions": QuestionsRepo(db).list_questions(course_id)})",
+"reason": "Question bank listings are available to any course member, including students."
+},
+{
+"file_path": "app.py",
+"line_start": 1022,
+"line_end": 1041,
+"function_name": "question_detail / api_question_detail",
+"code": "@app.get("/courses/[int:course_id](int:course_id)/questions/[int:question_id](int:question_id)")\n@require_login\n@require_course_member\ndef question_detail(course_id, question_id):\n    db = get_db()\n    q = QuestionsRepo(db).get_question(course_id, question_id)\n    ...\n\[n@app.get](mailto:n@app.get)("/api/courses/[int:course_id](int:course_id)/questions/[int:question_id](int:question_id)")\n@require_login\n@require_course_member\ndef api_question_detail(course_id, question_id):\n    db = get_db()\n    q = QuestionsRepo(db).get_question(course_id, question_id)\n    ...\n    return jsonify({"question": q})",
+"reason": "The detail endpoints likewise expose complete question records to any course member, with no role restriction for answer content."
+},
+{
+"file_path": "repos/questions_repo.py",
+"line_start": 16,
+"line_end": 27,
+"function_name": "list_questions / get_question",
+"code": "def list_questions(self, course_id):\n    rows = self.db.execute(\n        "SELECT q.*, u.username as creator_username FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? ORDER BY q.question_id DESC",\n        (course_id,),\n    ).fetchall()\n\ndef get_question(self, course_id, question_id):\n    r = self.db.execute(\n        "SELECT q.*, u.username as creator_username FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? AND q.question_id=?",\n        (course_id, question_id),\n    ).fetchone()",
+"reason": "The repository returns q.* for question records, which includes answer_json from the questions table."
+},
+{
+"file_path": "repos/schema.py",
+"line_start": 94,
+"line_end": 103,
+"function_name": null,
+"code": "CREATE TABLE IF NOT EXISTS questions (\n  question_id INTEGER PRIMARY KEY AUTOINCREMENT,\n  course_id INTEGER NOT NULL,\n  created_by INTEGER NOT NULL,\n  qtype TEXT NOT NULL,\n  prompt TEXT NOT NULL,\n  options_json TEXT,\n  answer_json TEXT,\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL,",
+"reason": "The table schema confirms that answer_json is stored on the same question objects being returned to all course members."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Question bank read endpoints apply only a generic course-membership check and do not separate staff-only answer data from student-visible question content.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 975,
+"line_end": 989,
+"function_name": "questions_list / api_questions_list"
+},
+{
+"file_path": "app.py",
+"line_start": 1022,
+"line_end": 1041,
+"function_name": "question_detail / api_question_detail"
+},
+{
+"file_path": "repos/questions_repo.py",
+"line_start": 16,
+"line_end": 27,
+"function_name": "list_questions / get_question"
+}
+],
+"repair_plan": "Restrict question bank management views and any answer-bearing fields to staff roles only. For student-facing quiz delivery, return a separate sanitized representation that excludes answer_json and any other grading metadata. Enforce this role separation in the route layer and, where practical, through dedicated repository methods for safe student views.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-008",
+"vulnerability_type_code": 4,
+"vulnerability_type": "Path Traversal",
+"cwe_id": "CWE-22",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.4,
+"severity_level": "high",
+"confidence_score": 89,
+"confidence_level": "high",
+"summary": "The upload handlers build storage paths directly from the untrusted original filename. A staff user can supply path separators such as ../ in the filename to write files outside the intended course upload directory.",
+"entry_points": [
+{
+"type": "file upload handler",
+"method": "POST",
+"route": "/api/courses/:course_id/uploads"
+},
+{
+"type": "file upload handler",
+"method": "POST",
+"route": "/courses/:course_id/uploads"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 903,
+"line_end": 912,
+"function_name": "upload_create",
+"code": "def upload_create(course_id):\n    ...\n    folder = ensure_upload_dir(course_id)\n    token = uuid.uuid4().hex\n    storage_path = os.path.join(folder, f"{token}*{f.filename}")\n    f.save(storage_path)\n    UploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)",
+"reason": "The server concatenates the client-controlled filename into a filesystem path and saves the file there without sanitizing separators or enforcing containment under UPLOAD_ROOT."
+},
+{
+"file_path": "app.py",
+"line_start": 918,
+"line_end": 927,
+"function_name": "api_upload_create",
+"code": "def api_upload_create(course_id):\n    ...\n    folder = ensure_upload_dir(course_id)\n    token = uuid.uuid4().hex\n    storage_path = os.path.join(folder, f"{token}*{f.filename}")\n    f.save(storage_path)\n    upload_id = UploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)",
+"reason": "The JSON API upload path repeats the same unsafe filename-to-path construction."
+}
+],
+"root_cause_code": 6,
+"root_cause": "Untrusted filenames are used directly in filesystem path construction, and the code does not normalize, sanitize, or verify that the final path remains inside the intended upload directory.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 903,
+"line_end": 912,
+"function_name": "upload_create"
+},
+{
+"file_path": "app.py",
+"line_start": 918,
+"line_end": 927,
+"function_name": "api_upload_create"
+}
+],
+"repair_plan": "Derive a safe server-side filename independently of the client-supplied name, such as a generated UUID plus a validated extension. Strip path separators from user input, normalize the target path, and verify that the resolved path is still under the expected course upload directory before saving. Store the original filename only as metadata for download presentation.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-009",
+"vulnerability_type_code": 13,
+"vulnerability_type": "Business Logic",
+"cwe_id": "CWE-840",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.4,
+"severity_level": "high",
+"confidence_score": 90,
+"confidence_level": "high",
+"summary": "The quiz answer endpoints allow a student to submit or overwrite answers after the attempt has been marked submitted, and they also accept arbitrary question_id values without verifying that the question belongs to the quiz. This permits score manipulation and invalid answer injection within a valid student session.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 1291,
+"line_end": 1314,
+"function_name": "answer_question / api_answer_question",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/quizzes/[int:quiz_id](int:quiz_id)/attempts/[int:attempt_id](int:attempt_id)/answers")\n@require_login\n@require_student\ndef answer_question(course_id, quiz_id, attempt_id):\n    db = get_db()\n    attempt = QuizzesRepo(db).get_attempt(attempt_id)\n    if not attempt or attempt["student_id"] != int(session["user_id"]):\n        return "Not found", 404\n    question_id = int(request.form.get("question_id") or 0)\n    answer_raw = (request.form.get("answer_json") or "").strip() or "{}"\n    QuizzesRepo(db).upsert_answer(attempt_id, question_id, answer_raw)\n\[n@app.post](mailto:n@app.post)("/api/courses/[int:course_id](int:course_id)/quizzes/[int:quiz_id](int:quiz_id)/attempts/[int:attempt_id](int:attempt_id)/answers")\n@require_login\n@require_student\ndef api_answer_question(course_id, quiz_id, attempt_id):\n    ...\n    QuizzesRepo(db).upsert_answer(attempt_id, int(data.get("question_id") or 0), json_dumps(data.get("answer_json")) or "{}")",
+"reason": "The answer routes verify only attempt ownership. They never check whether the attempt is already submitted, nor whether the supplied question_id is configured for the specified quiz."
+},
+{
+"file_path": "app.py",
+"line_start": 1316,
+"line_end": 1335,
+"function_name": "submit_attempt / api_submit_attempt",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/quizzes/[int:quiz_id](int:quiz_id)/attempts/[int:attempt_id](int:attempt_id)/submit")\n@require_login\n@require_student\ndef submit_attempt(course_id, quiz_id, attempt_id):\n    db = get_db()\n    attempt = QuizzesRepo(db).get_attempt(attempt_id)\n    if not attempt or attempt["student_id"] != int(session["user_id"]):\n        return "Not found", 404\n    QuizzesRepo(db).submit_attempt(attempt_id)",
+"reason": "Submission only timestamps the attempt; no later write path is blocked after submitted_at has been set."
+},
+{
+"file_path": "repos/quizzes_repo.py",
+"line_start": 67,
+"line_end": 80,
+"function_name": "get_attempt / submit_attempt / upsert_answer",
+"code": "def get_attempt(self, attempt_id):\n    r = self.db.execute("SELECT * FROM quiz_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()\n    return dict(r) if r else None\n\ndef submit_attempt(self, attempt_id):\n    self.db.execute("UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?", (now_iso(), attempt_id))\n    self.db.commit()\n\ndef upsert_answer(self, attempt_id, question_id, answer_json_text):\n    self.db.execute(\n        "INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) VALUES (?,?,?,?) ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json, created_at=excluded.created_at",\n        (attempt_id, question_id, answer_json_text, now_iso()),\n    )",
+"reason": "The repository blindly updates answers for any question_id tied to the attempt_id and has no rule preventing writes after submission."
+}
+],
+"root_cause_code": 12,
+"root_cause": "Quiz attempt state and quiz-question membership rules are not enforced on the answer write path, so the application accepts logically invalid mutations that should be rejected after submission or when the question is not part of the quiz.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 1291,
+"line_end": 1314,
+"function_name": "answer_question / api_answer_question"
+},
+{
+"file_path": "app.py",
+"line_start": 1316,
+"line_end": 1335,
+"function_name": "submit_attempt / api_submit_attempt"
+},
+{
+"file_path": "repos/quizzes_repo.py",
+"line_start": 67,
+"line_end": 80,
+"function_name": "get_attempt / submit_attempt / upsert_answer"
+}
+],
+"repair_plan": "Before accepting an answer, load the attempt and reject writes if submitted_at is already set. Also verify that the supplied question_id belongs to the quiz associated with that attempt, ideally with a server-side existence check against quiz_questions scoped by quiz_id. Once submitted, make the attempt immutable except through an explicitly authorized re-open workflow.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}
+]
+
+
+Repair requirements
+- Implement each vulnerability’s repair_plan consistent with its root_cause and evidence_snippets.
+- Apply fixes at the patch_locations specified in the VD report.
+- Enforce authorization/ownership/relationship checks server-side (not client-side).
+- Where applicable, scope write operations to the authorized parent resource (e.g., course_id + membership_id).
+- Keep error handling consistent with existing patterns in the repo (e.g., 401/403/404) and do not leak sensitive details.
+
+Output format (strict)
+1) Unified diff patch (git apply compatible). Include only changed files.
+2) Per-vulnerability summary (group by vulnerability_id):
+   - files changed
+   - key checks added
+   - why the vulnerability is mitigated (brief)
+3) Functional verification commands (copy-paste):
+   - run the full functional test suite (exact command)
+   - (optional) a minimal functional smoke command if full suite is slow

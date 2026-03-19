@@ -1,0 +1,18 @@
+
+test at tests\api.quiz.functional.test.js:16:1
+✖ R5 API functional: question bank + quiz + student attempts flow (3434.9668ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  403 !== 200
+
+      at TestContext.<anonymous> (D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\js\educollab-r5_repair\tests\api.quiz.functional.test.js:44:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async Test.run (node:internal/test_runner/test:797:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:526:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 403,
+    expected: 200,
+    operator: 'strictEqual'
+  }
+PS D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\js\educollab-r5_repair>

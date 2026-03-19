@@ -1,0 +1,96 @@
+{
+  "vulnerability_id": "VULN-006",
+  "vulnerability_type_code": 7,
+  "vulnerability_type": "CSRF",
+  "cwe_id": "CWE-352",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.4,
+  "severity_level": "high",
+  "confidence_score": 95,
+  "confidence_level": "high",
+  "summary": "The server-rendered membership management forms do not include any CSRF token or equivalent anti-CSRF validation. A malicious site can cause a logged-in teacher or admin to add members, change roles, or remove members using the victim's existing session.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/members"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/members/:membership_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/members/:membership_id/delete"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "templates/memberships/new.html",
+      "line_start": 6,
+      "line_end": 20,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"{{ url_for('memberships.add_member_submit', course_id=course['course_id']) }}\">\n  <label>User</label>\n  <select name=\"user_id\" required>\n    {% for item in users %}\n    <option value=\"{{ item['user_id'] }}\">{{ item['display_name'] }} ({{ item['username'] }})</option>\n    {% endfor %}\n  </select>\n  <label>Role</label>\n  <select name=\"role_in_course\" required>\n    {% for role in roles %}\n    <option value=\"{{ role }}\">{{ role }}</option>\n    {% endfor %}\n  </select>\n  <button type=\"submit\">Add Member</button>\n</form>",
+      "reason": "The add-member form performs a privileged state change but contains no CSRF token or nonce."
+    },
+    {
+      "file_path": "templates/memberships/list.html",
+      "line_start": 10,
+      "line_end": 21,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"{{ url_for('memberships.update_member_role_submit', course_id=course['course_id'], membership_id=item['membership_id']) }}\">\n  <label>Change role</label>\n  <select name=\"role_in_course\">\n    {% for role in roles %}\n    <option value=\"{{ role }}\" {% if role == item['role_in_course'] %}selected{% endif %}>{{ role }}</option>\n    {% endfor %}\n  </select>\n  <button type=\"submit\">Update Role</button>\n</form>\n<form method=\"post\" action=\"{{ url_for('memberships.remove_member_submit', course_id=course['course_id'], membership_id=item['membership_id']) }}\">\n  <button type=\"submit\">Remove Member</button>\n</form>",
+      "reason": "Both role-update and member-removal forms are forgeable because they contain no request authenticity token."
+    },
+    {
+      "file_path": "controllers/membership_controller.py",
+      "line_start": 58,
+      "line_end": 89,
+      "function_name": "add_member_submit",
+      "code": "@membership_bp.route('/courses/<int:course_id>/members', methods=['POST'])\n@login_required\n@require_teacher_or_admin\ndef add_member_submit(course_id):\n    ...\n    try:\n        add_membership(course_id, int(user_id), role_in_course)\n    except sqlite3.IntegrityError:\n        ...\n    return redirect(url_for('memberships.list_members_page', course_id=course_id))",
+      "reason": "The membership creation handler processes authenticated browser POST requests without verifying a CSRF token."
+    },
+    {
+      "file_path": "controllers/membership_controller.py",
+      "line_start": 134,
+      "line_end": 172,
+      "function_name": "update_member_role_submit / remove_member_submit",
+      "code": "@membership_bp.route('/courses/<int:course_id>/members/<int:membership_id>', methods=['POST'])\n@login_required\n@require_teacher_or_admin\ndef update_member_role_submit(course_id, membership_id):\n    ...\n    update_membership_role(membership_id, role_in_course)\n    return redirect(url_for('memberships.list_members_page', course_id=course_id))\n\n@membership_bp.route('/courses/<int:course_id>/members/<int:membership_id>/delete', methods=['POST'])\n@login_required\n@require_teacher_or_admin\ndef remove_member_submit(course_id, membership_id):\n    ...\n    remove_membership(membership_id)\n    return redirect(url_for('memberships.list_members_page', course_id=course_id))",
+      "reason": "The membership update and delete handlers accept cookie-authenticated POST requests without any anti-CSRF validation."
+    }
+  ],
+  "root_cause_code": 9,
+  "root_cause": "Server-rendered membership management endpoints rely on cookie-based authentication but do not require a request authenticity token or equivalent CSRF defense.",
+  "patch_locations": [
+    {
+      "file_path": "templates/memberships/new.html",
+      "line_start": 6,
+      "line_end": 20,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/memberships/list.html",
+      "line_start": 10,
+      "line_end": 21,
+      "function_name": null
+    },
+    {
+      "file_path": "controllers/membership_controller.py",
+      "line_start": 58,
+      "line_end": 89,
+      "function_name": "add_member_submit"
+    },
+    {
+      "file_path": "controllers/membership_controller.py",
+      "line_start": 134,
+      "line_end": 172,
+      "function_name": "update_member_role_submit / remove_member_submit"
+    }
+  ],
+  "repair_plan": "Introduce server-side CSRF protection for browser membership-management workflows by generating a per-session token, embedding it in the add, role-update, and remove-member forms, and rejecting requests whose token is missing or invalid. Apply the same protection consistently to all state-changing HTML form endpoints that rely on authenticated cookies.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

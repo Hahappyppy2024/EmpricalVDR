@@ -1,0 +1,412 @@
+[
+{
+"vulnerability_id": "VULN-001",
+"vulnerability_type_code": 11,
+"vulnerability_type": "Sensitive Data Exposure",
+"cwe_id": "CWE-200",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.1,
+"severity_level": "high",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "Any authenticated course member can retrieve full quiz question records through the quiz detail API, including answer_json for each mapped question. This exposes correct answers and assessment secrets to students before or during attempts, undermining quiz integrity.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/quizzes/:quiz_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app/controllers/QuizController.php",
+"line_start": 109,
+"line_end": 116,
+"function_name": "getApi",
+"code": "require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);\n$quiz = $this->quizRepo->findById($courseId, $quizId);\n...\njson_response(['success' => true, 'quiz' => $quiz, 'questions' => $this->quizRepo->listQuizQuestions($courseId, $quizId)]);",
+"reason": "The API allows any course member, not just staff, to fetch the full quiz question payload."
+},
+{
+"file_path": "app/repositories/QuizRepository.php",
+"line_start": 82,
+"line_end": 95,
+"function_name": "listQuizQuestions",
+"code": "SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,\n       q.qtype, q.prompt, q.options_json, q.answer_json\nFROM quiz_questions qq\nJOIN quizzes z ON z.quiz_id = qq.quiz_id AND z.course_id = :course_id\nJOIN questions q ON q.question_id = qq.question_id AND q.course_id = :course_id\nWHERE qq.quiz_id = :quiz_id",
+"reason": "The repository returns answer_json together with the quiz questions, so the student-visible API response includes the correct answers."
+},
+{
+"file_path": "app/controllers/QuizController.php",
+"line_start": 89,
+"line_end": 106,
+"function_name": "getHtml",
+"code": "require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);\n...\n'questions' => $quiz ? $this->quizRepo->listQuizQuestions($courseId, $quizId) : [],\n'question_bank' => $quiz && current_user_is_course_staff(...) ? $this->questionRepo->listByCourse($courseId) : [],",
+"reason": "The controller treats quiz question data as broadly member-readable, while only the separate question bank is staff-restricted, indicating an authorization boundary mismatch around assessment secrets."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Quiz detail access is authorized for all course members, but the returned data model includes staff-only assessment secrets such as answer_json instead of a student-safe projection.",
+"patch_locations": [
+{
+"file_path": "app/controllers/QuizController.php",
+"line_start": 109,
+"line_end": 116,
+"function_name": "getApi"
+},
+{
+"file_path": "app/repositories/QuizRepository.php",
+"line_start": 82,
+"line_end": 95,
+"function_name": "listQuizQuestions"
+},
+{
+"file_path": "app/repositories/QuizRepository.php",
+"line_start": 97,
+"line_end": 110,
+"function_name": "findQuizQuestion"
+}
+],
+"repair_plan": "Split quiz-question retrieval into staff and student representations. For member-visible quiz detail and attempt flows, return only the fields needed to answer the quiz, excluding answer_json and any other solution material. Keep answer_json accessible only to explicitly authorized staff endpoints.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"vulnerability_type_code": 13,
+"vulnerability_type": "Business Logic",
+"cwe_id": "CWE-841",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.8,
+"severity_level": "medium",
+"confidence_score": 94,
+"confidence_level": "high",
+"summary": "Students can start quiz attempts before the configured open_at time and continue answering or submit after the configured due_at time because the attempt workflow never enforces quiz availability windows. This allows bypass of intended release and deadline controls for assessments.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/start"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/start"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app/controllers/QuizController.php",
+"line_start": 49,
+"line_end": 69,
+"function_name": "create",
+"code": "$openAt = trim((string) ($data['open_at'] ?? ''));\n$dueAt = trim((string) ($data['due_at'] ?? ''));\n...\n$quizId = $this->quizRepo->create([\n    'course_id' => $courseId,\n    'created_by' => $userId,\n    'title' => $title,\n    'description' => $description,\n    'open_at' => $openAt === '' ? null : $openAt,\n    'due_at' => $dueAt === '' ? null : $dueAt,\n]);",
+"reason": "The application stores explicit quiz opening and due times, indicating that quiz availability windows are part of the intended workflow."
+},
+{
+"file_path": "app/views/courses/quizzes/show.php",
+"line_start": 7,
+"line_end": 9,
+"function_name": null,
+"code": "<p><?= nl2br(htmlspecialchars($quiz['description'], ENT_QUOTES, 'UTF-8')) ?></p>\n<p>Open: <?= htmlspecialchars((string) ($quiz['open_at'] ?? ''), ENT_QUOTES, 'UTF-8') ?></p>\n<p>Due: <?= htmlspecialchars((string) ($quiz['due_at'] ?? ''), ENT_QUOTES, 'UTF-8') ?></p>",
+"reason": "The UI presents open_at and due_at to users as meaningful quiz state constraints."
+},
+{
+"file_path": "app/controllers/QuizAttemptController.php",
+"line_start": 39,
+"line_end": 45,
+"function_name": "startAttempt",
+"code": "if (!$this->quizRepo->findById($courseId, $quizId)) {\n    return ['success' => false, 'error' => 'Quiz not found'];\n}\n$attemptId = $this->attemptRepo->create($quizId, $courseId, $userId);",
+"reason": "Attempt creation checks only that the quiz exists and does not enforce open_at or due_at before allowing a student to start."
+},
+{
+"file_path": "app/controllers/QuizAttemptController.php",
+"line_start": 66,
+"line_end": 87,
+"function_name": "answer",
+"code": "$attempt = $this->attemptRepo->findById($courseId, $quizId, $attemptId);\n...\nif ($attempt['submitted_at'] !== null) {\n    return ['success' => false, 'error' => 'Attempt already submitted'];\n}\n...\n$this->attemptRepo->upsertAnswer($attemptId, $questionId, $answerJson);",
+"reason": "Answer submission enforces only ownership and submitted_at status; it never checks whether the quiz is not yet open or already past due."
+},
+{
+"file_path": "app/controllers/QuizAttemptController.php",
+"line_start": 108,
+"line_end": 121,
+"function_name": "submit",
+"code": "$attempt = $this->attemptRepo->findById($courseId, $quizId, $attemptId);\n...\nif ($attempt['submitted_at'] !== null) {\n    return ['success' => false, 'error' => 'Attempt already submitted'];\n}\n$this->attemptRepo->submit($courseId, $quizId, $attemptId);",
+"reason": "Final submission likewise omits any check against the quiz's configured due_at deadline."
+}
+],
+"root_cause_code": 12,
+"root_cause": "The quiz attempt lifecycle stores schedule metadata on quizzes but does not enforce those state-transition rules when students start, answer, or submit attempts.",
+"patch_locations": [
+{
+"file_path": "app/controllers/QuizAttemptController.php",
+"line_start": 39,
+"line_end": 45,
+"function_name": "startAttempt"
+},
+{
+"file_path": "app/controllers/QuizAttemptController.php",
+"line_start": 66,
+"line_end": 87,
+"function_name": "answer"
+},
+{
+"file_path": "app/controllers/QuizAttemptController.php",
+"line_start": 108,
+"line_end": 121,
+"function_name": "submit"
+},
+{
+"file_path": "app/controllers/QuizController.php",
+"line_start": 49,
+"line_end": 69,
+"function_name": "create"
+},
+{
+"file_path": "app/controllers/QuizController.php",
+"line_start": 153,
+"line_end": 174,
+"function_name": "update"
+}
+],
+"repair_plan": "Before allowing attempt creation, answer saving, or final submission, load the quiz and enforce its availability rules server-side: reject starts before open_at, reject answering or submitting after due_at, and define whether in-progress attempts may continue past due_at. Apply the same checks consistently to both HTML and API attempt endpoints.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-003",
+"vulnerability_type_code": 7,
+"vulnerability_type": "CSRF",
+"cwe_id": "CWE-352",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.5,
+"severity_level": "medium",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "The server-rendered question, quiz, and quiz-attempt forms perform state-changing actions using only the session cookie and do not include anti-CSRF tokens. A malicious site can cause a logged-in victim's browser to create or modify quiz content, start attempts, save answers, or submit attempts without the victim's intent.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/questions"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/questions/:question_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/questions/:question_id/delete"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/delete"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/questions"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/start"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app/views/courses/quizzes/new.php",
+"line_start": 4,
+"line_end": 13,
+"function_name": null,
+"code": "<form method="post" action="/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>/quizzes">\n    ...\n    <button type="submit">Create quiz</button>\n</form>",
+"reason": "The quiz creation form submits a state-changing POST request without any CSRF token."
+},
+{
+"file_path": "app/views/courses/quizzes/show.php",
+"line_start": 24,
+"line_end": 37,
+"function_name": null,
+"code": "<form method="post" action="/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>/quizzes/<?= htmlspecialchars((string) $quiz['quiz_id'], ENT_QUOTES, 'UTF-8') ?>/questions">\n    ...\n    <button type="submit">Add or update mapping</button>\n</form>",
+"reason": "Quiz-question configuration is a privileged state-changing form with no anti-CSRF token."
+},
+{
+"file_path": "app/views/courses/quizzes/show.php",
+"line_start": 48,
+"line_end": 65,
+"function_name": null,
+"code": "<form method="post" action="/courses/.../quizzes/.../start">\n    <button type="submit">Start Attempt</button>\n</form>\n...\n<form method="post" action="/courses/.../quizzes/.../attempts/.../answers">\n    <input type="hidden" name="question_id" value="...">\n    <textarea name="answer_json" rows="3" ...></textarea>\n</form>\n...\n<form method="post" action="/courses/.../quizzes/.../attempts/.../submit">",
+"reason": "Student attempt start, answer submission, and final submission are all tokenless authenticated POST forms."
+},
+{
+"file_path": "app/controllers/QuestionController.php",
+"line_start": 24,
+"line_end": 33,
+"function_name": "createHtml",
+"code": "$userId = require_login($this->config, false);\nrequire_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);\n$result = $this->create($courseId, $userId, request_data());",
+"reason": "The HTML question-management path performs the state change based only on cookie-backed authentication and posted form data, with no CSRF verification."
+},
+{
+"file_path": "app/controllers/QuizController.php",
+"line_start": 26,
+"line_end": 35,
+"function_name": "createHtml",
+"code": "$userId = require_login($this->config, false);\nrequire_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);\n$result = $this->create($courseId, $userId, request_data());",
+"reason": "The HTML quiz-management path also lacks any anti-CSRF check before the state-changing operation."
+},
+{
+"file_path": "app/controllers/QuizAttemptController.php",
+"line_start": 19,
+"line_end": 26,
+"function_name": "startHtml",
+"code": "$userId = require_student($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);\n$result = $this->startAttempt($courseId, $quizId, $userId);\n...\nredirect_to('/courses/' . $courseId . '/quizzes/' . $quizId);",
+"reason": "The HTML attempt path trusts any browser-submitted authenticated POST and performs no CSRF validation before starting an attempt."
+}
+],
+"root_cause_code": 9,
+"root_cause": "The server-rendered quiz and question workflows do not generate or validate anti-CSRF tokens, so any browser request carrying the victim's session cookie is trusted for state-changing operations.",
+"patch_locations": [
+{
+"file_path": "app/views/courses/questions/new.php",
+"line_start": 4,
+"line_end": 15,
+"function_name": null
+},
+{
+"file_path": "app/views/courses/questions/edit.php",
+"line_start": 4,
+"line_end": 15,
+"function_name": null
+},
+{
+"file_path": "app/views/courses/quizzes/new.php",
+"line_start": 4,
+"line_end": 13,
+"function_name": null
+},
+{
+"file_path": "app/views/courses/quizzes/edit.php",
+"line_start": 4,
+"line_end": 13,
+"function_name": null
+},
+{
+"file_path": "app/views/courses/quizzes/show.php",
+"line_start": 24,
+"line_end": 65,
+"function_name": null
+},
+{
+"file_path": "app/controllers/QuestionController.php",
+"line_start": 24,
+"line_end": 33,
+"function_name": "createHtml"
+},
+{
+"file_path": "app/controllers/QuestionController.php",
+"line_start": 122,
+"line_end": 130,
+"function_name": "updateHtml"
+},
+{
+"file_path": "app/controllers/QuestionController.php",
+"line_start": 168,
+"line_end": 172,
+"function_name": "deleteHtml"
+},
+{
+"file_path": "app/controllers/QuizController.php",
+"line_start": 26,
+"line_end": 35,
+"function_name": "createHtml"
+},
+{
+"file_path": "app/controllers/QuizController.php",
+"line_start": 131,
+"line_end": 139,
+"function_name": "updateHtml"
+},
+{
+"file_path": "app/controllers/QuizController.php",
+"line_start": 177,
+"line_end": 181,
+"function_name": "deleteHtml"
+},
+{
+"file_path": "app/controllers/QuizController.php",
+"line_start": 203,
+"line_end": 207,
+"function_name": "configureQuestionsHtml"
+},
+{
+"file_path": "app/controllers/QuizAttemptController.php",
+"line_start": 19,
+"line_end": 26,
+"function_name": "startHtml"
+},
+{
+"file_path": "app/controllers/QuizAttemptController.php",
+"line_start": 48,
+"line_end": 52,
+"function_name": "answerHtml"
+},
+{
+"file_path": "app/controllers/QuizAttemptController.php",
+"line_start": 90,
+"line_end": 94,
+"function_name": "submitHtml"
+}
+],
+"repair_plan": "Add a centralized CSRF defense for all server-rendered question, quiz, and quiz-attempt routes. Generate a per-session or per-form token, embed it in every HTML form, and verify it before processing create, update, delete, question-mapping, attempt-start, answer-save, and attempt-submit actions. Reject requests with missing or invalid tokens before any side effect occurs.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}
+]

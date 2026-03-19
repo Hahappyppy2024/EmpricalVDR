@@ -1,0 +1,135 @@
+1. Unified diff patch (git apply compatible). Include only changed files.
+
+```diff
+--- /tmp/origpatch/app/core/Auth.php	2026-03-16 00:26:44.136971054 +0000
++++ app/core/Auth.php	2026-03-16 00:25:56.093902259 +0000
+@@ -147,9 +147,14 @@
+     return in_array($role, ['teacher', 'admin', 'assistant', 'senior-assistant'], true);
+ }
+ 
++function can_moderate_course_content(array $membership): bool
++{
++    return in_array((string) ($membership['role_in_course'] ?? ''), ['teacher', 'admin'], true);
++}
++
+ function can_manage_course_content(array $membership, int $userId, int $authorId): bool
+ {
+-    return $userId === $authorId || is_course_staff_role((string) ($membership['role_in_course'] ?? ''));
++    return $userId === $authorId || can_moderate_course_content($membership);
+ }
+ 
+ function current_user_can_manage_course(array $config, MembershipRepository $membershipRepo, CourseRepository $courseRepo, int $courseId): bool
+--- /tmp/origpatch/app/controllers/PostController.php	2026-03-16 00:26:44.137740455 +0000
++++ app/controllers/PostController.php	2026-03-16 00:25:56.094607032 +0000
+@@ -186,7 +186,7 @@
+         if ($title === '' || $body === '') {
+             return ['success' => false, 'error' => 'title and body are required'];
+         }
+-        if (is_course_staff_role((string) $membership['role_in_course'])) {
++        if (can_moderate_course_content($membership)) {
+             $this->postRepo->update($courseId, $postId, ['title' => $title, 'body' => $body]);
+         } else {
+             $this->postRepo->updateOwned($courseId, $postId, $userId, ['title' => $title, 'body' => $body]);
+@@ -223,7 +223,7 @@
+         if (!can_manage_course_content($membership, $userId, (int) $post['author_id'])) {
+             return ['success' => false, 'error' => 'Forbidden'];
+         }
+-        if (is_course_staff_role((string) $membership['role_in_course'])) {
++        if (can_moderate_course_content($membership)) {
+             $this->postRepo->delete($courseId, $postId);
+         } else {
+             $this->postRepo->deleteOwned($courseId, $postId, $userId);
+--- /tmp/origpatch/app/controllers/CommentController.php	2026-03-16 00:26:44.138086440 +0000
++++ app/controllers/CommentController.php	2026-03-16 00:25:56.095122620 +0000
+@@ -104,7 +104,7 @@
+         if ($body === '') {
+             return ['success' => false, 'error' => 'body is required'];
+         }
+-        if (is_course_staff_role((string) $membership['role_in_course'])) {
++        if (can_moderate_course_content($membership)) {
+             $this->commentRepo->update($courseId, $postId, $commentId, $body);
+         } else {
+             $this->commentRepo->updateOwned($courseId, $postId, $commentId, $userId, $body);
+@@ -141,7 +141,7 @@
+         if (!can_manage_course_content($membership, $userId, (int) $comment['author_id'])) {
+             return ['success' => false, 'error' => 'Forbidden'];
+         }
+-        if (is_course_staff_role((string) $membership['role_in_course'])) {
++        if (can_moderate_course_content($membership)) {
+             $this->commentRepo->delete($courseId, $postId, $commentId);
+         } else {
+             $this->commentRepo->deleteOwned($courseId, $postId, $commentId, $userId);
+```
+
+2. Per-vulnerability summary (group by vulnerability_id)
+
+VULN-001
+
+* files changed
+
+  * `app/core/Auth.php`
+  * `app/controllers/PostController.php`
+* key checks added
+
+  * Added `can_moderate_course_content(...)` to narrow non-owner post moderation to `teacher` and `admin` only.
+  * Kept `can_manage_course_content(...)` author-aware, but changed its non-owner path to use the narrower moderator check instead of the broad staff-role helper.
+  * Changed post update/delete controller branching so unrestricted repository writes are used only for true moderators, not for `assistant` or `senior-assistant`.
+* regression restored
+
+  * No route, response field, or role-name contract changed.
+  * Legitimate author CRUD remains intact because authors still pass `can_manage_course_content(...)` and still use the owner-scoped repository path.
+* why the vulnerability is mitigated
+
+  * `assistant` and `senior-assistant` no longer inherit blanket authority to mutate another author’s post by supplying `post_id`.
+
+VULN-002
+
+* files changed
+
+  * `app/core/Auth.php`
+  * `app/controllers/CommentController.php`
+* key checks added
+
+  * Reused the new `can_moderate_course_content(...)` helper so only `teacher` and `admin` can bypass comment ownership.
+  * Changed comment update/delete controller branching so unrestricted repository writes are no longer available to `assistant` or `senior-assistant`.
+* regression restored
+
+  * Comment author CRUD remains intact because comment authors still pass the ownership check and continue to use the owner-scoped repository path.
+* why the vulnerability is mitigated
+
+  * `assistant` and `senior-assistant` can no longer update or delete another author’s comment by supplying `comment_id`.
+
+3. Functional verification commands (copy-paste)
+
+Run the full functional test suite:
+
+```bash
+cd educollab_php_req03_iteration1_failed && pytest -q tests/test_api_functional_r3_posts_comments.py
+```
+
+Optional minimal functional smoke command:
+
+```bash
+cd educollab_php_req03_iteration1_failed && php -l app/core/Auth.php && php -l app/controllers/PostController.php && php -l app/controllers/CommentController.php
+```
+
+4. Security verification commands (copy-paste)
+
+Run the relevant security tests affected by the repaired vulnerabilities:
+
+```bash
+cd educollab_php_req03_iteration1_failed && pytest -q tests/test_api_exploit_r3_posts_comments.py
+```
+
+Optional single-test commands for the most relevant repaired paths:
+
+```bash
+cd educollab_php_req03_iteration1_failed && pytest -q tests/test_api_exploit_r3_posts_comments.py -k edit_another_students_post
+```
+
+```bash
+cd educollab_php_req03_iteration1_failed && pytest -q tests/test_api_exploit_r3_posts_comments.py -k delete_another_students_comment
+```
+
+Note:
+The local test environment here could not complete the repository’s HTTP tests because the container PHP runtime is missing the SQLite PDO driver (`PDOException: could not find driver`). The patch was syntax-checked successfully with `php -l`, but end-to-end functional/security execution still needs a PHP environment with `pdo_sqlite` enabled.

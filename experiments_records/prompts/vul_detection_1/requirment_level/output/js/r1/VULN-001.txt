@@ -1,0 +1,77 @@
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 9,
+  "vulnerability_type": "Authentication Flaw",
+  "cwe_id": "CWE-798",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 9.1,
+  "severity_level": "critical",
+  "confidence_score": 97,
+  "confidence_level": "high",
+  "summary": "The application auto-seeds a privileged administrator account with hard-coded credentials. An external attacker who knows or guesses the shipped admin username/password can log in as the administrator and gain full admin capabilities.",
+  "entry_points": [
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/login"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/api/auth/login"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "scripts/initDb.js",
+      "line_start": 25,
+      "line_end": 33,
+      "function_name": "seedAdmin",
+      "code": "function seedAdmin() {\\n  const existing = userRepository.findByUsername('admin');\\n  if (!existing) {\\n    userRepository.createUser({\\n      username: 'admin',\\n      password: 'adminpass',\\n      display_name: 'Admin'\\n    });\\n  }\\n}",
+      "reason": "A built-in admin user is created with a fixed username and password, making the privileged account credentials predictable."
+    },
+    {
+      "file_path": "app.js",
+      "line_start": 10,
+      "line_end": 12,
+      "function_name": null,
+      "code": "initDb();\\nseedAdmin();",
+      "reason": "The hard-coded admin seeding routine runs automatically on application startup."
+    },
+    {
+      "file_path": "src/middleware/auth.js",
+      "line_start": 27,
+      "line_end": 38,
+      "function_name": "requireAdminPage / requireAdminApi",
+      "code": "function requireAdminPage(req, res, next) {\\n  if (!req.currentUser || req.currentUser.username !== 'admin') {\\n    return res.status(403).send('Forbidden');\\n  }\\n  next();\\n}\\n\\nfunction requireAdminApi(req, res, next) {\\n  if (!req.currentUser || req.currentUser.username !== 'admin') {\\n    return res.status(403).json({ success: false, error: 'Admin access required' });\\n  }\\n  next();\\n}",
+      "reason": "Admin authorization is granted based on the fixed username 'admin', so compromising the seeded admin account yields administrator access."
+    }
+  ],
+  "root_cause_code": 10,
+  "root_cause": "The application embeds and auto-provisions a privileged default credential instead of requiring secure first-run provisioning or deployment-time secrets.",
+  "patch_locations": [
+    {
+      "file_path": "scripts/initDb.js",
+      "line_start": 25,
+      "line_end": 34,
+      "function_name": "seedAdmin"
+    },
+    {
+      "file_path": "app.js",
+      "line_start": 10,
+      "line_end": 12,
+      "function_name": null
+    },
+    {
+      "file_path": "src/middleware/auth.js",
+      "line_start": 27,
+      "line_end": 38,
+      "function_name": "requireAdminPage / requireAdminApi"
+    }
+  ],
+  "repair_plan": "Remove hard-coded administrator credentials and stop auto-seeding a reusable privileged account. Replace it with an explicit first-run initialization flow (e.g., one-time setup token or environment-provided initial admin password) and store administrator privilege as server-side role state (e.g., users.is_admin) instead of inferring it from a fixed username.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

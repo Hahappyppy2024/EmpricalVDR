@@ -1,0 +1,95 @@
+{
+"vulnerability_id": "VULN-007",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.0,
+"severity_level": "high",
+"confidence_score": 94,
+"confidence_level": "high",
+"summary": "Students and other ordinary course members can retrieve question bank records that include answer_json, exposing correct answers for quizzes. This allows unauthorized disclosure of assessment answers and undermines quiz integrity.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions/:question_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions/:question_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 975,
+"line_end": 989,
+"function_name": "questions_list / api_questions_list",
+"code": "@app.get("/courses/[int:course_id](int:course_id)/questions")\n@require_login\n@require_course_member\ndef questions_list(course_id):\n    db = get_db()\n    items = QuestionsRepo(db).list_questions(course_id)\n    ...\n\[n@app.get](mailto:n@app.get)("/api/courses/[int:course_id](int:course_id)/questions")\n@require_login\n@require_course_member\ndef api_questions_list(course_id):\n    db = get_db()\n    return jsonify({"questions": QuestionsRepo(db).list_questions(course_id)})",
+"reason": "Question bank listings are available to any course member, including students."
+},
+{
+"file_path": "app.py",
+"line_start": 1022,
+"line_end": 1041,
+"function_name": "question_detail / api_question_detail",
+"code": "@app.get("/courses/[int:course_id](int:course_id)/questions/[int:question_id](int:question_id)")\n@require_login\n@require_course_member\ndef question_detail(course_id, question_id):\n    db = get_db()\n    q = QuestionsRepo(db).get_question(course_id, question_id)\n    ...\n\[n@app.get](mailto:n@app.get)("/api/courses/[int:course_id](int:course_id)/questions/[int:question_id](int:question_id)")\n@require_login\n@require_course_member\ndef api_question_detail(course_id, question_id):\n    db = get_db()\n    q = QuestionsRepo(db).get_question(course_id, question_id)\n    ...\n    return jsonify({"question": q})",
+"reason": "The detail endpoints likewise expose complete question records to any course member, with no role restriction for answer content."
+},
+{
+"file_path": "repos/questions_repo.py",
+"line_start": 16,
+"line_end": 27,
+"function_name": "list_questions / get_question",
+"code": "def list_questions(self, course_id):\n    rows = self.db.execute(\n        "SELECT q.*, u.username as creator_username FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? ORDER BY q.question_id DESC",\n        (course_id,),\n    ).fetchall()\n\ndef get_question(self, course_id, question_id):\n    r = self.db.execute(\n        "SELECT q.*, u.username as creator_username FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? AND q.question_id=?",\n        (course_id, question_id),\n    ).fetchone()",
+"reason": "The repository returns q.* for question records, which includes answer_json from the questions table."
+},
+{
+"file_path": "repos/schema.py",
+"line_start": 94,
+"line_end": 103,
+"function_name": null,
+"code": "CREATE TABLE IF NOT EXISTS questions (\n  question_id INTEGER PRIMARY KEY AUTOINCREMENT,\n  course_id INTEGER NOT NULL,\n  created_by INTEGER NOT NULL,\n  qtype TEXT NOT NULL,\n  prompt TEXT NOT NULL,\n  options_json TEXT,\n  answer_json TEXT,\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL,",
+"reason": "The table schema confirms that answer_json is stored on the same question objects being returned to all course members."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Question bank read endpoints apply only a generic course-membership check and do not separate staff-only answer data from student-visible question content.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 975,
+"line_end": 989,
+"function_name": "questions_list / api_questions_list"
+},
+{
+"file_path": "app.py",
+"line_start": 1022,
+"line_end": 1041,
+"function_name": "question_detail / api_question_detail"
+},
+{
+"file_path": "repos/questions_repo.py",
+"line_start": 16,
+"line_end": 27,
+"function_name": "list_questions / get_question"
+}
+],
+"repair_plan": "Restrict question bank management views and any answer-bearing fields to staff roles only. For student-facing quiz delivery, return a separate sanitized representation that excludes answer_json and any other grading metadata. Enforce this role separation in the route layer and, where practical, through dedicated repository methods for safe student views.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

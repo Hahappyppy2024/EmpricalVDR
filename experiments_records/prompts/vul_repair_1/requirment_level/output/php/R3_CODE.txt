@@ -1,0 +1,332 @@
+还是同一个问题，说明你**还没有把 `public/index.php` 里的 `CommentController` 初始化顺序改过来**，或者改的不是当前测试实际跑到的那份文件。
+
+报错已经把错误位置写得很清楚了：
+
+* 文件：`public/index.php`
+* 行号：`line 33`
+* 实际传参：
+  `CommentRepository, PostRepository, CourseRepository, MembershipRepository, Array`
+* 但构造函数要求：
+  `CommentRepository, PostRepository, MembershipRepository, CourseRepository, Array`
+
+也就是第 3、4 个参数反了。
+
+---
+
+## 你现在直接改这个文件
+
+### `public/index.php`
+
+把 `CommentController` 这一段改成下面这样：
+
+```php
+<?php
+
+declare(strict_types=1);
+
+session_start();
+
+$config = require dirname(__DIR__) . '/config/config.php';
+
+require_once dirname(__DIR__) . '/app/core/Bootstrap.php';
+require_once dirname(__DIR__) . '/app/core/View.php';
+require_once dirname(__DIR__) . '/app/core/Auth.php';
+
+require_once dirname(__DIR__) . '/app/repositories/UserRepository.php';
+require_once dirname(__DIR__) . '/app/repositories/CourseRepository.php';
+require_once dirname(__DIR__) . '/app/repositories/MembershipRepository.php';
+require_once dirname(__DIR__) . '/app/repositories/PostRepository.php';
+require_once dirname(__DIR__) . '/app/repositories/CommentRepository.php';
+
+require_once dirname(__DIR__) . '/app/controllers/AuthController.php';
+require_once dirname(__DIR__) . '/app/controllers/CourseController.php';
+require_once dirname(__DIR__) . '/app/controllers/MembershipController.php';
+require_once dirname(__DIR__) . '/app/controllers/PostController.php';
+require_once dirname(__DIR__) . '/app/controllers/CommentController.php';
+
+init_db($config);
+seed_admin($config);
+
+$pdo = Database::connection($config);
+
+$userRepo = new UserRepository($pdo);
+$courseRepo = new CourseRepository($pdo);
+$membershipRepo = new MembershipRepository($pdo);
+$postRepo = new PostRepository($pdo);
+$commentRepo = new CommentRepository($pdo);
+
+$authController = new AuthController($userRepo, $config);
+$courseController = new CourseController($courseRepo, $membershipRepo, $config);
+$membershipController = new MembershipController($membershipRepo, $courseRepo, $userRepo, $config);
+$postController = new PostController($postRepo, $commentRepo, $courseRepo, $membershipRepo, $config);
+$commentController = new CommentController(
+    $commentRepo,
+    $postRepo,
+    $membershipRepo,
+    $courseRepo,
+    $config
+);
+
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+
+if ($path === '/' && $method === 'GET') {
+    render('home', ['title' => 'EduCollab PHP']);
+    exit;
+}
+
+if ($path === '/register' && $method === 'GET') {
+    $authController->showRegister();
+    exit;
+}
+if ($path === '/register' && $method === 'POST') {
+    $authController->registerHtml();
+    exit;
+}
+if ($path === '/login' && $method === 'GET') {
+    $authController->showLogin();
+    exit;
+}
+if ($path === '/login' && $method === 'POST') {
+    $authController->loginHtml();
+    exit;
+}
+if ($path === '/logout' && $method === 'POST') {
+    $authController->logoutHtml();
+    exit;
+}
+if ($path === '/me' && $method === 'GET') {
+    $authController->meHtml();
+    exit;
+}
+if ($path === '/admin/users' && $method === 'GET') {
+    $authController->listUsersHtml();
+    exit;
+}
+if ($path === '/courses' && $method === 'GET') {
+    $courseController->listHtml();
+    exit;
+}
+if ($path === '/courses/new' && $method === 'GET') {
+    $courseController->showCreateForm();
+    exit;
+}
+if ($path === '/courses' && $method === 'POST') {
+    $courseController->createHtml();
+    exit;
+}
+if (preg_match('#^/courses/(\d+)$#', $path, $matches) && $method === 'GET') {
+    $courseController->getHtml((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/edit$#', $path, $matches) && $method === 'GET') {
+    $courseController->showEditForm((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)$#', $path, $matches) && $method === 'POST') {
+    $courseController->updateHtml((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/delete$#', $path, $matches) && $method === 'POST') {
+    $courseController->deleteHtml((int) $matches[1]);
+    exit;
+}
+
+if (preg_match('#^/courses/(\d+)/members$#', $path, $matches) && $method === 'GET') {
+    $membershipController->listMembersHtml((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/members/new$#', $path, $matches) && $method === 'GET') {
+    $membershipController->showAddForm((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/members$#', $path, $matches) && $method === 'POST') {
+    $membershipController->addMemberHtml((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/members/(\d+)$#', $path, $matches) && $method === 'POST') {
+    $membershipController->updateMemberRoleHtml((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/members/(\d+)/delete$#', $path, $matches) && $method === 'POST') {
+    $membershipController->removeMemberHtml((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if ($path === '/memberships' && $method === 'GET') {
+    $membershipController->myMembershipsHtml();
+    exit;
+}
+
+if (preg_match('#^/courses/(\d+)/posts$#', $path, $matches) && $method === 'GET') {
+    $postController->listHtml((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/posts/new$#', $path, $matches) && $method === 'GET') {
+    $postController->showCreateForm((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/posts$#', $path, $matches) && $method === 'POST') {
+    $postController->createHtml((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/posts/(\d+)$#', $path, $matches) && $method === 'GET') {
+    $postController->getHtml((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/posts/(\d+)/edit$#', $path, $matches) && $method === 'GET') {
+    $postController->showEditForm((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/posts/(\d+)$#', $path, $matches) && $method === 'POST') {
+    $postController->updateHtml((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/posts/(\d+)/delete$#', $path, $matches) && $method === 'POST') {
+    $postController->deleteHtml((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/posts/(\d+)/comments$#', $path, $matches) && $method === 'POST') {
+    $commentController->createHtml((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/posts/(\d+)/comments/(\d+)$#', $path, $matches) && $method === 'POST') {
+    $commentController->updateHtml((int) $matches[1], (int) $matches[2], (int) $matches[3]);
+    exit;
+}
+if (preg_match('#^/courses/(\d+)/posts/(\d+)/comments/(\d+)/delete$#', $path, $matches) && $method === 'POST') {
+    $commentController->deleteHtml((int) $matches[1], (int) $matches[2], (int) $matches[3]);
+    exit;
+}
+
+if ($path === '/api/auth/register' && $method === 'POST') {
+    $authController->registerApi();
+    exit;
+}
+if ($path === '/api/auth/login' && $method === 'POST') {
+    $authController->loginApi();
+    exit;
+}
+if ($path === '/api/auth/logout' && $method === 'POST') {
+    $authController->logoutApi();
+    exit;
+}
+if ($path === '/api/auth/me' && $method === 'GET') {
+    $authController->meApi();
+    exit;
+}
+if ($path === '/api/users' && $method === 'GET') {
+    $authController->listUsersApi();
+    exit;
+}
+
+if ($path === '/api/courses' && $method === 'GET') {
+    $courseController->listApi();
+    exit;
+}
+if ($path === '/api/courses' && $method === 'POST') {
+    $courseController->createApi();
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)$#', $path, $matches) && $method === 'GET') {
+    $courseController->getApi((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)$#', $path, $matches) && $method === 'PUT') {
+    $courseController->updateApi((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)$#', $path, $matches) && $method === 'DELETE') {
+    $courseController->deleteApi((int) $matches[1]);
+    exit;
+}
+
+if (preg_match('#^/api/courses/(\d+)/members$#', $path, $matches) && $method === 'GET') {
+    $membershipController->listMembersApi((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)/members$#', $path, $matches) && $method === 'POST') {
+    $membershipController->addMemberApi((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)/members/(\d+)$#', $path, $matches) && $method === 'PUT') {
+    $membershipController->updateMemberRoleApi((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)/members/(\d+)$#', $path, $matches) && $method === 'DELETE') {
+    $membershipController->removeMemberApi((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if ($path === '/api/memberships' && $method === 'GET') {
+    $membershipController->myMembershipsApi();
+    exit;
+}
+
+if (preg_match('#^/api/courses/(\d+)/posts$#', $path, $matches) && $method === 'GET') {
+    $postController->listApi((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)/posts$#', $path, $matches) && $method === 'POST') {
+    $postController->createApi((int) $matches[1]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)/posts/(\d+)$#', $path, $matches) && $method === 'GET') {
+    $postController->getApi((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)/posts/(\d+)$#', $path, $matches) && $method === 'PUT') {
+    $postController->updateApi((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)/posts/(\d+)$#', $path, $matches) && $method === 'DELETE') {
+    $postController->deleteApi((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)/posts/(\d+)/comments$#', $path, $matches) && $method === 'POST') {
+    $commentController->createApi((int) $matches[1], (int) $matches[2]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)/posts/(\d+)/comments/(\d+)$#', $path, $matches) && $method === 'PUT') {
+    $commentController->updateApi((int) $matches[1], (int) $matches[2], (int) $matches[3]);
+    exit;
+}
+if (preg_match('#^/api/courses/(\d+)/posts/(\d+)/comments/(\d+)$#', $path, $matches) && $method === 'DELETE') {
+    $commentController->deleteApi((int) $matches[1], (int) $matches[2], (int) $matches[3]);
+    exit;
+}
+
+http_response_code(404);
+if (str_starts_with($path, '/api/')) {
+    json_response(['success' => false, 'error' => 'Not found'], 404);
+}
+render('home', ['title' => 'Not Found']);
+```
+
+---
+
+## 你现在只需要检查这一处
+
+最关键就是这几行：
+
+```php
+$membershipController = new MembershipController($membershipRepo, $courseRepo, $userRepo, $config);
+$postController = new PostController($postRepo, $commentRepo, $courseRepo, $membershipRepo, $config);
+$commentController = new CommentController(
+    $commentRepo,
+    $postRepo,
+    $membershipRepo,
+    $courseRepo,
+    $config
+);
+```
+
+尤其是最后这个 `CommentController`。
+
+---
+
+## 改完后重新跑
+
+```bash
+python -m pytest tests\test_api_functional_r3_posts_comments.py -vv -s
+```
+
+如果还报错，把新的报错继续贴出来。

@@ -1,0 +1,44 @@
+{
+  "vulnerability_id": "VULN-005",
+  "vulnerability_type_code": 10,
+  "vulnerability_type": "Session Weakness",
+  "cwe_id": "CWE-321",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.2,
+  "severity_level": "medium",
+  "confidence_score": 78,
+  "confidence_level": "high",
+  "summary": "The application uses a hard-coded default session secret when SESSION_SECRET is not provided. Deployments that keep this default weaken session integrity and enable attackers who know the secret to forge or fixate signed session cookies.",
+  "entry_points": [
+    {
+      "type": "other",
+      "method": "N/A",
+      "route": "process.env.SESSION_SECRET fallback"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app.js",
+      "line_start": 21,
+      "line_end": 29,
+      "function_name": null,
+      "code": "session({\\n  secret: process.env.SESSION_SECRET || 'educollab-dev-secret',\\n  resave: false,\\n  saveUninitialized: false,\\n  cookie: { httpOnly: true }\\n})",
+      "reason": "A fixed fallback secret is embedded in code, so deployments without an environment-provided secret use a predictable signing key."
+    }
+  ],
+  "root_cause_code": 10,
+  "root_cause": "The session signing secret is hard-coded as a default value rather than being required as a deployment-time secret.",
+  "patch_locations": [
+    {
+      "file_path": "app.js",
+      "line_start": 21,
+      "line_end": 30,
+      "function_name": null
+    }
+  ],
+  "repair_plan": "Require SESSION_SECRET to be provided at deployment (fail fast if missing) and remove the hard-coded fallback. Use a high-entropy secret, and consider setting secure cookie attributes (Secure, SameSite) based on deployment environment.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

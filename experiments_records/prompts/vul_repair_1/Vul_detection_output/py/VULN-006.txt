@@ -1,0 +1,73 @@
+{
+"vulnerability_id": "VULN-006",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.6,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "Any course member can edit or delete another member's comment by specifying that comment_id. The application never verifies comment ownership or moderator permission before applying the write.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 598,
+"line_end": 633,
+"function_name": "comment_update / api_comment_update / comment_delete / api_comment_delete",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)")\n@require_login\n@require_course_member\ndef comment_update(course_id, post_id, comment_id):\n    ...\n    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body)\n\[n@app.put](mailto:n@app.put)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)")\n@require_login\n@require_course_member\ndef api_comment_update(course_id, post_id, comment_id):\n    ...\n    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body)\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)/delete")\n@require_login\n@require_course_member\ndef comment_delete(course_id, post_id, comment_id):\n    CommentsRepo(db).delete_comment(course_id, post_id, comment_id)\n\[n@app.delete](mailto:n@app.delete)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)")\n@require_login\n@require_course_member\ndef api_comment_delete(course_id, post_id, comment_id):\n    CommentsRepo(db).delete_comment(course_id, post_id, comment_id)",
+"reason": "Only course membership is checked. The code does not verify that the current user authored the comment or has a moderator/staff role."
+},
+{
+"file_path": "repos/comments_repo.py",
+"line_start": 23,
+"line_end": 31,
+"function_name": "update_comment / delete_comment",
+"code": "def update_comment(self, course_id, post_id, comment_id, body):\n    self.db.execute(\n        "UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?",\n        (body, now_iso(), course_id, post_id, comment_id),\n    )\n    self.db.commit()\n\ndef delete_comment(self, course_id, post_id, comment_id):\n    self.db.execute("DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?", (course_id, post_id, comment_id))",
+"reason": "The repository uses only the comment identifier and parent resource identifiers, without any author_id constraint."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Comment mutation logic omits ownership enforcement and assumes any member of the course may modify or delete any comment within that course.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 598,
+"line_end": 633,
+"function_name": "comment_update / api_comment_update / comment_delete / api_comment_delete"
+},
+{
+"file_path": "repos/comments_repo.py",
+"line_start": 23,
+"line_end": 31,
+"function_name": "update_comment / delete_comment"
+}
+],
+"repair_plan": "Fetch the target comment before mutating it, verify that the caller is the comment author or holds an explicitly allowed staff role for the course, and scope update and delete queries to the authorized owner or moderator context. Deny same-course peer-to-peer modification by default.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

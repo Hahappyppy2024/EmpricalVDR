@@ -1,0 +1,76 @@
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 9,
+  "vulnerability_type": "Authentication Flaw",
+  "cwe_id": "CWE-798",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 9.1,
+  "severity_level": "critical",
+  "confidence_score": 99,
+  "confidence_level": "high",
+  "summary": "The application automatically creates a privileged admin account with the predictable credentials admin/admin123 during bootstrap. Any external user who knows or guesses these default credentials can authenticate as the administrator and access privileged user-management and course-management functionality.",
+  "entry_points": [
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/api/auth/login"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/login"
+    },
+    {
+      "type": "background trigger",
+      "method": "INIT",
+      "route": "application bootstrap"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app.py",
+      "line_start": 14,
+      "line_end": 15,
+      "function_name": "create_app",
+      "code": "init_db(app)\nseed_admin(app)",
+      "reason": "The application invokes the admin seeding routine automatically during normal startup."
+    },
+    {
+      "file_path": "models/db.py",
+      "line_start": 50,
+      "line_end": 59,
+      "function_name": "seed_admin",
+      "code": "def seed_admin(app):\n    with app.app_context():\n        db = get_db()\n        existing = db.execute('SELECT user_id FROM users WHERE username = ?', ('admin',)).fetchone()\n        if existing is None:\n            db.execute(\n                'INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)',\n                ('admin', generate_password_hash('admin123'), 'Default Admin')\n            )\n            db.commit()",
+      "reason": "The bootstrap logic inserts a fixed administrator username and a predictable password if the account does not already exist."
+    },
+    {
+      "file_path": "controllers/auth_controller.py",
+      "line_start": 84,
+      "line_end": 95,
+      "function_name": "api_login",
+      "code": "@auth_bp.route('/api/auth/login', methods=['POST'])\ndef api_login():\n    data = request.get_json(silent=True) or {}\n    username = str(data.get('username', '')).strip()\n    password = str(data.get('password', ''))\n    user = get_user_by_username(username)\n\n    if user is None or not check_password_hash(user['password_hash'], password):\n        return jsonify({'success': False, 'error': 'invalid_credentials'}), 401\n\n    login_user(user)\n    return jsonify({'success': True, 'user': _user_to_dict(user)})",
+      "reason": "The standard login path accepts any valid credentials, so the auto-seeded default admin credentials are directly exploitable."
+    }
+  ],
+  "root_cause_code": 10,
+  "root_cause": "The application ships with a built-in privileged account and predictable credentials, then provisions that account automatically during bootstrap instead of requiring secure first-run initialization.",
+  "patch_locations": [
+    {
+      "file_path": "app.py",
+      "line_start": 14,
+      "line_end": 15,
+      "function_name": "create_app"
+    },
+    {
+      "file_path": "models/db.py",
+      "line_start": 50,
+      "line_end": 59,
+      "function_name": "seed_admin"
+    }
+  ],
+  "repair_plan": "Remove the hard-coded administrator credentials from source code. Replace bootstrap seeding with an explicit one-time initialization flow that requires a deployment-provided secret or environment-controlled initial password, and do not create a privileged account automatically on every application startup.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

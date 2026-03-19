@@ -1,0 +1,834 @@
+可以，下面把这次 repair 涉及的**全部修改后文件内容**完整贴出来。
+同时也放一个单独的文本汇总文件，避免 zip 下载问题：
+
+[repair_files_bundle.md](sandbox:/mnt/data/repair_files_bundle.md)
+
+---
+
+## `app.js`
+
+```javascript
+const path = require('path');
+const crypto = require('crypto');
+const express = require('express');
+const session = require('express-session');
+
+const { initDb, seedAdmin } = require('./scripts/initDb');
+const webRoutes = require('./src/routes/web');
+const apiRoutes = require('./src/routes/api');
+const { attachCurrentUser } = require('./src/middleware/auth');
+
+initDb();
+seedAdmin();
+
+const app = express();
+const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'src', 'views'));
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+app.use(
+  session({
+    secret: sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax'
+    }
+  })
+);
+
+app.use(attachCurrentUser);
+
+app.use((req, res, next) => {
+  res.locals.currentUser = req.currentUser || null;
+  next();
+});
+
+app.use('/', webRoutes);
+app.use('/api', apiRoutes);
+
+app.use((req, res) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ success: false, error: 'Not found' });
+  }
+  return res.status(404).send('Not found');
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`EduCollab running on http://localhost:${PORT}`);
+});
+```
+
+---
+
+## `scripts/initDb.js`
+
+```javascript
+const { db } = require('../src/db');
+const userRepository = require('../src/repositories/userRepository');
+
+function ensureUserAdminColumn() {
+  const columns = db.prepare(`PRAGMA table_info(users)`).all();
+  const hasIsAdmin = columns.some((column) => column.name === 'is_admin');
+
+  if (!hasIsAdmin) {
+    db.exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`);
+  }
+}
+
+function initDb() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      is_admin INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS courses (
+      course_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      created_by INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (created_by) REFERENCES users(user_id)
+    );
+  `);
+
+  ensureUserAdminColumn();
+  db.prepare(`UPDATE users SET is_admin = 1 WHERE username = ?`).run('admin');
+}
+
+function seedAdmin() {
+  const initialAdminPassword = process.env.INITIAL_ADMIN_PASSWORD;
+  if (!initialAdminPassword) {
+    return;
+  }
+
+  const username = process.env.INITIAL_ADMIN_USERNAME || 'admin';
+  const displayName = process.env.INITIAL_ADMIN_DISPLAY_NAME || 'Admin';
+  const existing = userRepository.findByUsername(username);
+
+  if (!existing) {
+    userRepository.createUser({
+      username,
+      password: initialAdminPassword,
+      display_name: displayName,
+      is_admin: 1
+    });
+    return;
+  }
+
+  db.prepare(`UPDATE users SET is_admin = 1 WHERE user_id = ?`).run(existing.user_id);
+}
+
+if (require.main === module) {
+  initDb();
+  seedAdmin();
+  console.log('Database initialized.');
+}
+
+module.exports = {
+  initDb,
+  seedAdmin
+};
+```
+
+---
+
+## `src/controllers/authController.js`
+
+```javascript
+const userRepository = require('../repositories/userRepository');
+
+function regenerateSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function establishAuthenticatedSession(req, userId) {
+  await regenerateSession(req);
+  req.session.userId = userId;
+}
+
+function showRegister(req, res) {
+  res.render('register', { error: null });
+}
+
+async function register(req, res) {
+  const { username, password, display_name } = req.body;
+
+  if (!username || !password || !display_name) {
+    return res.status(400).render('register', { error: 'All fields are required.' });
+  }
+
+  const existing = userRepository.findByUsername(username);
+  if (existing) {
+    return res.status(400).render('register', { error: 'Username already exists.' });
+  }
+
+  const user = userRepository.createUser({ username, password, display_name });
+  await establishAuthenticatedSession(req, user.user_id);
+  return res.redirect('/me');
+}
+
+async function apiRegister(req, res) {
+  const { username, password, display_name } = req.body;
+
+  if (!username || !password || !display_name) {
+    return res.status(400).json({ success: false, error: 'username, password, and display_name are required' });
+  }
+
+  const existing = userRepository.findByUsername(username);
+  if (existing) {
+    return res.status(400).json({ success: false, error: 'Username already exists' });
+  }
+
+  const user = userRepository.createUser({ username, password, display_name });
+  await establishAuthenticatedSession(req, user.user_id);
+  return res.status(201).json({ success: true, user });
+}
+
+function showLogin(req, res) {
+  res.render('login', { error: null });
+}
+
+async function login(req, res) {
+  const { username, password } = req.body;
+  const authUser = userRepository.findAuthByUsername(username);
+
+  if (!authUser || !userRepository.verifyPassword(authUser, password)) {
+    return res.status(401).render('login', { error: 'Invalid credentials.' });
+  }
+
+  await establishAuthenticatedSession(req, authUser.user_id);
+  return res.redirect('/me');
+}
+
+async function apiLogin(req, res) {
+  const { username, password } = req.body;
+  const authUser = userRepository.findAuthByUsername(username);
+
+  if (!authUser || !userRepository.verifyPassword(authUser, password)) {
+    return res.status(401).json({ success: false, error: 'Invalid credentials' });
+  }
+
+  await establishAuthenticatedSession(req, authUser.user_id);
+  const user = userRepository.findById(authUser.user_id);
+  return res.json({ success: true, user });
+}
+
+function logout(req, res) {
+  req.session.destroy(() => {
+    res.redirect('/login');
+  });
+}
+
+function apiLogout(req, res) {
+  req.session.destroy(() => {
+    res.json({ success: true });
+  });
+}
+
+function me(req, res) {
+  if (!req.currentUser) {
+    return res.redirect('/login');
+  }
+  return res.render('me', { user: req.currentUser });
+}
+
+function apiMe(req, res) {
+  if (!req.currentUser) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  return res.json({ success: true, user: req.currentUser });
+}
+
+module.exports = {
+  showRegister,
+  register,
+  apiRegister,
+  showLogin,
+  login,
+  apiLogin,
+  logout,
+  apiLogout,
+  me,
+  apiMe
+};
+```
+
+---
+
+## `src/controllers/courseController.js`
+
+```javascript
+const courseRepository = require('../repositories/courseRepository');
+
+function showNewCourse(req, res) {
+  res.render('course_new', { error: null });
+}
+
+function createCourse(req, res) {
+  const { title, description } = req.body;
+
+  if (!title) {
+    return res.status(400).render('course_new', { error: 'Title is required.' });
+  }
+
+  const course = courseRepository.createCourse({
+    title,
+    description: description || '',
+    created_by: req.currentUser.user_id
+  });
+
+  return res.redirect(`/courses/${course.course_id}`);
+}
+
+function apiCreateCourse(req, res) {
+  const { title, description } = req.body;
+
+  if (!title) {
+    return res.status(400).json({ success: false, error: 'title is required' });
+  }
+
+  const course = courseRepository.createCourse({
+    title,
+    description: description || '',
+    created_by: req.currentUser.user_id
+  });
+
+  return res.status(201).json({ success: true, course });
+}
+
+function listCourses(req, res) {
+  const courses = courseRepository.listCourses();
+  res.render('courses_list', { courses });
+}
+
+function apiListCourses(req, res) {
+  const courses = courseRepository.listCourses();
+  res.json({ success: true, courses });
+}
+
+function getCourse(req, res) {
+  const course = courseRepository.findById(req.params.course_id);
+  if (!course) {
+    return res.status(404).send('Course not found');
+  }
+  res.render('course_show', { course });
+}
+
+function apiGetCourse(req, res) {
+  const course = courseRepository.findById(req.params.course_id);
+  if (!course) {
+    return res.status(404).json({ success: false, error: 'Course not found' });
+  }
+  res.json({ success: true, course });
+}
+
+function canManageCourse(user, course) {
+  return Boolean(user && course && (user.is_admin || user.user_id === course.created_by));
+}
+
+function denyCourseAccess(req, res) {
+  if (req.path.startsWith('/api/')) {
+    return res.status(403).json({ success: false, error: 'Forbidden' });
+  }
+  return res.status(403).send('Forbidden');
+}
+
+function showEditCourse(req, res) {
+  const course = courseRepository.findById(req.params.course_id);
+  if (!course) {
+    return res.status(404).send('Course not found');
+  }
+  if (!canManageCourse(req.currentUser, course)) {
+    return res.status(403).send('Forbidden');
+  }
+  res.render('course_edit', { course, error: null });
+}
+
+function updateCourse(req, res) {
+  const { title, description } = req.body;
+  const existing = courseRepository.findById(req.params.course_id);
+
+  if (!existing) {
+    return res.status(404).send('Course not found');
+  }
+  if (!canManageCourse(req.currentUser, existing)) {
+    return denyCourseAccess(req, res);
+  }
+
+  if (!title) {
+    return res.status(400).render('course_edit', {
+      course: existing,
+      error: 'Title is required.'
+    });
+  }
+
+  courseRepository.updateCourse(req.params.course_id, {
+    title,
+    description: description || ''
+  });
+
+  return res.redirect(`/courses/${req.params.course_id}`);
+}
+
+function apiUpdateCourse(req, res) {
+  const { title, description } = req.body;
+  const existing = courseRepository.findById(req.params.course_id);
+
+  if (!existing) {
+    return res.status(404).json({ success: false, error: 'Course not found' });
+  }
+  if (!canManageCourse(req.currentUser, existing)) {
+    return denyCourseAccess(req, res);
+  }
+
+  if (!title) {
+    return res.status(400).json({ success: false, error: 'title is required' });
+  }
+
+  const course = courseRepository.updateCourse(req.params.course_id, {
+    title,
+    description: description || ''
+  });
+
+  return res.json({ success: true, course });
+}
+
+function deleteCourse(req, res) {
+  const existing = courseRepository.findById(req.params.course_id);
+  if (!existing) {
+    return res.status(404).send('Course not found');
+  }
+  if (!canManageCourse(req.currentUser, existing)) {
+    return denyCourseAccess(req, res);
+  }
+
+  courseRepository.deleteCourse(req.params.course_id);
+  return res.redirect('/courses');
+}
+
+function apiDeleteCourse(req, res) {
+  const existing = courseRepository.findById(req.params.course_id);
+  if (!existing) {
+    return res.status(404).json({ success: false, error: 'Course not found' });
+  }
+  if (!canManageCourse(req.currentUser, existing)) {
+    return denyCourseAccess(req, res);
+  }
+
+  courseRepository.deleteCourse(req.params.course_id);
+  return res.json({ success: true });
+}
+
+module.exports = {
+  showNewCourse,
+  createCourse,
+  apiCreateCourse,
+  listCourses,
+  apiListCourses,
+  getCourse,
+  apiGetCourse,
+  showEditCourse,
+  updateCourse,
+  apiUpdateCourse,
+  deleteCourse,
+  apiDeleteCourse
+};
+```
+
+---
+
+## `src/middleware/auth.js`
+
+```javascript
+const userRepository = require('../repositories/userRepository');
+
+function attachCurrentUser(req, res, next) {
+  const userId = req.session.userId;
+  if (userId) {
+    req.currentUser = userRepository.findById(userId) || null;
+  } else {
+    req.currentUser = null;
+  }
+  next();
+}
+
+function requireAuthPage(req, res, next) {
+  if (!req.currentUser) {
+    return res.redirect('/login');
+  }
+  next();
+}
+
+function requireAuthApi(req, res, next) {
+  if (!req.currentUser) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  next();
+}
+
+function requireAdminPage(req, res, next) {
+  if (!req.currentUser || !req.currentUser.is_admin) {
+    return res.status(403).send('Forbidden');
+  }
+  next();
+}
+
+function requireAdminApi(req, res, next) {
+  if (!req.currentUser || !req.currentUser.is_admin) {
+    return res.status(403).json({ success: false, error: 'Admin access required' });
+  }
+  next();
+}
+
+module.exports = {
+  attachCurrentUser,
+  requireAuthPage,
+  requireAuthApi,
+  requireAdminPage,
+  requireAdminApi
+};
+```
+
+---
+
+## `src/middleware/csrf.js`
+
+```javascript
+const crypto = require('crypto');
+
+function ensureCsrfToken(req, res, next) {
+  if (!req.session.csrfToken) {
+    req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+  }
+  res.locals.csrfToken = req.session.csrfToken;
+  next();
+}
+
+function requireCsrfToken(req, res, next) {
+  const token = req.body && req.body._csrf;
+  if (!req.session || !req.session.csrfToken || !token || token !== req.session.csrfToken) {
+    return res.status(403).send('Forbidden');
+  }
+  next();
+}
+
+module.exports = {
+  ensureCsrfToken,
+  requireCsrfToken
+};
+```
+
+---
+
+## `src/repositories/userRepository.js`
+
+```javascript
+const bcrypt = require('bcryptjs');
+const { db } = require('../db');
+
+function createUser({ username, password, display_name, is_admin = 0 }) {
+  const password_hash = bcrypt.hashSync(password, 10);
+  const stmt = db.prepare(`
+    INSERT INTO users (username, password_hash, display_name, is_admin)
+    VALUES (?, ?, ?, ?)
+  `);
+  const result = stmt.run(username, password_hash, display_name, is_admin ? 1 : 0);
+  return findById(result.lastInsertRowid);
+}
+
+function findByUsername(username) {
+  return db.prepare(`SELECT * FROM users WHERE username = ?`).get(username);
+}
+
+function findById(userId) {
+  const user = db.prepare(`
+    SELECT user_id, username, display_name, created_at, is_admin
+    FROM users
+    WHERE user_id = ?
+  `).get(userId);
+
+  if (!user) {
+    return user;
+  }
+
+  return {
+    ...user,
+    is_admin: Boolean(user.is_admin)
+  };
+}
+
+function findAuthByUsername(username) {
+  return db.prepare(`SELECT * FROM users WHERE username = ?`).get(username);
+}
+
+function verifyPassword(user, plainPassword) {
+  if (!user) return false;
+  return bcrypt.compareSync(plainPassword, user.password_hash);
+}
+
+function listUsers() {
+  return db.prepare(`
+    SELECT user_id, username, display_name, created_at, is_admin
+    FROM users
+    ORDER BY user_id ASC
+  `).all().map((user) => ({
+    ...user,
+    is_admin: Boolean(user.is_admin)
+  }));
+}
+
+module.exports = {
+  createUser,
+  findByUsername,
+  findById,
+  findAuthByUsername,
+  verifyPassword,
+  listUsers
+};
+```
+
+---
+
+## `src/routes/web.js`
+
+```javascript
+const express = require('express');
+const authController = require('../controllers/authController');
+const userController = require('../controllers/userController');
+const courseController = require('../controllers/courseController');
+const { ensureCsrfToken, requireCsrfToken } = require('../middleware/csrf');
+const {
+  requireAuthPage,
+  requireAdminPage
+} = require('../middleware/auth');
+
+const router = express.Router();
+
+router.use(ensureCsrfToken);
+
+router.get('/', (req, res) => {
+  res.render('index');
+});
+
+router.get('/register', authController.showRegister);
+router.post('/register', requireCsrfToken, authController.register);
+
+router.get('/login', authController.showLogin);
+router.post('/login', requireCsrfToken, authController.login);
+
+router.post('/logout', requireCsrfToken, authController.logout);
+router.get('/me', authController.me);
+
+router.get('/admin/users', requireAuthPage, requireAdminPage, userController.listUsersPage);
+
+router.get('/courses/new', requireAuthPage, courseController.showNewCourse);
+router.post('/courses', requireAuthPage, requireCsrfToken, courseController.createCourse);
+router.get('/courses', requireAuthPage, courseController.listCourses);
+router.get('/courses/:course_id', requireAuthPage, courseController.getCourse);
+router.get('/courses/:course_id/edit', requireAuthPage, courseController.showEditCourse);
+router.post('/courses/:course_id', requireAuthPage, requireCsrfToken, courseController.updateCourse);
+router.post('/courses/:course_id/delete', requireAuthPage, requireCsrfToken, courseController.deleteCourse);
+
+module.exports = router;
+```
+
+---
+
+## `src/views/course_edit.ejs`
+
+```ejs
+<%- include('partials/header') %>
+
+<h1>Edit Course</h1>
+
+<% if (error) { %>
+  <p style="color:red;"><%= error %></p>
+<% } %>
+
+<form method="post" action="/courses/<%= course.course_id %>">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <div>
+    <label>Title</label>
+    <input type="text" name="title" value="<%= course.title %>" required>
+  </div>
+  <div>
+    <label>Description</label>
+    <textarea name="description"><%= course.description %></textarea>
+  </div>
+  <button type="submit">Save</button>
+</form>
+
+<%- include('partials/footer') %>
+```
+
+---
+
+## `src/views/course_new.ejs`
+
+```ejs
+<%- include('partials/header') %>
+
+<h1>Create Course</h1>
+
+<% if (error) { %>
+  <p style="color:red;"><%= error %></p>
+<% } %>
+
+<form method="post" action="/courses">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <div>
+    <label>Title</label>
+    <input type="text" name="title" required>
+  </div>
+  <div>
+    <label>Description</label>
+    <textarea name="description"></textarea>
+  </div>
+  <button type="submit">Create</button>
+</form>
+
+<%- include('partials/footer') %>
+```
+
+---
+
+## `src/views/course_show.ejs`
+
+```ejs
+<%- include('partials/header') %>
+
+<h1><%= course.title %></h1>
+
+<p><strong>Course ID:</strong> <%= course.course_id %></p>
+<p><strong>Description:</strong> <%= course.description %></p>
+<p><strong>Created by:</strong> <%= course.creator_display_name %> (@<%= course.creator_username %>)</p>
+<p><strong>Created at:</strong> <%= course.created_at %></p>
+
+<p>
+  <a href="/courses/<%= course.course_id %>/edit">Edit</a>
+</p>
+
+<form method="post" action="/courses/<%= course.course_id %>/delete">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <button type="submit">Delete</button>
+</form>
+
+<%- include('partials/footer') %>
+```
+
+---
+
+## `src/views/login.ejs`
+
+```ejs
+<%- include('partials/header') %>
+
+<h1>Login</h1>
+
+<% if (error) { %>
+  <p style="color:red;"><%= error %></p>
+<% } %>
+
+<form method="post" action="/login">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <div>
+    <label>Username</label>
+    <input type="text" name="username" required>
+  </div>
+  <div>
+    <label>Password</label>
+    <input type="password" name="password" required>
+  </div>
+  <button type="submit">Login</button>
+</form>
+
+<%- include('partials/footer') %>
+```
+
+---
+
+## `src/views/partials/header.ejs`
+
+```ejs
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>EduCollab</title>
+</head>
+<body>
+  <nav>
+    <a href="/">Home</a>
+    <% if (currentUser) { %>
+      | <a href="/me">Me</a>
+      | <a href="/courses">Courses</a>
+      | <a href="/courses/new">New Course</a>
+      <% if (currentUser.is_admin) { %>
+        | <a href="/admin/users">Users</a>
+      <% } %>
+      | <form action="/logout" method="post" style="display:inline;">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <button type="submit">Logout</button>
+        </form>
+    <% } else { %>
+      | <a href="/register">Register</a>
+      | <a href="/login">Login</a>
+    <% } %>
+  </nav>
+  <hr>
+```
+
+---
+
+## `src/views/register.ejs`
+
+```ejs
+<%- include('partials/header') %>
+
+<h1>Register</h1>
+
+<% if (error) { %>
+  <p style="color:red;"><%= error %></p>
+<% } %>
+
+<form method="post" action="/register">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <div>
+    <label>Username</label>
+    <input type="text" name="username" required>
+  </div>
+  <div>
+    <label>Password</label>
+    <input type="password" name="password" required>
+  </div>
+  <div>
+    <label>Display Name</label>
+    <input type="text" name="display_name" required>
+  </div>
+  <button type="submit">Register</button>
+</form>
+
+<%- include('partials/footer') %>
+```
+
+如果你愿意，我下一条可以继续直接给你一个“按文件替换清单”，把每个文件对应到修复的是哪一个 VULN，方便你手工改。

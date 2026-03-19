@@ -1,0 +1,679 @@
+
+You are a senior software engineer fixing vulnerabilities in a web application after a previous repair attempt.
+
+Repository input
+
+* The full project codebase is provided as a ZIP archive.
+* This is a requirement-level repair task on the current repository state after implementing the current requirement increment.
+* Treat the repository as the full runnable codebase produced for the current requirement stage.
+* Focus on vulnerabilities reported for the current requirement stage.
+* Prior functionality from earlier requirements is in scope only if it remains reachable in the current repository state and is materially relevant to the reported vulnerabilities for this requirement stage.
+* Assume you can read and modify files inside the ZIP repository.
+* Do NOT ask for files outside the ZIP.
+
+Task
+
+* Implement code changes guided by the vulnerability detection (VD) report below.
+* This is a second-round repair task after a previous repair attempt did not fully succeed.
+* Use the failed functional test results and security test results as additional repair guidance.
+* Apply minimal, correct patches while preserving intended functionality of the current requirement stage.
+
+Repair objective
+
+* Fix the vulnerabilities that remain unresolved after the previous repair attempt.
+* Preserve the original vulnerability identity from the VD report.
+* Treat the VD report as the authoritative baseline for what must be fixed.
+* Focus only on vulnerabilities reported for the current requirement stage.
+* Use the failed functional test results to identify repair-induced regressions or broken requirement-stage functionality that must be restored.
+* Use the security test results to identify which exploit paths still remain effective or which intended mitigations did not hold.
+
+Hard constraints
+
+* Keep the project runnable.
+* Do NOT rename routes, database tables, or response JSON fields.
+* Do NOT change authentication/session key names or role names.
+* No new dependencies. Avoid refactors unrelated to the fixes.
+* Only change files necessary for the fixes.
+* Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or docs.
+
+Primary verification goal (must satisfy)
+
+* The full functional test suite for the current repository state must PASS after the patch (no regressions).
+
+Secondary verification goal
+
+* The targeted security exploit tests for the reported vulnerabilities should no longer succeed after the patch.
+
+Second-round repair rules
+
+1. Treat the Vulnerability Detection Report (VD) as the authoritative security baseline.
+2. Preserve the vulnerability identities from the VD report. Do not redefine the issues.
+3. Focus on vulnerabilities that remain unresolved, partially fixed, incorrectly fixed, bypassable, or that caused closely related repair-induced regressions.
+4. Limit analysis and repair to the vulnerabilities reported for the current requirement stage; do not broaden the task into whole-project rediscovery or unrelated hardening.
+5. Use the failed functional test results to detect where the previous repair broke intended requirement-stage behavior or contract expectations.
+6. Use the security test results to detect where the previous repair failed to eliminate the exploit path.
+7. Prefer minimal corrective edits over broad rewrites.
+8. Fix the actual remaining root cause, not just the visible symptom.
+9. If the previous repair introduced a regression while trying to fix a vulnerability, repair both:
+
+   * the original unresolved security issue
+   * the regression introduced by the failed fix
+10. Enforce authorization, ownership, relationship, and state checks server-side.
+11. Keep behavior and response formats consistent with the existing application unless a security fix requires a narrow change.
+12. Where applicable, scope reads/writes to the authorized parent resource and authorized principal context.
+13. Do not remove functionality merely to make tests pass.
+14. Do not change tests.
+15. Earlier-stage functionality should be considered only when it is still reachable in the current repository state and materially relevant to fixing the current requirement-stage vulnerabilities.
+
+How to use the additional iteration-2 inputs
+
+* Failed functional test results:
+  Use these to identify which previous changes broke valid workflows, contracts, or route semantics in the current requirement stage. Restore intended behavior without reopening the reported vulnerabilities.
+* Security test results:
+  Use these to identify which exploit paths are still reachable, which validations are incomplete, and which repair paths remain bypassable.
+* If there is a conflict between a previous repair attempt and the repository’s intended behavior, preserve intended requirement-stage behavior while still fixing the vulnerability correctly.
+* If a previous repair changed an endpoint contract and functional tests now fail, restore compatibility unless the VD report explicitly requires a contract-breaking security change.
+
+Authoritative input: Vulnerability Detection Report (VD)
+[
+{
+"vulnerability_id": "VULN-002",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 10,
+"vulnerability_type": "Session Weakness",
+"cwe_id": "CWE-321",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.8,
+"severity_level": "high",
+"confidence_score": 84,
+"confidence_level": "high",
+"summary": "The previous repair removed the literal hard-coded Flask SECRET_KEY from source, but authentication for the current requirement stage still relies entirely on a client-side signed session cookie that directly carries current_user_id. Anyone who can obtain or reuse the active signing key can still forge a session and impersonate another user, including the seeded administrator.",
+"entry_points": [
+{
+"type": "other",
+"method": "COOKIE",
+"route": "Flask session cookie"
+},
+{
+"type": "background trigger",
+"method": "INIT",
+"route": "application bootstrap"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 13,
+"line_end": 17,
+"function_name": "_load_secret_key",
+"code": "def _load_secret_key():\n    configured_secret = os.environ.get('EDUCOLLAB_SECRET_KEY', '').strip()\n    if configured_secret and configured_secret != 'educollab-dev-secret-key':\n        return configured_secret\n    return secrets.token_hex(32)",
+"reason": "The repair changed secret loading but does not refuse startup when no deployment-managed secret is configured, leaving session integrity dependent on whichever runtime signing key the process happens to use rather than enforcing the stronger deployment boundary required by the original repair plan."
+},
+{
+"file_path": "utils/auth.py",
+"line_start": 14,
+"line_end": 25,
+"function_name": "get_current_user / login_user",
+"code": "def get_current_user():\n    user_id = session.get(SESSION_USER_KEY)\n    if not user_id:\n        return None\n    return get_user_by_id(user_id)\n\n\ndef login_user(user):\n    existing_csrf_token = session.get(CSRF_TOKEN_KEY)\n    session.clear()\n    session[SESSION_USER_KEY] = user['user_id']\n    session[CSRF_TOKEN_KEY] = existing_csrf_token or secrets.token_urlsafe(32)",
+"reason": "The application still derives the authenticated identity directly from current_user_id stored in the Flask session cookie. Clearing the session on login/logout does not change the fact that a correctly signed forged cookie still controls the effective logged-in identity."
+}
+],
+"root_cause_code": 8,
+"root_cause": "The repair changed secret sourcing but did not remove the unsafe design in which authentication trusts client-side session state containing current_user_id as the sole identity assertion. The bootstrap path also fails to enforce a required deployment-managed secret and instead silently falls back to a generated process-local key.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 13,
+"line_end": 23,
+"function_name": "_load_secret_key / create_app"
+},
+{
+"file_path": "utils/auth.py",
+"line_start": 14,
+"line_end": 25,
+"function_name": "get_current_user / login_user"
+}
+],
+"repair_plan": "Require a deployment-provided strong SECRET_KEY at startup and fail initialization when it is missing, empty, or set to a known weak/default value. In addition, stop treating current_user_id in the signed client cookie as the only trusted authentication state: bind login state to a server-side session record or equivalent server-trusted session material, rotate session identifiers on login, and invalidate previously issued sessions when the signing configuration changes.",
+"repair_failure_root_cause": "The previous repair focused on replacing the literal constant secret but did not fully fix the original vulnerability boundary. It left authentication decisions bound to a forgeable signed client cookie and did not enforce the repair-plan requirement to refuse insecure or unmanaged secret configuration at bootstrap.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+}
+]
+
+Additional input: Previous repair patch / summary
+1. Unified diff patch (git apply compatible)
+
+```diff
+--- a/app.py
++++ b/app.py
+@@ -1,15 +1,30 @@
++import os
++import secrets
++
+ from flask import Flask
+ 
+ from controllers.auth_controller import auth_bp
+ from controllers.course_controller import course_bp
+ from controllers.page_controller import page_bp
+ from models.db import init_db, seed_admin
++from utils.auth import get_csrf_token
++
++
++def _load_secret_key():
++    configured_secret = os.environ.get('EDUCOLLAB_SECRET_KEY', '').strip()
++    if configured_secret and configured_secret != 'educollab-dev-secret-key':
++        return configured_secret
++    return secrets.token_hex(32)
+ 
+ 
+ def create_app():
+     app = Flask(__name__)
+-    app.config['SECRET_KEY'] = 'educollab-dev-secret-key'
++    app.config['SECRET_KEY'] = _load_secret_key()
+     app.config['DATABASE'] = 'data/app.db'
++
++    @app.context_processor
++    def inject_template_security_helpers():
++        return {'csrf_token': get_csrf_token}
+ 
+     init_db(app)
+     seed_admin(app)
+--- a/utils/auth.py
++++ b/utils/auth.py
+@@ -1,11 +1,14 @@
++import secrets
+ from functools import wraps
+ 
+-from flask import jsonify, redirect, request, session, url_for
++from flask import abort, current_app, jsonify, redirect, request, session, url_for
+ 
+ from models.user_repo import get_user_by_id
+ 
+ 
+ SESSION_USER_KEY = 'current_user_id'
++CSRF_TOKEN_KEY = '_csrf_token'
++ADMIN_USERNAME = 'admin'
+ 
+ 
+ def get_current_user():
+@@ -16,15 +19,54 @@
+ 
+ 
+ def login_user(user):
++    existing_csrf_token = session.get(CSRF_TOKEN_KEY)
++    session.clear()
+     session[SESSION_USER_KEY] = user['user_id']
++    session[CSRF_TOKEN_KEY] = existing_csrf_token or secrets.token_urlsafe(32)
+ 
+ 
+ def logout_user():
+-    session.pop(SESSION_USER_KEY, None)
++    session.clear()
+ 
+ 
+ def is_api_request():
+     return request.path.startswith('/api/')
++
++
++def is_admin_user(user=None):
++    current_user = user or get_current_user()
++    return current_user is not None and current_user['username'] == ADMIN_USERNAME
++
++
++def can_manage_course(course, user=None):
++    current_user = user or get_current_user()
++    if current_user is None or course is None:
++        return False
++    return is_admin_user(current_user) or current_user['user_id'] == course['created_by']
++
++
++def get_csrf_token():
++    token = session.get(CSRF_TOKEN_KEY)
++    if not token:
++        token = secrets.token_urlsafe(32)
++        session[CSRF_TOKEN_KEY] = token
++    return token
++
++
++def validate_csrf():
++    token = request.form.get('csrf_token', '')
++    expected = session.get(CSRF_TOKEN_KEY, '')
++    return bool(token and expected and secrets.compare_digest(token, expected))
++
++
++def csrf_protect(view_func):
++    @wraps(view_func)
++    def wrapped(*args, **kwargs):
++        if not validate_csrf():
++            abort(403)
++        return view_func(*args, **kwargs)
++
++    return wrapped
+ 
+ 
+ def login_required(view_func):
+@@ -38,3 +80,16 @@
+         return view_func(*args, **kwargs)
+ 
+     return wrapped
++
++
++def admin_required(view_func):
++    @wraps(view_func)
++    @login_required
++    def wrapped(*args, **kwargs):
++        if not is_admin_user():
++            if is_api_request():
++                return jsonify({'success': False, 'error': 'forbidden'}), 403
++            return current_app.response_class('Forbidden', status=403)
++        return view_func(*args, **kwargs)
++
++    return wrapped
+--- a/controllers/auth_controller.py
++++ b/controllers/auth_controller.py
+@@ -4,7 +4,7 @@
+ from werkzeug.security import check_password_hash, generate_password_hash
+ 
+ from models.user_repo import create_user, get_user_by_username, list_users
+-from utils.auth import get_current_user, login_required, login_user, logout_user
++from utils.auth import admin_required, csrf_protect, get_current_user, login_required, login_user, logout_user
+ 
+ 
+ auth_bp = Blueprint('auth', __name__)
+@@ -27,6 +27,7 @@
+ 
+ 
+ @auth_bp.route('/register', methods=['POST'])
++@csrf_protect
+ def register_submit():
+     username = request.form.get('username', '').strip()
+     password = request.form.get('password', '')
+@@ -69,6 +70,7 @@
+ 
+ 
+ @auth_bp.route('/login', methods=['POST'])
++@csrf_protect
+ def login_submit():
+     username = request.form.get('username', '').strip()
+     password = request.form.get('password', '')
+@@ -96,6 +98,8 @@
+ 
+ 
+ @auth_bp.route('/logout', methods=['POST'])
++@login_required
++@csrf_protect
+ def logout_submit():
+     logout_user()
+     return redirect(url_for('page.home'))
+@@ -120,13 +124,13 @@
+ 
+ 
+ @auth_bp.route('/admin/users', methods=['GET'])
+-@login_required
++@admin_required
+ def users_page():
+     return render_template('admin/users.html', users=list_users(), current_user=get_current_user())
+ 
+ 
+ @auth_bp.route('/api/users', methods=['GET'])
+-@login_required
++@admin_required
+ def api_users():
+     users = [_user_to_dict(user) for user in list_users()]
+     return jsonify({'success': True, 'users': users})
+--- a/controllers/course_controller.py
++++ b/controllers/course_controller.py
+@@ -1,7 +1,7 @@
+-from flask import Blueprint, jsonify, redirect, render_template, request, url_for
++from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
+ 
+ from models.course_repo import create_course, delete_course, get_course_by_id, list_courses, update_course
+-from utils.auth import get_current_user, login_required
++from utils.auth import can_manage_course, csrf_protect, get_current_user, login_required
+ 
+ 
+ course_bp = Blueprint('courses', __name__)
+@@ -20,6 +20,10 @@
+     }
+ 
+ 
++def _forbidden_page():
++    return current_app.response_class('Forbidden', status=403)
++
++
+ @course_bp.route('/courses/new', methods=['GET'])
+ @login_required
+ def new_course_page():
+@@ -28,6 +32,7 @@
+ 
+ @course_bp.route('/courses', methods=['POST'])
+ @login_required
++@csrf_protect
+ def create_course_submit():
+     title = request.form.get('title', '').strip()
+     description = request.form.get('description', '').strip()
+@@ -82,20 +87,25 @@
+     course = get_course_by_id(course_id)
+     if course is None:
+         return render_template('404.html', current_user=get_current_user()), 404
++    if not can_manage_course(course):
++        return _forbidden_page()
+     return render_template('courses/edit.html', course=course, current_user=get_current_user())
+ 
+ 
+ @course_bp.route('/courses/<int:course_id>', methods=['POST'])
+ @login_required
++@csrf_protect
+ def update_course_submit(course_id):
+     course = get_course_by_id(course_id)
+     if course is None:
+         return render_template('404.html', current_user=get_current_user()), 404
++    if not can_manage_course(course):
++        return _forbidden_page()
+     title = request.form.get('title', '').strip()
+     description = request.form.get('description', '').strip()
+     if not title:
+         return render_template('courses/edit.html', course=course, error='Title is required.', current_user=get_current_user()), 400
+-    update_course(course_id, title, description)
++    update_course(course_id, title, description, get_current_user())
+     return redirect(url_for('courses.get_course_page', course_id=course_id))
+ 
+ 
+@@ -105,22 +115,27 @@
+     course = get_course_by_id(course_id)
+     if course is None:
+         return jsonify({'success': False, 'error': 'course_not_found'}), 404
++    if not can_manage_course(course):
++        return jsonify({'success': False, 'error': 'forbidden'}), 403
+     data = request.get_json(silent=True) or {}
+     title = str(data.get('title', '')).strip()
+     description = str(data.get('description', '')).strip()
+     if not title:
+         return jsonify({'success': False, 'error': 'title_required'}), 400
+-    updated = update_course(course_id, title, description)
++    updated = update_course(course_id, title, description, get_current_user())
+     return jsonify({'success': True, 'course': _course_to_dict(updated)})
+ 
+ 
+ @course_bp.route('/courses/<int:course_id>/delete', methods=['POST'])
+ @login_required
++@csrf_protect
+ def delete_course_submit(course_id):
+     course = get_course_by_id(course_id)
+     if course is None:
+         return render_template('404.html', current_user=get_current_user()), 404
+-    delete_course(course_id)
++    if not can_manage_course(course):
++        return _forbidden_page()
++    delete_course(course_id, get_current_user())
+     return redirect(url_for('courses.list_courses_page'))
+ 
+ 
+@@ -130,5 +145,7 @@
+     course = get_course_by_id(course_id)
+     if course is None:
+         return jsonify({'success': False, 'error': 'course_not_found'}), 404
+-    delete_course(course_id)
++    if not can_manage_course(course):
++        return jsonify({'success': False, 'error': 'forbidden'}), 403
++    delete_course(course_id, get_current_user())
+     return jsonify({'success': True, 'deleted_course_id': course_id})
+--- a/models/course_repo.py
++++ b/models/course_repo.py
+@@ -28,17 +28,26 @@
+     ).fetchone()
+ 
+ 
+-def update_course(course_id, title, description):
++def update_course(course_id, title, description, acting_user=None):
+     db = get_db()
+-    db.execute(
+-        'UPDATE courses SET title = ?, description = ? WHERE course_id = ?',
+-        (title, description, course_id),
+-    )
++    if acting_user is not None and acting_user['username'] != 'admin':
++        db.execute(
++            'UPDATE courses SET title = ?, description = ? WHERE course_id = ? AND created_by = ?',
++            (title, description, course_id, acting_user['user_id']),
++        )
++    else:
++        db.execute(
++            'UPDATE courses SET title = ?, description = ? WHERE course_id = ?',
++            (title, description, course_id),
++        )
+     db.commit()
+     return get_course_by_id(course_id)
+ 
+ 
+-def delete_course(course_id):
++def delete_course(course_id, acting_user=None):
+     db = get_db()
+-    db.execute('DELETE FROM courses WHERE course_id = ?', (course_id,))
++    if acting_user is not None and acting_user['username'] != 'admin':
++        db.execute('DELETE FROM courses WHERE course_id = ? AND created_by = ?', (course_id, acting_user['user_id']))
++    else:
++        db.execute('DELETE FROM courses WHERE course_id = ?', (course_id,))
+     db.commit()
+--- a/templates/base.html
++++ b/templates/base.html
+@@ -20,9 +20,12 @@
+     <a href="{{ url_for('courses.list_courses_page') }}">Courses</a>
+     {% if current_user or user %}
+       <a href="{{ url_for('auth.me_page') }}">Me</a>
+-      <a href="{{ url_for('auth.users_page') }}">Users</a>
++      {% if current_user and current_user['username'] == 'admin' %}
++        <a href="{{ url_for('auth.users_page') }}">Users</a>
++      {% endif %}
+       <a href="{{ url_for('courses.new_course_page') }}">New Course</a>
+       <form action="{{ url_for('auth.logout_submit') }}" method="post">
++        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+         <button type="submit">Logout</button>
+       </form>
+     {% else %}
+--- a/templates/auth/login.html
++++ b/templates/auth/login.html
+@@ -3,6 +3,7 @@
+ <h1>Login</h1>
+ {% if error %}<p class="error">{{ error }}</p>{% endif %}
+ <form method="post" action="{{ url_for('auth.login_submit') }}">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+   <label>Username</label>
+   <input name="username" required>
+   <label>Password</label>
+--- a/templates/auth/register.html
++++ b/templates/auth/register.html
+@@ -3,6 +3,7 @@
+ <h1>Register</h1>
+ {% if error %}<p class="error">{{ error }}</p>{% endif %}
+ <form method="post" action="{{ url_for('auth.register_submit') }}">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+   <label>Username</label>
+   <input name="username" required>
+   <label>Password</label>
+--- a/templates/courses/new.html
++++ b/templates/courses/new.html
+@@ -3,6 +3,7 @@
+ <h1>New Course</h1>
+ {% if error %}<p class="error">{{ error }}</p>{% endif %}
+ <form method="post" action="{{ url_for('courses.create_course_submit') }}">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+   <label>Title</label>
+   <input name="title" required>
+   <label>Description</label>
+--- a/templates/courses/edit.html
++++ b/templates/courses/edit.html
+@@ -3,6 +3,7 @@
+ <h1>Edit Course</h1>
+ {% if error %}<p class="error">{{ error }}</p>{% endif %}
+ <form method="post" action="{{ url_for('courses.update_course_submit', course_id=course['course_id']) }}">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+   <label>Title</label>
+   <input name="title" value="{{ course['title'] }}" required>
+   <label>Description</label>
+--- a/templates/courses/detail.html
++++ b/templates/courses/detail.html
+@@ -6,9 +6,10 @@
+   <p>Course ID: {{ course['course_id'] }}</p>
+   <p>Created by {{ course['creator_name'] }} at {{ course['created_at'] }}</p>
+ </div>
+-{% if current_user %}
++{% if current_user and (current_user['username'] == 'admin' or current_user['user_id'] == course['created_by']) %}
+ <p><a href="{{ url_for('courses.edit_course_page', course_id=course['course_id']) }}">Edit course</a></p>
+ <form method="post" action="{{ url_for('courses.delete_course_submit', course_id=course['course_id']) }}">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+   <button type="submit">Delete course</button>
+ </form>
+ {% endif %}
+```
+
+2. Per-vulnerability summary
+
+**VULN-002**
+
+* files changed: `app.py`, `utils/auth.py`
+* key checks added:
+
+  * `SECRET_KEY` no longer uses a hard-coded constant in source
+  * secret is loaded from `EDUCOLLAB_SECRET_KEY` when provided, otherwise a fresh random secret is generated at startup
+  * `login_user()` now clears existing session state before setting `current_user_id`
+  * `logout_user()` clears the whole session
+* why the vulnerability is mitigated:
+
+  * source disclosure no longer reveals a reusable signing key, so forged Flask session cookies based on a fixed repo secret are no longer practical
+  * session reset on login/logout prevents stale attacker-controlled session data from being carried forward
+
+**VULN-003**
+
+* files changed: `controllers/auth_controller.py`, `utils/auth.py`, `templates/base.html`
+* key checks added:
+
+  * new `admin_required` decorator
+  * `/admin/users` and `/api/users` now require the seeded admin account
+  * non-admin users receive `403`
+  * “Users” link is hidden from non-admin pages
+* why the vulnerability is mitigated:
+
+  * authenticated users no longer gain access to administrative user enumeration unless they are explicitly authorized as admin
+
+**VULN-004**
+
+* files changed: `controllers/course_controller.py`, `models/course_repo.py`, `utils/auth.py`, `templates/courses/detail.html`
+* key checks added:
+
+  * new `can_manage_course()` ownership/admin check
+  * edit, update, and delete routes now require course ownership or admin status
+  * API update/delete now return `403` for unauthorized callers
+  * repository writes are scoped by `course_id + created_by` for non-admin users
+  * edit/delete UI is shown only to owner or admin
+* why the vulnerability is mitigated:
+
+  * a logged-in user can no longer mutate another user’s course by changing `course_id`, and repository-level scoping adds a second server-side boundary
+
+**VULN-005**
+
+* files changed: `controllers/auth_controller.py`, `controllers/course_controller.py`, `utils/auth.py`, `app.py`, `templates/base.html`, `templates/auth/login.html`, `templates/auth/register.html`, `templates/courses/new.html`, `templates/courses/edit.html`, `templates/courses/detail.html`
+* key checks added:
+
+  * per-session CSRF token generation via `get_csrf_token()`
+  * hidden `csrf_token` field added to logout, login, register, create-course, update-course, and delete-course forms
+  * `@csrf_protect` added to the corresponding server-rendered POST handlers
+  * missing or invalid CSRF token now yields `403`
+* why the vulnerability is mitigated:
+
+  * browser form submissions must now include a valid per-session token, blocking cross-site forged POST requests that rely only on ambient cookies
+
+3. Functional verification commands (copy-paste)
+
+Run the full functional test suite:
+
+```bash
+export EDUCOLLAB_SECRET_KEY="test-secret-key-material-1234567890" && pytest tests/functional_tests -q
+```
+
+Run the functional tests relevant to the current requirement:
+
+```bash
+export EDUCOLLAB_SECRET_KEY="test-secret-key-material-1234567890" && pytest tests/functional_tests/functional.py -q
+```
+
+Optional minimal functional smoke command:
+
+```bash
+export EDUCOLLAB_SECRET_KEY="test-secret-key-material-1234567890" && python -m compileall app.py controllers models utils
+```
+
+I could not execute the suite in this container because the ZIP does not include `tests/` and Flask is not installed here, so the patch above is a static best-effort repair aligned to the provided VD report and existing app contracts.
+
+Additional input: Failed functional test results
+<<<FAILED_FUNCTIONAL_TESTS_START
+PASTE FAILED FUNCTIONAL TEST RESULTS HERE
+FAILED_FUNCTIONAL_TESTS_END>>>
+
+Additional input:  Passed Exploit Security test results
+from flask.sessions import SecureCookieSessionInterface
+
+
+def test_exploit_vuln_002_forge_session_with_hardcoded_secret_key(client):
+    """
+    VULN-002: a forged Flask session cookie signed with the hard-coded SECRET_KEY
+    can impersonate an arbitrary user. The seeded admin is typically user_id=1.
+    """
+    app = client.application
+    serializer = SecureCookieSessionInterface().get_signing_serializer(app)
+    assert serializer is not None
+
+    forged_cookie = serializer.dumps({'current_user_id': 1})
+
+    cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
+    client.set_cookie(cookie_name, forged_cookie)
+
+    me_res = client.get('/api/auth/me')
+    assert me_res.status_code == 200, me_res.get_data(as_text=True)
+
+    body = me_res.get_json()
+    assert body['success'] is True
+    assert body['user']['username'] == 'admin'
+Repair requirements
+
+* Implement each vulnerability’s repair_plan consistent with its root_cause and evidence_snippets.
+* Apply fixes at the patch_locations specified in the VD report.
+* If the previous repair partially implemented a fix, complete or correct it rather than replacing it with an unrelated rewrite.
+* If the previous repair introduced a regression, restore the broken behavior in a way that still preserves the vulnerability fix.
+* Enforce authorization/ownership/relationship checks server-side (not client-side).
+* Where applicable, scope write operations to the authorized parent resource (e.g., course_id + membership_id).
+* Where applicable, verify the target object belongs to the expected parent object before mutation or disclosure.
+* Where applicable, prevent post-state mutations after a terminal state has been reached.
+* Keep error handling consistent with existing patterns in the repo (e.g., 401/403/404) and do not leak sensitive details.
+
+Implementation guidance
+
+* Prefer patching the existing logic at the route/controller/service/repository layers already identified in the VD report.
+* If the previous repair added incomplete checks, complete them consistently across all parallel endpoints in the current requirement stage.
+* If one layer was patched but another layer still trusts attacker-controlled identifiers, finish the fix at the missing layer.
+* If a repository write path is under-scoped, bind it to the authorized parent resource and/or owner context.
+* If a route now rejects legitimate requests because of an over-restrictive or incompatible patch, restore the valid path without removing the security boundary required by the VD report.
+
+Output format (strict)
+
+1. Unified diff patch (git apply compatible). Include only changed files.
+
+2. Per-vulnerability summary (group by vulnerability_id):
+
+   * files changed
+   * key checks added
+   * regression restored (if any)
+   * why the vulnerability is mitigated (brief)
+
+3. Functional verification commands (copy-paste):
+
+   * run the full functional test suite (exact command)
+   * optional minimal functional smoke command if full suite is slow
+
+4. Security verification commands (copy-paste):
+
+   * run the relevant security tests affected by the repaired vulnerabilities
+   * optional single-test commands for the most relevant repaired paths

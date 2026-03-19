@@ -1,0 +1,631 @@
+You are a senior software engineer fixing vulnerabilities in a web application.
+
+Repository input
+- The full project codebase is provided as a ZIP archive.
+- Assume you can read and modify files inside the ZIP repository.
+- Do NOT ask for files outside the ZIP.
+
+Task
+- Implement code changes guided by the vulnerability detection (VD) report below.
+- This is a requirement-level vulnerability repair task.
+- Treat the repository as the full runnable codebase produced after implementing the current requirement increment.
+- Focus only on vulnerabilities reported for the current requirement scope.
+- The current requirement may interact with functionality introduced earlier, but do not perform unrelated hardening, cleanup, or broad refactors outside the reported issue.
+- Apply minimal, correct patches while preserving intended functionality.
+
+Hard constraints
+- Keep the project runnable.
+- Do NOT rename routes, database tables, or response JSON fields.
+- Do NOT change authentication/session key names or role names.
+- No new dependencies. Avoid refactors unrelated to the fixes.
+- Only change files necessary for the fixes.
+- Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or docs.
+
+Primary verification goal (must satisfy)
+- The functional test suite must PASS after the patch (no regressions).
+- Prioritize preserving the intended behavior of the current requirement.
+- Do not over-fix in ways that risk breaking valid workflows.
+
+Authoritative input: Vulnerability Detection Report (VD)
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 9,
+  "vulnerability_type": "Authentication Flaw",
+  "cwe_id": "CWE-798",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 9.1,
+  "severity_level": "critical",
+  "confidence_score": 99,
+  "confidence_level": "high",
+  "summary": "The application ships with a hard-coded default administrator credential and automatically seeds that account at startup. Anyone who knows the published default username and password can authenticate as the seeded admin and obtain full access intended for the bootstrap administrator.",
+  "entry_points": [
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/login"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/api/auth/login"
+    },
+    {
+      "type": "other",
+      "method": "CLI",
+      "route": "scripts/init.php"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "config/config.php",
+      "line_start": 8,
+      "line_end": 12,
+      "function_name": null,
+      "code": "'admin' => [ 'username' => 'admin', 'password' => 'admin123', 'display_name' => 'Default Admin' ]",
+      "reason": "The bootstrap administrator credentials are embedded in the repository as fixed, predictable values."
+    },
+    {
+      "file_path": "app/core/Bootstrap.php",
+      "line_start": 35,
+      "line_end": 47,
+      "function_name": "seed_admin",
+      "code": "$admin = $userRepo->findByUsername($config['admin']['username']); ... $userRepo->create([ 'username' => $config['admin']['username'], 'password_hash' => password_hash($config['admin']['password'], PASSWORD_DEFAULT), 'display_name' => $config['admin']['display_name'], ]);",
+      "reason": "On initialization, the application automatically provisions the default admin account using the hard-coded password from configuration."
+    },
+    {
+      "file_path": "public/index.php",
+      "line_start": 15,
+      "line_end": 16,
+      "function_name": null,
+      "code": "init_db($config);\nseed_admin($config);",
+      "reason": "The admin seeding logic runs on normal application startup, so the predictable account is created automatically whenever it does not already exist."
+    }
+  ],
+  "root_cause_code": 10,
+  "root_cause": "The bootstrap design relies on a reusable, hard-coded privileged credential in configuration and automatically creates that account instead of requiring secure one-time initialization.",
+  "patch_locations": [
+    {
+      "file_path": "config/config.php",
+      "line_start": 8,
+      "line_end": 12,
+      "function_name": null
+    },
+    {
+      "file_path": "app/core/Bootstrap.php",
+      "line_start": 35,
+      "line_end": 47,
+      "function_name": "seed_admin"
+    },
+    {
+      "file_path": "public/index.php",
+      "line_start": 15,
+      "line_end": 16,
+      "function_name": null
+    },
+    {
+      "file_path": "scripts/init.php",
+      "line_start": 8,
+      "line_end": 9,
+      "function_name": null
+    }
+  ],
+  "repair_plan": "Remove the hard-coded bootstrap password from the repository and stop creating a privileged account from fixed credentials during normal startup. Require an explicit first-run setup step or an environment-provided one-time secret, and ensure any bootstrap admin credential must be rotated or invalidated immediately after initial provisioning.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+
+
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 10,
+  "vulnerability_type": "Session Weakness",
+  "cwe_id": "CWE-384",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.6,
+  "severity_level": "medium",
+  "confidence_score": 95,
+  "confidence_level": "high",
+  "summary": "The application does not regenerate the session identifier after successful registration or login. An attacker who can pre-set or obtain a victim's anonymous session ID can keep using that same session after the victim authenticates, enabling session fixation.",
+  "entry_points": [
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/register"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/login"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/api/auth/register"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/api/auth/login"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "public/index.php",
+      "line_start": 6,
+      "line_end": 6,
+      "function_name": null,
+      "code": "session_start();",
+      "reason": "The application starts a session before authentication, so pre-authentication session identifiers persist unless explicitly rotated."
+    },
+    {
+      "file_path": "app/core/Auth.php",
+      "line_start": 27,
+      "line_end": 30,
+      "function_name": "login_user",
+      "code": "function login_user(array $config, int $userId): void\n{\n    $_SESSION[$config['session_user_key']] = $userId;\n}",
+      "reason": "The login helper binds the authenticated user to the existing session but never calls session_regenerate_id(true)."
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 21,
+      "line_end": 31,
+      "function_name": "registerHtml",
+      "code": "$result = $this->register($data); ... login_user($this->config, $result['user']['user_id']); redirect_to('/me');",
+      "reason": "HTML registration authenticates the new user into the current session without rotating the session identifier."
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 34,
+      "line_end": 41,
+      "function_name": "registerApi",
+      "code": "$result = $this->register(request_data()); ... login_user($this->config, $result['user']['user_id']); json_response($result, 201);",
+      "reason": "API registration has the same missing session-ID rotation."
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 73,
+      "line_end": 82,
+      "function_name": "loginHtml",
+      "code": "$result = $this->login(request_data()); ... login_user($this->config, $result['user']['user_id']); redirect_to('/me');",
+      "reason": "HTML login reuses the existing session ID after authentication."
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 85,
+      "line_end": 93,
+      "function_name": "loginApi",
+      "code": "$result = $this->login(request_data()); ... login_user($this->config, $result['user']['user_id']); json_response($result, 200);",
+      "reason": "API login also authenticates the user into the existing session without regenerating the session ID."
+    }
+  ],
+  "root_cause_code": 8,
+  "root_cause": "Authentication state is attached to a pre-existing session and the code never rotates the session identifier when the user transitions from unauthenticated to authenticated.",
+  "patch_locations": [
+    {
+      "file_path": "app/core/Auth.php",
+      "line_start": 27,
+      "line_end": 30,
+      "function_name": "login_user"
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 21,
+      "line_end": 31,
+      "function_name": "registerHtml"
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 34,
+      "line_end": 41,
+      "function_name": "registerApi"
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 73,
+      "line_end": 82,
+      "function_name": "loginHtml"
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 85,
+      "line_end": 93,
+      "function_name": "loginApi"
+    }
+  ],
+  "repair_plan": "Regenerate the session ID immediately after every successful login and registration before storing the authenticated user ID in the session. Also invalidate the old session during logout and review cookie settings so authenticated sessions are issued with secure, HttpOnly, and appropriate SameSite protections.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+{
+  "vulnerability_id": "VULN-003",
+  "vulnerability_type_code": 3,
+  "vulnerability_type": "Broken Access Control",
+  "cwe_id": "CWE-862",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.9,
+  "severity_level": "medium",
+  "confidence_score": 96,
+  "confidence_level": "high",
+  "summary": "Any authenticated user can access the full user directory through the HTML and API user-list endpoints. This exposes all registered usernames, display names, and creation timestamps without any admin-only authorization check.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/admin/users"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/users"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "public/index.php",
+      "line_start": 56,
+      "line_end": 58,
+      "function_name": null,
+      "code": "if ($path === '/admin/users' && $method === 'GET') {\n    $authController->listUsersHtml();\n    exit;\n}",
+      "reason": "The route name implies administrative access, but enforcement depends entirely on the controller."
+    },
+    {
+      "file_path": "public/index.php",
+      "line_start": 105,
+      "line_end": 107,
+      "function_name": null,
+      "code": "if ($path === '/api/users' && $method === 'GET') {\n    $authController->listUsersApi();\n    exit;\n}",
+      "reason": "The API exposes the same user-list operation."
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 139,
+      "line_end": 148,
+      "function_name": "listUsersHtml/listUsersApi",
+      "code": "public function listUsersHtml(): void\n{\n    require_login($this->config, false);\n    render('admin/users', ['title' => 'Users', 'users' => $this->userRepo->all()]);\n}\n\npublic function listUsersApi(): void\n{\n    require_login($this->config, true);\n    json_response(['success' => true, 'users' => $this->userRepo->all()]);\n}",
+      "reason": "Both handlers require only authentication and do not check any administrator role or equivalent authorization condition."
+    },
+    {
+      "file_path": "app/repositories/UserRepository.php",
+      "line_start": 43,
+      "line_end": 46,
+      "function_name": "all",
+      "code": "$stmt = $this->pdo->query('SELECT user_id, username, display_name, created_at FROM users ORDER BY user_id ASC');\nreturn $stmt->fetchAll();",
+      "reason": "The repository returns the entire user directory to whichever authenticated caller reaches the endpoint."
+    }
+  ],
+  "root_cause_code": 2,
+  "root_cause": "The user-list endpoints enforce only login status and omit any role-based authorization check, even though they expose global user records intended for an administrative context.",
+  "patch_locations": [
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 139,
+      "line_end": 148,
+      "function_name": "listUsersHtml/listUsersApi"
+    },
+    {
+      "file_path": "app/core/Auth.php",
+      "line_start": 7,
+      "line_end": 25,
+      "function_name": "current_user_id/require_login"
+    },
+    {
+      "file_path": "app/repositories/UserRepository.php",
+      "line_start": 43,
+      "line_end": 46,
+      "function_name": "all"
+    }
+  ],
+  "repair_plan": "Introduce an explicit administrator authorization check before serving /admin/users and /api/users, and reject non-admin callers with a 403 response. If non-admin users need limited user data elsewhere, create separate endpoints or projections that return only the minimum permitted fields for that role.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+{
+  "vulnerability_id": "VULN-004",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.8,
+  "severity_level": "high",
+  "confidence_score": 98,
+  "confidence_level": "high",
+  "summary": "Any authenticated user can edit or delete any course by supplying that course's identifier. The application checks only whether the caller is logged in and never verifies that the caller created the course or holds an administrator role before performing the update or delete.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/edit"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/delete"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "DELETE",
+      "route": "/api/courses/:course_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 90,
+      "line_end": 99,
+      "function_name": "showEditForm",
+      "code": "require_login($this->config, false);\n$course = $this->courseRepo->findById($courseId);\n... render('courses/edit', ['title' => 'Edit Course', 'course' => $course, 'error' => null]);",
+      "reason": "Any authenticated user can open the edit form for any course_id because no ownership or admin check is performed."
+    },
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 102,
+      "line_end": 122,
+      "function_name": "updateHtml/updateApi",
+      "code": "require_login($this->config, false); $result = $this->update($courseId, request_data());\n...\nrequire_login($this->config, true); $result = $this->update($courseId, request_data());",
+      "reason": "Both HTML and API update handlers require only authentication before delegating to the write path."
+    },
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 125,
+      "line_end": 139,
+      "function_name": "update",
+      "code": "$course = $this->courseRepo->findById($courseId); ... $this->courseRepo->update($courseId, ['title' => $title, 'description' => $description]);",
+      "reason": "The update logic trusts the supplied course_id and never verifies that the current user owns the course or has elevated permission."
+    },
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 142,
+      "line_end": 166,
+      "function_name": "deleteHtml/deleteApi/delete",
+      "code": "require_login($this->config, false); $this->delete($courseId);\n...\nrequire_login($this->config, true); $result = $this->delete($courseId);\n...\n$this->courseRepo->delete($courseId);",
+      "reason": "Delete uses the same login-only check and then deletes by identifier alone."
+    },
+    {
+      "file_path": "app/repositories/CourseRepository.php",
+      "line_start": 52,
+      "line_end": 67,
+      "function_name": "update/delete",
+      "code": "UPDATE courses SET title = :title, description = :description WHERE course_id = :course_id\n...\nDELETE FROM courses WHERE course_id = :course_id",
+      "reason": "The repository write operations are scoped only by course_id and do not constrain the action to the course creator or an authorized administrator."
+    }
+  ],
+  "root_cause_code": 7,
+  "root_cause": "The course mutation flows trust the user-supplied course identifier across an authorization boundary and omit any ownership or privileged-role check before updating or deleting the targeted record.",
+  "patch_locations": [
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 90,
+      "line_end": 166,
+      "function_name": "showEditForm/updateHtml/updateApi/update/deleteHtml/deleteApi/delete"
+    },
+    {
+      "file_path": "app/repositories/CourseRepository.php",
+      "line_start": 38,
+      "line_end": 67,
+      "function_name": "findById/update/delete"
+    },
+    {
+      "file_path": "app/core/Auth.php",
+      "line_start": 7,
+      "line_end": 25,
+      "function_name": "current_user_id/require_login"
+    }
+  ],
+  "repair_plan": "Before showing the edit form or executing update/delete, load the target course and verify that the authenticated user is the course creator or an explicitly authorized administrator. Enforce the same rule in both HTML and API handlers, and consider scoping repository writes by both course_id and created_by for non-admin callers so direct identifier tampering cannot modify another user's course.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+{
+  "vulnerability_id": "VULN-005",
+  "vulnerability_type_code": 7,
+  "vulnerability_type": "CSRF",
+  "cwe_id": "CWE-352",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.4,
+  "severity_level": "medium",
+  "confidence_score": 93,
+  "confidence_level": "high",
+  "summary": "The server-rendered authentication and course-management forms perform state-changing actions using only the session cookie and do not include any anti-CSRF token. A malicious website can cause a logged-in victim's browser to submit forged requests that register accounts, log the victim in or out, create courses, or alter existing courses.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/register"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/login"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/logout"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/delete"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app/views/auth/register.php",
+      "line_start": 5,
+      "line_end": 12,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"/register\"> ... <input type=\"text\" name=\"username\" required> ... <button type=\"submit\">Create account</button></form>",
+      "reason": "The registration form submits a state-changing POST request with no CSRF token or nonce."
+    },
+    {
+      "file_path": "app/views/auth/login.php",
+      "line_start": 5,
+      "line_end": 10,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"/login\"> ... <input type=\"password\" name=\"password\" required> ... </form>",
+      "reason": "The login form likewise contains no anti-CSRF token."
+    },
+    {
+      "file_path": "app/views/courses/new.php",
+      "line_start": 27,
+      "line_end": 32,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"/courses\"> ... <textarea name=\"description\" rows=\"5\"></textarea> <button type=\"submit\">Create course</button></form>",
+      "reason": "Course creation is a state-changing POST with no CSRF token."
+    },
+    {
+      "file_path": "app/views/courses/edit.php",
+      "line_start": 5,
+      "line_end": 10,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>\"> ... </form>",
+      "reason": "Course update is performed by a POST form with no CSRF protection."
+    },
+    {
+      "file_path": "app/views/courses/show.php",
+      "line_start": 45,
+      "line_end": 47,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>/delete\">\n    <button type=\"submit\">Delete course</button>\n</form>",
+      "reason": "Course deletion is exposed as a tokenless POST form."
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 113,
+      "line_end": 116,
+      "function_name": "logoutHtml",
+      "code": "public function logoutHtml(): void\n{\n    logout_user($this->config);\n    redirect_to('/login');\n}",
+      "reason": "The logout action accepts a browser-submitted POST and performs the state change without any CSRF validation."
+    }
+  ],
+  "root_cause_code": 9,
+  "root_cause": "The HTML form workflows do not generate or validate anti-CSRF tokens, so the server trusts any browser request that carries the victim's session cookie.",
+  "patch_locations": [
+    {
+      "file_path": "app/views/auth/register.php",
+      "line_start": 5,
+      "line_end": 12,
+      "function_name": null
+    },
+    {
+      "file_path": "app/views/auth/login.php",
+      "line_start": 5,
+      "line_end": 10,
+      "function_name": null
+    },
+    {
+      "file_path": "app/views/courses/new.php",
+      "line_start": 27,
+      "line_end": 32,
+      "function_name": null
+    },
+    {
+      "file_path": "app/views/courses/edit.php",
+      "line_start": 5,
+      "line_end": 10,
+      "function_name": null
+    },
+    {
+      "file_path": "app/views/courses/show.php",
+      "line_start": 45,
+      "line_end": 47,
+      "function_name": null
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 21,
+      "line_end": 31,
+      "function_name": "registerHtml"
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 73,
+      "line_end": 82,
+      "function_name": "loginHtml"
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 113,
+      "line_end": 116,
+      "function_name": "logoutHtml"
+    },
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 22,
+      "line_end": 30,
+      "function_name": "createHtml"
+    },
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 102,
+      "line_end": 111,
+      "function_name": "updateHtml"
+    },
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 142,
+      "line_end": 146,
+      "function_name": "deleteHtml"
+    }
+  ],
+  "repair_plan": "Add a centralized CSRF defense for all server-rendered state-changing routes: generate a per-session or per-form token, embed it in every HTML form, and verify the token before processing registration, login, logout, course creation, course update, and course deletion. Reject missing or invalid tokens before any side effect occurs.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+Repair requirements
+- Implement each vulnerability’s repair_plan consistent with its root_cause and evidence_snippets.
+- Apply fixes at the patch_locations specified in the VD report.
+- Enforce authorization, ownership, and relationship checks server-side (not client-side).
+- Where applicable, scope read/write operations to the authorized parent resource (e.g., course_id + membership_id, course_id + post_id, quiz_id + question_id).
+- Do not introduce client-side-only protections as the primary fix.
+- Do not change unrelated behavior, response schemas, or persistence semantics unless required by the fix.
+- Do not fix additional speculative vulnerabilities that are not supported by the VD report.
+- If a vulnerability spans earlier and current requirement logic, patch the narrowest correct server-side boundary that removes the exploit path and preserves intended behavior.
+- Keep error handling consistent with existing patterns in the repo (e.g., 401/403/404) and do not leak sensitive details.
+- Preserve compatibility with the existing functional test expectations.
+
+Output format (strict)
+1) Unified diff patch (git apply compatible). Include only changed files.
+2) Per-vulnerability summary (group by vulnerability_id):
+   - files changed
+   - key checks added
+   - why the vulnerability is mitigated (brief)
+3) Functional verification commands (copy-paste):
+   - run the full functional test suite (exact command)
+   - run the functional tests relevant to the current requirement (exact command)
+   - (optional) a minimal functional smoke command if full suite is slow

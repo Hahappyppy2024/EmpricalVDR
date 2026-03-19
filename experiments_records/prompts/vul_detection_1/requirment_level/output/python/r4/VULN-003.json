@@ -1,0 +1,77 @@
+{
+  "vulnerability_id": "VULN-003",
+  "vulnerability_type_code": 11,
+  "vulnerability_type": "Sensitive Data Exposure",
+  "cwe_id": "CWE-200",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 5.8,
+  "severity_level": "medium",
+  "confidence_score": 97,
+  "confidence_level": "high",
+  "summary": "The upload APIs expose the server-side storage_path for every uploaded file to course members and staff. An authenticated user can therefore learn internal filesystem layout and exact stored filenames for uploaded content, which is unnecessary for normal client functionality and increases the value of later file-handling attacks.",
+  "entry_points": [
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/courses/:course_id/uploads"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/uploads"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 53,
+      "line_end": 65,
+      "function_name": "_upload_to_dict",
+      "code": "def _upload_to_dict(item):\n    if item is None:\n        return None\n    return {\n        'upload_id': item['upload_id'],\n        'course_id': item['course_id'],\n        'uploaded_by': item['uploaded_by'],\n        'original_name': item['original_name'],\n        'storage_path': item['storage_path'],\n        'created_at': item['created_at'],\n        'username': item['username'],\n        'display_name': item['display_name'],\n    }",
+      "reason": "The response serializer includes the full server-side storage_path field in API output."
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 400,
+      "line_end": 420,
+      "function_name": "api_create_upload / _save_upload",
+      "code": "@assignment_bp.route('/api/courses/<int:course_id>/uploads', methods=['POST'])\n@login_required\n@require_course_staff\ndef api_create_upload(course_id):\n    ...\n    item = _save_upload(course_id, uploaded_file)\n    return jsonify({'success': True, 'upload': _upload_to_dict(item)}), 201\n\n\ndef _save_upload(course_id, uploaded_file):\n    ...\n    full_path = Path(upload_root) / stored_name\n    uploaded_file.save(full_path)\n    return create_upload(course_id, get_current_user()['user_id'], original_name, str(full_path))",
+      "reason": "The upload creation API returns the serialized upload object immediately after persisting the full local filesystem path."
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 433,
+      "line_end": 439,
+      "function_name": "api_list_uploads",
+      "code": "@assignment_bp.route('/api/courses/<int:course_id>/uploads', methods=['GET'])\n@login_required\n@require_course_member\ndef api_list_uploads(course_id):\n    if get_course_by_id(course_id) is None:\n        return jsonify({'success': False, 'error': 'course_not_found'}), 404\n    return jsonify({'success': True, 'uploads': [_upload_to_dict(item) for item in list_uploads(course_id)]})",
+      "reason": "The listing API exposes storage_path for every upload to any authenticated course member."
+    }
+  ],
+  "root_cause_code": 11,
+  "root_cause": "The API crosses a trust boundary by serializing internal persistence metadata intended for server-side file handling and returning it directly to clients.",
+  "patch_locations": [
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 53,
+      "line_end": 65,
+      "function_name": "_upload_to_dict"
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 400,
+      "line_end": 420,
+      "function_name": "api_create_upload / _save_upload"
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 433,
+      "line_end": 439,
+      "function_name": "api_list_uploads"
+    }
+  ],
+  "repair_plan": "Remove storage_path from all client-facing API responses and keep it strictly server-side. Return only stable client-safe metadata such as upload_id, original_name, uploader display fields, and timestamps. Any later file operations should continue to resolve the stored path on the server from upload_id rather than exposing it to clients.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

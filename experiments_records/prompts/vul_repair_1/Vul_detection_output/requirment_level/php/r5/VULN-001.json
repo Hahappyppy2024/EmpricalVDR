@@ -1,0 +1,72 @@
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 11,
+  "vulnerability_type": "Sensitive Data Exposure",
+  "cwe_id": "CWE-200",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.1,
+  "severity_level": "high",
+  "confidence_score": 98,
+  "confidence_level": "high",
+  "summary": "Any authenticated course member can retrieve full quiz question records through the quiz detail API, including answer_json for each mapped question. This exposes correct answers and assessment secrets to students before or during attempts, undermining quiz integrity.",
+  "entry_points": [
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app/controllers/QuizController.php",
+      "line_start": 109,
+      "line_end": 116,
+      "function_name": "getApi",
+      "code": "require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);\n$quiz = $this->quizRepo->findById($courseId, $quizId);\n...\njson_response(['success' => true, 'quiz' => $quiz, 'questions' => $this->quizRepo->listQuizQuestions($courseId, $quizId)]);",
+      "reason": "The API allows any course member, not just staff, to fetch the full quiz question payload."
+    },
+    {
+      "file_path": "app/repositories/QuizRepository.php",
+      "line_start": 82,
+      "line_end": 95,
+      "function_name": "listQuizQuestions",
+      "code": "SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,\n       q.qtype, q.prompt, q.options_json, q.answer_json\nFROM quiz_questions qq\nJOIN quizzes z ON z.quiz_id = qq.quiz_id AND z.course_id = :course_id\nJOIN questions q ON q.question_id = qq.question_id AND q.course_id = :course_id\nWHERE qq.quiz_id = :quiz_id",
+      "reason": "The repository returns answer_json together with the quiz questions, so the student-visible API response includes the correct answers."
+    },
+    {
+      "file_path": "app/controllers/QuizController.php",
+      "line_start": 89,
+      "line_end": 106,
+      "function_name": "getHtml",
+      "code": "require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);\n...\n'questions' => $quiz ? $this->quizRepo->listQuizQuestions($courseId, $quizId) : [],\n'question_bank' => $quiz && current_user_is_course_staff(...) ? $this->questionRepo->listByCourse($courseId) : [],",
+      "reason": "The controller treats quiz question data as broadly member-readable, while only the separate question bank is staff-restricted, indicating an authorization boundary mismatch around assessment secrets."
+    }
+  ],
+  "root_cause_code": 2,
+  "root_cause": "Quiz detail access is authorized for all course members, but the returned data model includes staff-only assessment secrets such as answer_json instead of a student-safe projection.",
+  "patch_locations": [
+    {
+      "file_path": "app/controllers/QuizController.php",
+      "line_start": 109,
+      "line_end": 116,
+      "function_name": "getApi"
+    },
+    {
+      "file_path": "app/repositories/QuizRepository.php",
+      "line_start": 82,
+      "line_end": 95,
+      "function_name": "listQuizQuestions"
+    },
+    {
+      "file_path": "app/repositories/QuizRepository.php",
+      "line_start": 97,
+      "line_end": 110,
+      "function_name": "findQuizQuestion"
+    }
+  ],
+  "repair_plan": "Split quiz-question retrieval into staff and student representations. For member-visible quiz detail and attempt flows, return only the fields needed to answer the quiz, excluding answer_json and any other solution material. Keep answer_json accessible only to explicitly authorized staff endpoints.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

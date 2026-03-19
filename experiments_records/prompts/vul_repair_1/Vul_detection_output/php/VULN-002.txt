@@ -1,0 +1,103 @@
+{
+"vulnerability_id": "VULN-002",
+"vulnerability_type_code": 10,
+"vulnerability_type": "Session Weakness",
+"cwe_id": "CWE-384",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.8,
+"severity_level": "medium",
+"confidence_score": 91,
+"confidence_level": "high",
+"summary": "The application does not rotate the session identifier after successful login or registration. An attacker who can set or learn a victim's pre-authentication session ID can reuse that same session after the victim authenticates, resulting in session fixation and account compromise.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/register"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/register"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/bootstrap.php",
+"line_start": 4,
+"line_end": 7,
+"function_name": null,
+"code": "if (session_status() === PHP_SESSION_NONE) { session_start(); }",
+"reason": "The application starts and reuses the current PHP session, so any pre-existing session identifier remains active unless it is explicitly rotated."
+},
+{
+"file_path": "src/controllers/AuthController.php",
+"line_start": 22,
+"line_end": 30,
+"function_name": "register",
+"code": "$u = $repo->create($username, $password, $display); ... $_SESSION['user'] = $u; redirect('/courses');",
+"reason": "Registration authenticates the new user into the existing session but does not call session_regenerate_id(true)."
+},
+{
+"file_path": "src/controllers/AuthController.php",
+"line_start": 37,
+"line_end": 52,
+"function_name": "login",
+"code": "$row = $repo->getAuthByUsername($username); ... $_SESSION['user'] = [ ... ]; redirect('/courses');",
+"reason": "The login flow binds the authenticated identity to the current session without rotating the session ID."
+},
+{
+"file_path": "src/controllers/AuthController.php",
+"line_start": 70,
+"line_end": 83,
+"function_name": "apiRegister",
+"code": "$u = $repo->create($username, $password, $display); ... $_SESSION['user'] = $u; json_response(['user' => $u]);",
+"reason": "The API registration path has the same missing session rotation."
+},
+{
+"file_path": "src/controllers/AuthController.php",
+"line_start": 86,
+"line_end": 102,
+"function_name": "apiLogin",
+"code": "$row = $repo->getAuthByUsername($username); ... $_SESSION['user'] = $u; json_response(['user' => $u]);",
+"reason": "The API login path also authenticates into the existing session without regenerating the session identifier."
+}
+],
+"root_cause_code": 8,
+"root_cause": "Authentication state is attached to whatever session ID already exists, and the code never regenerates the session identifier when privilege level changes from unauthenticated to authenticated.",
+"patch_locations": [
+{
+"file_path": "src/controllers/AuthController.php",
+"line_start": 12,
+"line_end": 31,
+"function_name": "register"
+},
+{
+"file_path": "src/controllers/AuthController.php",
+"line_start": 37,
+"line_end": 52,
+"function_name": "login"
+},
+{
+"file_path": "src/controllers/AuthController.php",
+"line_start": 70,
+"line_end": 102,
+"function_name": "apiRegister/apiLogin"
+}
+],
+"repair_plan": "Call session_regenerate_id(true) immediately after every successful login and registration, before storing the authenticated user object in the session. Also review session cookie settings so authenticated sessions are issued with secure, HttpOnly, and SameSite protections appropriate for the deployment.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

@@ -1,0 +1,95 @@
+{
+  "vulnerability_id": "VULN-003",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.6,
+  "severity_level": "high",
+  "confidence_score": 96,
+  "confidence_level": "high",
+  "summary": "Any authenticated user can update or delete arbitrary courses by supplying a different course_id. This enables unauthorized modification or destruction of other users' course resources.",
+  "entry_points": [
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "DELETE",
+      "route": "/api/courses/:course_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/delete"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 19,
+      "line_end": 23,
+      "function_name": null,
+      "code": "router.post('/courses', requireAuthApi, courseController.apiCreateCourse);\\nrouter.get('/courses', requireAuthApi, courseController.apiListCourses);\\nrouter.get('/courses/:course_id', requireAuthApi, courseController.apiGetCourse);\\nrouter.put('/courses/:course_id', requireAuthApi, courseController.apiUpdateCourse);\\nrouter.delete('/courses/:course_id', requireAuthApi, courseController.apiDeleteCourse);",
+      "reason": "Course mutation endpoints require only authentication and do not apply any course-level ownership/staff authorization middleware."
+    },
+    {
+      "file_path": "src/controllers/courseController.js",
+      "line_start": 73,
+      "line_end": 114,
+      "function_name": "updateCourse / apiUpdateCourse",
+      "code": "const existing = courseRepository.findById(req.params.course_id);\\n...\\ncourseRepository.updateCourse(req.params.course_id, {\\n  title,\\n  description: description || ''\\n});",
+      "reason": "The controller never verifies that the current user is the course owner/creator (existing.created_by) before updating the course identified by attacker-controlled course_id."
+    },
+    {
+      "file_path": "src/controllers/courseController.js",
+      "line_start": 116,
+      "line_end": 134,
+      "function_name": "deleteCourse / apiDeleteCourse",
+      "code": "const existing = courseRepository.findById(req.params.course_id);\\n...\\ncourseRepository.deleteCourse(req.params.course_id);",
+      "reason": "The delete controller likewise performs no ownership/staff check before deleting the course by course_id."
+    },
+    {
+      "file_path": "src/repositories/courseRepository.js",
+      "line_start": 44,
+      "line_end": 56,
+      "function_name": "updateCourse / deleteCourse",
+      "code": "UPDATE courses\\nSET title = ?, description = ?\\nWHERE course_id = ?\\n...\\nDELETE FROM courses WHERE course_id = ?",
+      "reason": "Repository write operations are scoped only by course_id, so any caller that reaches these methods can modify/delete any course row."
+    }
+  ],
+  "root_cause_code": 7,
+  "root_cause": "Course update/delete operations trust a user-supplied course_id without enforcing ownership or an elevated authorization rule tied to the target course.",
+  "patch_locations": [
+    {
+      "file_path": "src/controllers/courseController.js",
+      "line_start": 65,
+      "line_end": 134,
+      "function_name": "showEditCourse / updateCourse / apiUpdateCourse / deleteCourse / apiDeleteCourse"
+    },
+    {
+      "file_path": "src/repositories/courseRepository.js",
+      "line_start": 44,
+      "line_end": 56,
+      "function_name": "updateCourse / deleteCourse"
+    },
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 19,
+      "line_end": 23,
+      "function_name": null
+    }
+  ],
+  "repair_plan": "Before updating or deleting a course, load the course and enforce that req.currentUser.user_id matches course.created_by (or an explicitly defined staff/admin role). Apply the same authorization rule consistently for both web and API handlers, and consider adding repository methods that scope updates/deletes by (course_id, created_by) for non-admin operations.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

@@ -1,0 +1,898 @@
+You are a senior application security engineer analyzing a complete web application project at a requirement-level stage after a previous vulnerability repair attempt.
+
+Inputs provided to you:
+1. Previous vulnerability detection report for the current requirement stage
+2. Previous vulnerability repair report / patch / summary
+3. Failed functional test results
+4. Failed security exploit test results
+5. The current project codebase for this requirement stage
+
+Your task is to produce a strict repair-failure re-analysis report anchored to the first vulnerability detection report for the current requirement stage.
+
+This is NOT a fresh vulnerability discovery task.
+This is NOT a reclassification task.
+This is NOT a new vulnerability taxonomy pass.
+
+The first vulnerability detection report is the authoritative baseline for vulnerability identity in this iteration.
+
+--------------------------------------------------
+Requirement-Level Analysis Mode
+--------------------------------------------------
+
+This is a requirement-level repair-failure re-analysis task.
+
+Analyze the repository as the full runnable codebase produced after implementing the current requirement increment and after a previous repair attempt.
+
+Treat the current requirement as the primary analysis scope.
+Prior functionality from earlier requirements is still in scope only if it remains reachable in the current repository state and is materially relevant to the vulnerabilities already identified for this requirement stage.
+
+Pay primary attention to:
+- the functionality introduced or expanded in the current requirement
+- interactions between the current requirement and previously implemented features
+- newly exposed trust boundaries, resource identifiers, role checks, file flows, and state transitions created at this requirement stage
+- whether the previous repair attempt failed to correctly secure the requirement-stage functionality already identified in the first vulnerability detection report
+
+--------------------------------------------------
+Mandatory Task Assumption
+--------------------------------------------------
+
+For this task, all vulnerabilities from the first vulnerability detection report must be treated as not successfully repaired.
+
+This assumption is mandatory and must not be re-evaluated.
+
+Therefore:
+- do not classify any original vulnerability as fully mitigated,
+- do not omit any original vulnerability from the output,
+- return exactly one output object for every vulnerability_id in the first vulnerability detection report,
+- and analyze how the previous repair attempt failed for each original vulnerability in the current codebase.
+
+Allowed current_status values in this task are exactly:
+- "still_present"
+- "partially_fixed"
+- "incorrectly_fixed"
+- "bypassable"
+
+Do not use "fully_mitigated" in this task.
+
+--------------------------------------------------
+Analysis Objective
+--------------------------------------------------
+
+Analyze the entire project as a whole system, not as isolated files.
+
+For every vulnerability in the first vulnerability detection report:
+- preserve the same vulnerability_id,
+- preserve the same vulnerability identity,
+- do not rename, split, merge, replace, or reinterpret it as a different vulnerability unless the previous classification is clearly impossible to maintain,
+- determine how that same vulnerability remains unresolved after the repair attempt,
+- explain why the previous repair did not fully succeed,
+- identify the remaining repair root cause,
+- and provide the next repair plan.
+
+Focus only on vulnerabilities supported by concrete current-code evidence.
+
+Do NOT perform a broad new vulnerability discovery pass.
+Only mention a newly introduced regression if it is directly caused by the previous repair attempt, is closely related to a previous vulnerability, and is clearly supported by current code evidence.
+
+Use the failed functional test results and failed security exploit test results only as supporting signals.
+Final conclusions must still be grounded in the current codebase.
+
+--------------------------------------------------
+Core Reporting Rules
+--------------------------------------------------
+
+1. Use the first vulnerability detection report as the required baseline.
+
+2. Re-analyze every vulnerability from that report against the current codebase.
+
+3. Every original vulnerability_id must appear exactly once in the output.
+
+4. No original vulnerability_id may be omitted.
+
+5. No new vulnerability_id may be introduced.
+
+6. Do not redefine, rename, split, merge, replace, or reinterpret previously reported vulnerabilities unless clearly required by the current code evidence.
+
+7. For each vulnerability, classify the unresolved state as exactly one of:
+   - still_present
+   - partially_fixed
+   - incorrectly_fixed
+   - bypassable
+
+8. Do not merely restate the original vulnerability.
+   The focus is the repair-failure analysis layer for that same vulnerability.
+
+9. For every vulnerability, explicitly explain:
+   - what was changed by the previous repair attempt,
+   - why that change did not fully eliminate the original risk,
+   - what implementation mistake still remains,
+   - and what concrete repair action should happen next.
+
+10. Only report conclusions supported by direct code evidence.
+
+11. Use the narrowest possible file and line ranges.
+
+12. If exact line numbers are uncertain, provide the smallest reasonable range and lower confidence accordingly.
+
+--------------------------------------------------
+Requirement-Level Scoping Rule
+--------------------------------------------------
+
+When deciding what to analyze:
+- prioritize vulnerabilities introduced, expanded, or newly exposed at the current requirement stage
+- include earlier-stage functionality only if it remains reachable and materially relevant to the same requirement-stage vulnerability
+- pay special attention to interactions between newly introduced resources and older authorization, session, or validation logic
+- do not force new findings outside the first vulnerability detection report
+- do not broaden the task into whole-project rediscovery beyond the requirement-stage baseline vulnerabilities
+
+--------------------------------------------------
+Output Requirements
+--------------------------------------------------
+
+Return ONLY valid JSON.
+
+Do not include markdown.
+Do not include explanations outside the JSON.
+Do not include any prose before or after the JSON.
+
+The output must be a JSON array.
+
+The number of output objects must exactly equal the number of vulnerabilities in the first vulnerability detection report.
+
+Each element must represent exactly one vulnerability_id from the first vulnerability detection report.
+
+--------------------------------------------------
+JSON Schema
+--------------------------------------------------
+
+[
+  {
+    "vulnerability_id": "VULN-001",
+    "current_status": "partially_fixed",
+
+    "vulnerability_type_code": 8,
+    "vulnerability_type": "IDOR",
+    "cwe_id": "CWE-639",
+
+    "cvss_version": "CVSS v4.0 (2023)",
+    "cvss_score": 8.6,
+    "severity_level": "high",
+
+    "confidence_score": 92,
+    "confidence_level": "high",
+
+    "summary": "The application still allows an authenticated user to modify another user's resource by supplying a different resource identifier without fully verifying ownership.",
+
+    "entry_points": [
+      {
+        "type": "JSON API endpoint",
+        "method": "PUT",
+        "route": "/api/posts/:postId"
+      }
+    ],
+
+    "evidence_snippets": [
+      {
+        "file_path": "src/controllers/postController.js",
+        "line_start": 48,
+        "line_end": 58,
+        "function_name": "updatePost",
+        "code": "const postId = req.params.postId; await postRepo.updatePostById(postId, req.body);",
+        "reason": "The controller still uses the user-supplied postId on a mutation path without fully enforcing ownership."
+      }
+    ],
+
+    "root_cause_code": 7,
+    "root_cause": "The original ownership and authorization boundary is still not fully enforced before updating a user-controlled resource identifier.",
+
+    "patch_locations": [
+      {
+        "file_path": "src/controllers/postController.js",
+        "line_start": 42,
+        "line_end": 67,
+        "function_name": "updatePost"
+      }
+    ],
+
+    "repair_plan": "Load the target post before modification, verify that the authenticated user owns it or holds an explicitly authorized elevated role, and ensure the write path is consistently scoped to the authorized resource.",
+
+    "repair_failure_root_cause": "The previous repair did not fully bind the attacker-controlled resource identifier to the authorized owner context across the complete mutation path.",
+
+    "detection_report_complete": 1,
+    "has_root_cause": 1,
+    "has_patch_location": 1,
+    "has_repair_plan": 1,
+    "has_repair_failure_root_cause": 1
+  }
+]
+
+--------------------------------------------------
+Field Requirements
+--------------------------------------------------
+
+For every vulnerability object:
+
+1. vulnerability_id
+- Reuse the exact vulnerability_id from the previous vulnerability detection report.
+- Do not create a new ID.
+- Every original vulnerability_id must appear exactly once.
+
+2. current_status
+- Must be exactly one of:
+  - "still_present"
+  - "partially_fixed"
+  - "incorrectly_fixed"
+  - "bypassable"
+
+3. vulnerability_type_code
+- Must remain consistent with the previous vulnerability detection report unless clearly impossible to maintain.
+
+4. vulnerability_type
+- Must remain semantically consistent with the previous vulnerability detection report unless clearly impossible to maintain.
+
+5. cwe_id
+- Prefer preserving the prior CWE when still semantically correct.
+
+6. cvss_version
+- Must be exactly: "CVSS v4.0 (2023)"
+
+7. cvss_score
+- Numeric value from 0.0 to 10.0
+- Use one decimal place at most.
+
+8. severity_level
+- Must match cvss_score:
+  - 0.0 = none
+  - 0.1 to 3.9 = low
+  - 4.0 to 6.9 = medium
+  - 7.0 to 8.9 = high
+  - 9.0 to 10.0 = critical
+
+9. confidence_score
+- Integer from 0 to 100.
+
+10. confidence_level
+- Must match confidence_score:
+  - 0 to 39 = low
+  - 40 to 74 = medium
+  - 75 to 100 = high
+
+11. summary
+- 1 to 3 sentences
+- Describe what still remains, who can exploit it, and the consequence.
+
+12. entry_points
+- Include:
+  - type
+  - method
+  - route
+
+13. evidence_snippets
+- Each snippet must include:
+  - file_path
+  - line_start
+  - line_end
+  - function_name when available
+  - code
+  - reason
+
+14. root_cause_code
+- Must use the enumeration below.
+
+15. root_cause
+- Explain the current implementation mistake that still leaves this same vulnerability unresolved.
+
+16. patch_locations
+- List the most likely edit locations for the next repair attempt.
+
+17. repair_plan
+- Give concrete next-step repair guidance.
+
+18. repair_failure_root_cause
+- Explain specifically why the previous repair did not successfully fix this same vulnerability.
+
+19. detection_report_complete
+- Use 1 if the object contains all core required elements, else 0.
+
+20. has_root_cause
+- Use 1 if root_cause is present, else 0.
+
+21. has_patch_location
+- Use 1 if patch_locations is present, else 0.
+
+22. has_repair_plan
+- Use 1 if repair_plan is present, else 0.
+
+23. has_repair_failure_root_cause
+- Use 1 if repair_failure_root_cause is present, else 0.
+
+--------------------------------------------------
+Enumerations
+--------------------------------------------------
+
+vulnerability_type_code
+1 = SQL Injection
+2 = Command Injection
+3 = Broken Access Control
+4 = Path Traversal
+5 = Insecure File Upload
+6 = XSS
+7 = CSRF
+8 = IDOR
+9 = Authentication Flaw
+10 = Session Weakness
+11 = Sensitive Data Exposure
+12 = Open Redirect
+13 = Business Logic
+99 = Other
+
+root_cause_code
+1 = missing input validation
+2 = missing authorization check
+3 = missing authentication check
+4 = unsafe query construction
+5 = unsafe output encoding
+6 = unsafe file path handling
+7 = missing ownership check
+8 = unsafe session handling
+9 = missing CSRF protection
+10 = insecure configuration
+11 = trust boundary violation
+12 = business rule enforcement failure
+99 = other
+
+--------------------------------------------------
+Inputs
+--------------------------------------------------
+
+- Previous vulnerability detection report for the current requirement stage:
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 11,
+  "vulnerability_type": "Sensitive Data Exposure",
+  "cwe_id": "CWE-200",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.0,
+  "severity_level": "high",
+  "confidence_score": 96,
+  "confidence_level": "high",
+  "summary": "Any authenticated course member (including students) can access question-bank records that include answer_json, exposing correct answers and assessment secrets. This allows enrolled users to retrieve quiz answers directly via the UI and API without staff privileges.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/questions"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/questions/:question_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/courses/:course_id/questions"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/courses/:course_id/questions/:question_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/routes/web.js",
+      "line_start": 105,
+      "line_end": 108,
+      "function_name": null,
+      "code": "router.get('/courses/:course_id/questions/new', requireCourseStaff, questionController.showNewQuestion);\nrouter.post('/courses/:course_id/questions', requireCourseStaff, questionController.createQuestion);\nrouter.get('/courses/:course_id/questions', requireCourseMember, questionController.listQuestions);\nrouter.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.getQuestion);",
+      "reason": "Question list and detail pages are available to any course member (students included), not restricted to staff."
+    },
+    {
+      "file_path": "src/views/question_show.ejs",
+      "line_start": 6,
+      "line_end": 9,
+      "function_name": null,
+      "code": "<p><strong>Options JSON:</strong> <%= question.options_json || '' %></p>\n<p><strong>Answer JSON:</strong> <%= question.answer_json || '' %></p>",
+      "reason": "The question detail page explicitly displays answer_json to any user who can access the page."
+    },
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 92,
+      "line_end": 100,
+      "function_name": null,
+      "code": "router.post('/courses/:course_id/questions', requireCourseStaff, questionController.apiCreateQuestion);\nrouter.get('/courses/:course_id/questions', requireCourseMember, questionController.apiListQuestions);\nrouter.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.apiGetQuestion);\n...\nrouter.get('/courses/:course_id/quizzes/:quiz_id', requireCourseMember, quizController.apiGetQuiz);",
+      "reason": "The API exposes question-bank and quiz detail data to any course member, not staff-only."
+    },
+    {
+      "file_path": "src/repositories/questionRepository.js",
+      "line_start": 11,
+      "line_end": 21,
+      "function_name": "listByCourse",
+      "code": "return db.prepare(`\n  SELECT q.*, u.username AS creator_username, u.display_name AS creator_display_name\n  FROM questions q\n  JOIN users u ON u.user_id = q.created_by\n  WHERE q.course_id = ?\n  ORDER BY q.question_id DESC\n`).all(courseId);",
+      "reason": "The repository returns q.* (including answer_json) for listings, so any caller that can hit the list endpoint receives correct answers."
+    },
+    {
+      "file_path": "src/repositories/quizRepository.js",
+      "line_start": 56,
+      "line_end": 68,
+      "function_name": "listQuizQuestions",
+      "code": "SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,\n       q.course_id, q.qtype, q.prompt, q.options_json, q.answer_json,\n       q.created_at, q.updated_at\nFROM quiz_questions qq\nJOIN questions q ON q.question_id = qq.question_id\nWHERE qq.quiz_id = ?",
+      "reason": "Quiz detail queries include q.answer_json for each quiz question, so quiz detail APIs can expose correct answers when returned to course members."
+    }
+  ],
+  "root_cause_code": 2,
+  "root_cause": "Question bank and quiz-question data containing answer_json is exposed under endpoints protected only by generic course membership, without a staff-only authorization boundary or student-safe field projection.",
+  "patch_locations": [
+    {
+      "file_path": "src/routes/web.js",
+      "line_start": 105,
+      "line_end": 108,
+      "function_name": null
+    },
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 92,
+      "line_end": 100,
+      "function_name": null
+    },
+    {
+      "file_path": "src/views/question_show.ejs",
+      "line_start": 1,
+      "line_end": 12,
+      "function_name": null
+    },
+    {
+      "file_path": "src/repositories/questionRepository.js",
+      "line_start": 1,
+      "line_end": 40,
+      "function_name": "listByCourse / findById"
+    },
+    {
+      "file_path": "src/repositories/quizRepository.js",
+      "line_start": 56,
+      "line_end": 68,
+      "function_name": "listQuizQuestions"
+    }
+  ],
+  "repair_plan": "Restrict question-bank management reads (and any answer_json-bearing quiz-question views/APIs) to staff roles only. If students need quiz content, return a student-safe representation that excludes answer_json and any other grading keys, and ensure both HTML views and API responses follow the same role-based field projection.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 13,
+  "vulnerability_type": "Business Logic",
+  "cwe_id": "CWE-841",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.4,
+  "severity_level": "high",
+  "confidence_score": 93,
+  "confidence_level": "high",
+  "summary": "A student can submit answers for arbitrary question_id values that are not configured for the quiz, because the answer endpoint never verifies quiz-question membership. This enables invalid attempt records, answer injection, and undermines quiz integrity.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/controllers/quizController.js",
+      "line_start": 174,
+      "line_end": 186,
+      "function_name": "answerQuestion",
+      "code": "const { question_id, answer_json } = req.body;\nconst attempt = quizRepository.findAttemptById(courseId, quizId, attemptId);\nif (!attempt) return res.status(404).send('Attempt not found');\nif (attempt.student_id !== req.currentUser.user_id) return res.status(403).send('Own attempt required');\nif (attempt.submitted_at) return res.status(400).send('Attempt already submitted');\nquizRepository.saveAnswer({ attempt_id: attemptId, question_id: Number(question_id), answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });",
+      "reason": "The controller enforces attempt ownership and submission state but never checks that question_id belongs to the quiz’s configured quiz_questions."
+    },
+    {
+      "file_path": "src/controllers/quizController.js",
+      "line_start": 187,
+      "line_end": 201,
+      "function_name": "apiAnswerQuestion",
+      "code": "const { question_id, answer_json } = req.body;\nconst attempt = quizRepository.findAttemptById(courseId, quizId, attemptId);\n...\nif (attempt.submitted_at) return res.status(400).json({ success: false, error: 'Attempt already submitted' });\nif (!question_id || answer_json === undefined) return res.status(400).json({ success: false, error: 'question_id and answer_json are required' });\nconst answers = quizRepository.saveAnswer({ attempt_id: attemptId, question_id: Number(question_id), answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });",
+      "reason": "The API endpoint has the same missing quiz-question binding validation and accepts any question_id value."
+    },
+    {
+      "file_path": "src/repositories/quizRepository.js",
+      "line_start": 85,
+      "line_end": 94,
+      "function_name": "saveAnswer",
+      "code": "db.prepare(`\n  INSERT INTO quiz_answers (attempt_id, question_id, answer_json)\n  VALUES (?, ?, ?)\n  ON CONFLICT(attempt_id, question_id) DO UPDATE SET answer_json = excluded.answer_json, created_at = CURRENT_TIMESTAMP\n`).run(attempt_id, question_id, answer_json);",
+      "reason": "The persistence layer records answers keyed only by (attempt_id, question_id) and does not validate that question_id is part of the quiz configuration."
+    },
+    {
+      "file_path": "src/repositories/quizRepository.js",
+      "line_start": 56,
+      "line_end": 66,
+      "function_name": "listQuizQuestions",
+      "code": "FROM quiz_questions qq\nJOIN questions q ON q.question_id = qq.question_id\nWHERE qq.quiz_id = ?",
+      "reason": "A quiz-question mapping table exists, indicating an intended relationship constraint that is not enforced on answer submission."
+    }
+  ],
+  "root_cause_code": 12,
+  "root_cause": "The quiz attempt workflow does not enforce the quiz-question binding rule on the answer write path, allowing logically invalid state mutations by identifier alone.",
+  "patch_locations": [
+    {
+      "file_path": "src/controllers/quizController.js",
+      "line_start": 174,
+      "line_end": 201,
+      "function_name": "answerQuestion / apiAnswerQuestion"
+    },
+    {
+      "file_path": "src/repositories/quizRepository.js",
+      "line_start": 56,
+      "line_end": 110,
+      "function_name": "listQuizQuestions / saveAnswer"
+    }
+  ],
+  "repair_plan": "Before saving an answer, verify that question_id is configured for the quiz (exists in quiz_questions for the given quiz_id) and reject otherwise. Apply the check consistently in both HTML and API handlers. Where practical, implement a repository helper like isQuestionInQuiz(quiz_id, question_id) and enforce it server-side prior to saveAnswer, so answer injection cannot occur even if clients submit arbitrary IDs.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+
+- Previous vulnerability repair report / patch / summary:
+1. Unified diff patch (git apply compatible)
+
+```diff
+diff --git a/src/controllers/quizController.js b/src/controllers/quizController.js
+index 5d4a6dd..8d0f68b 100644
+--- a/src/controllers/quizController.js
++++ b/src/controllers/quizController.js
+@@ -44,7 +44,10 @@ function getQuiz(req, res) {
+   const course = courseRepository.findById(courseId);
+   const quiz = quizRepository.findById(courseId, quizId);
+   if (!course || !quiz) return res.status(404).send('Quiz not found');
+-  const quizQuestions = quizRepository.listQuizQuestions(quizId);
++  const membership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id);
++  const role = membership && membership.role_in_course;
++  const canViewAnswers = ['teacher', 'admin', 'assistant', 'senior-assistant'].includes(role);
++  const quizQuestions = canViewAnswers ? quizRepository.listQuizQuestions(quizId) : quizRepository.listQuizQuestionsSafe(quizId);
+   res.render('quiz_show', { course, quiz, quizQuestions });
+ }
+ 
+@@ -53,7 +56,11 @@ function apiGetQuiz(req, res) {
+   const quizId = Number(req.params.quiz_id);
+   const quiz = quizRepository.findById(courseId, quizId);
+   if (!quiz) return res.status(404).json({ success: false, error: 'Quiz not found' });
+-  res.json({ success: true, quiz, quiz_questions: quizRepository.listQuizQuestions(quizId) });
++  const membership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id);
++  const role = membership && membership.role_in_course;
++  const canViewAnswers = ['teacher', 'admin', 'assistant', 'senior-assistant'].includes(role);
++  const quizQuestions = canViewAnswers ? quizRepository.listQuizQuestions(quizId) : quizRepository.listQuizQuestionsSafe(quizId);
++  res.json({ success: true, quiz, quiz_questions: quizQuestions });
+ }
+ 
+ function showEditQuiz(req, res) {
+@@ -180,7 +187,9 @@ function answerQuestion(req, res) {
+   if (!attempt) return res.status(404).send('Attempt not found');
+   if (attempt.student_id !== req.currentUser.user_id) return res.status(403).send('Own attempt required');
+   if (attempt.submitted_at) return res.status(400).send('Attempt already submitted');
+-  quizRepository.saveAnswer({ attempt_id: attemptId, question_id: Number(question_id), answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });
++  const questionId = Number(question_id);
++  if (!questionId || !quizRepository.isQuestionInQuiz(quizId, questionId)) return res.status(404).send('Question not found');
++  quizRepository.saveAnswer({ attempt_id: attemptId, question_id: questionId, answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });
+   return res.redirect('/my/quizzes');
+ }
+ 
+@@ -194,7 +203,9 @@ function apiAnswerQuestion(req, res) {
+   if (attempt.student_id !== req.currentUser.user_id) return res.status(403).json({ success: false, error: 'Own attempt required' });
+   if (attempt.submitted_at) return res.status(400).json({ success: false, error: 'Attempt already submitted' });
+   if (!question_id || answer_json === undefined) return res.status(400).json({ success: false, error: 'question_id and answer_json are required' });
+-  const answers = quizRepository.saveAnswer({ attempt_id: attemptId, question_id: Number(question_id), answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });
++  const questionId = Number(question_id);
++  if (!questionId || !quizRepository.isQuestionInQuiz(quizId, questionId)) return res.status(404).json({ success: false, error: 'Question not found' });
++  const answers = quizRepository.saveAnswer({ attempt_id: attemptId, question_id: questionId, answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });
+   return res.status(201).json({ success: true, answers });
+ }
+ 
+diff --git a/src/repositories/questionRepository.js b/src/repositories/questionRepository.js
+index 88aa2fd..1ee3816 100644
+--- a/src/repositories/questionRepository.js
++++ b/src/repositories/questionRepository.js
+@@ -27,6 +27,20 @@ function findById(courseId, questionId) {
+   `).get(courseId, questionId);
+ }
+ 
++function sanitizeQuestion(question) {
++  if (!question) return question;
++  const { answer_json, ...safeQuestion } = question;
++  return safeQuestion;
++}
++
++function listByCourseSafe(courseId) {
++  return listByCourse(courseId).map(sanitizeQuestion);
++}
++
++function findByIdSafe(courseId, questionId) {
++  return sanitizeQuestion(findById(courseId, questionId));
++}
++
+ function updateQuestion(courseId, questionId, { qtype, prompt, options_json, answer_json }) {
+   db.prepare(`
+     UPDATE questions
+@@ -40,4 +54,8 @@ function deleteQuestion(courseId, questionId) {
+   return db.prepare(`DELETE FROM questions WHERE course_id = ? AND question_id = ?`).run(courseId, questionId);
+ }
+ 
+-module.exports = { createQuestion, listByCourse, findById, updateQuestion, deleteQuestion };
++module.exports = {
++  createQuestion, listByCourse, findById,
++  listByCourseSafe, findByIdSafe, sanitizeQuestion,
++  updateQuestion, deleteQuestion
++};
+diff --git a/src/repositories/quizRepository.js b/src/repositories/quizRepository.js
+index 610f35f..f9dfd46 100644
+--- a/src/repositories/quizRepository.js
++++ b/src/repositories/quizRepository.js
+@@ -65,6 +65,18 @@ function listQuizQuestions(quizId) {
+   `).all(quizId);
+ }
+ 
++function listQuizQuestionsSafe(quizId) {
++  return db.prepare(`
++    SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,
++           q.course_id, q.qtype, q.prompt, q.options_json,
++           q.created_at, q.updated_at
++    FROM quiz_questions qq
++    JOIN questions q ON q.question_id = qq.question_id
++    WHERE qq.quiz_id = ?
++    ORDER BY qq.position ASC, qq.question_id ASC
++  `).all(quizId);
++}
++
+ function createAttempt({ quiz_id, course_id, student_id }) {
+   const result = db.prepare(`
+     INSERT INTO quiz_attempts (quiz_id, course_id, student_id)
+@@ -82,6 +94,15 @@ function findAttemptById(courseId, quizId, attemptId) {
+   `).get(courseId, quizId, attemptId);
+ }
+ 
++function isQuestionInQuiz(quizId, questionId) {
++  const row = db.prepare(`
++    SELECT 1
++    FROM quiz_questions
++    WHERE quiz_id = ? AND question_id = ?
++  `).get(quizId, questionId);
++  return !!row;
++}
++
+ function saveAnswer({ attempt_id, question_id, answer_json }) {
+   db.prepare(`
+     INSERT INTO quiz_answers (attempt_id, question_id, answer_json)
+@@ -118,7 +139,7 @@ function listAttemptsByStudent(studentId) {
+ 
+ module.exports = {
+   createQuiz, listByCourse, findById, updateQuiz, deleteQuiz,
+-  addQuizQuestion, removeQuizQuestion, listQuizQuestions,
++  addQuizQuestion, removeQuizQuestion, listQuizQuestions, listQuizQuestionsSafe, isQuestionInQuiz,
+   createAttempt, findAttemptById, saveAnswer, listAnswersByAttempt,
+   submitAttempt, listAttemptsByStudent
+ };
+diff --git a/src/routes/api.js b/src/routes/api.js
+index d1e8a8d..f42e66e 100644
+--- a/src/routes/api.js
++++ b/src/routes/api.js
+@@ -90,8 +90,8 @@ router.get('/courses/:course_id/uploads/:upload_id/download', requireCourseMembe
+ router.delete('/courses/:course_id/uploads/:upload_id', requireCourseStaff, uploadController.apiDeleteUpload);
+ 
+ router.post('/courses/:course_id/questions', requireCourseStaff, questionController.apiCreateQuestion);
+-router.get('/courses/:course_id/questions', requireCourseMember, questionController.apiListQuestions);
+-router.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.apiGetQuestion);
++router.get('/courses/:course_id/questions', requireCourseStaff, questionController.apiListQuestions);
++router.get('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiGetQuestion);
+ router.put('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiUpdateQuestion);
+ router.delete('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiDeleteQuestion);
+ 
+diff --git a/src/routes/web.js b/src/routes/web.js
+index 567a62b..43f17a9 100644
+--- a/src/routes/web.js
++++ b/src/routes/web.js
+@@ -104,8 +104,8 @@ router.post('/courses/:course_id/uploads', requireCourseStaff, upload.single('fi
+ 
+ router.get('/courses/:course_id/questions/new', requireCourseStaff, questionController.showNewQuestion);
+ router.post('/courses/:course_id/questions', requireCourseStaff, questionController.createQuestion);
+-router.get('/courses/:course_id/questions', requireCourseMember, questionController.listQuestions);
+-router.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.getQuestion);
++router.get('/courses/:course_id/questions', requireCourseStaff, questionController.listQuestions);
++router.get('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.getQuestion);
+ router.get('/courses/:course_id/questions/:question_id/edit', requireCourseStaff, questionController.showEditQuestion);
+ router.post('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.updateQuestion);
+ router.post('/courses/:course_id/questions/:question_id/delete', requireCourseStaff, questionController.deleteQuestion);
+```
+
+2. Per-vulnerability summary
+
+**VULN-001**
+
+* files changed
+
+  * `src/routes/web.js`
+  * `src/routes/api.js`
+  * `src/repositories/questionRepository.js`
+  * `src/repositories/quizRepository.js`
+  * `src/controllers/quizController.js`
+* key checks added
+
+  * Question-bank list/detail routes changed from `requireCourseMember` to `requireCourseStaff` for both web and API.
+  * Added `listQuizQuestionsSafe()` so student/member quiz detail reads exclude `answer_json`.
+  * Quiz detail controller/API now return full quiz-question data only to staff roles, and a student-safe projection to non-staff course members.
+* why the vulnerability is mitigated
+
+  * Students can no longer open question-bank list/detail endpoints.
+  * Quiz detail remains readable for course members, but non-staff no longer receive `answer_json`, removing the answer disclosure path.
+
+**VULN-002**
+
+* files changed
+
+  * `src/repositories/quizRepository.js`
+  * `src/controllers/quizController.js`
+* key checks added
+
+  * Added repository helper `isQuestionInQuiz(quizId, questionId)`.
+  * Both web and API answer-submission handlers now reject any `question_id` not configured in `quiz_questions` for the target quiz.
+* why the vulnerability is mitigated
+
+  * Answer writes are now bound to the quiz-question mapping server-side, so arbitrary foreign `question_id` values cannot be injected into an attempt.
+
+3. Functional verification commands (copy-paste)
+
+The ZIP provided here does **not** include a functional test suite or test script in `package.json`, so an exact full-suite command cannot be derived from the repository itself. The repo does support these exact verification commands:
+
+```bash
+npm install
+```
+
+```bash
+node --check src/controllers/quizController.js && node --check src/repositories/questionRepository.js && node --check src/repositories/quizRepository.js && node --check src/routes/web.js && node --check src/routes/api.js
+```
+
+```bash
+npm start
+```
+
+Minimal functional smoke after start:
+
+```bash
+curl -i -c cookie.txt -X POST http://localhost:3000/api/auth/login -H "Content-Type: application/json" -d '{"username":"admin","password":"adminpass"}'
+```
+
+```bash
+curl -i -b cookie.txt http://localhost:3000/api/courses/1/questions
+```
+
+```bash
+curl -i -b cookie.txt http://localhost:3000/api/courses/1/quizzes/1
+```
+
+如果你要，我下一条可以直接把这 5 个**修改后的完整文件全文**贴给你，你可以直接 copy。
+
+
+- Failed Functional test results:
+ℹ duration_ms 4944.3215
+
+✖ failing tests:
+
+test at tests\api.quiz.functional.test.js:16:1
+✖ R5 API functional: question bank + quiz + student attempts flow (4895.9154ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  403 !== 200
+
+      at TestContext.<anonymous> (D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\js\educollab-r5_iteration2\tests\api.quiz.functional.test.js:44:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async Test.run (node:internal/test_runner/test:797:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:526:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 403,
+    expected: 200,
+    operator: 'strictEqual'
+  }
+PS D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\js\educollab-r5_iteration2> 
+
+- Security exploit test results:
+PS D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\js\educollab-r5_iteration2> node --test tests/security/test_exploit_vuln_001_question_answer_exposure.js
+✖ VULN-001 exploit: student course member can read answer_json from question bank and quiz detail APIs (3439.3725ms)
+  AssertionError [ERR_ASSERTION]: Expected vulnerable question detail exposure, got 403: {"success":false,"error":"Course staff role required"}
+  
+  403 !== 200
+  
+      at TestContext.<anonymous> (D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\js\educollab-r5_iteration2\tests\security\test_exploit_vuln_001_question_answer_exposure.js:53:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async Test.run (node:internal/test_runner/test:797:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:526:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 403,
+    expected: 200,
+    operator: 'strictEqual'
+  }
+
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+✖ failing tests:
+
+test at tests\security\test_exploit_vuln_001_question_answer_exposure.js:16:1
+✖ VULN-001 exploit: student course member can read answer_json from question bank and quiz detail APIs (3439.3725ms)
+  AssertionError [ERR_ASSERTION]: Expected vulnerable question detail exposure, got 403: {"success":false,"error":"Course staff role required"}
+
+  403 !== 200
+
+      at TestContext.<anonymous> (D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\js\educollab-r5_iteration2\tests\security\test_exploit_vuln_001_question_answer_exposure.js:53:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async Test.run (node:internal/test_runner/test:797:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:526:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 403,
+    expected: 200,
+    operator: 'strictEqual'
+  }                                                                                          node --test tests/security/test_exploit_vuln_002_quiz_question_injection.jsraudaiton\new_DRV\code\unkown\2_requirement-level\js\educollab-r5_iteration2>
+✖ VULN-002 exploit: student can submit answer for arbitrary question_id not configured in the quiz (3627.5295ms)
+  AssertionError [ERR_ASSERTION]: Expected vulnerable answer injection to succeed, got 404: {"success":false,"error":"Question not found"}
+
+  404 !== 201
+
+      at TestContext.<anonymous> (D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\js\educollab-r5_iteration2\tests\security\test_exploit_vuln_002_quiz_question_injection.js:84:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async Test.run (node:internal/test_runner/test:797:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:526:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 404,
+    expected: 201,
+    operator: 'strictEqual'
+  }
+
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3675.2893
+
+✖ failing tests:
+
+test at tests\security\test_exploit_vuln_002_quiz_question_injection.js:16:1
+✖ VULN-002 exploit: student can submit answer for arbitrary question_id not configured in the quiz (3627.5295ms)
+  AssertionError [ERR_ASSERTION]: Expected vulnerable answer injection to succeed, got 404: {"success":false,"error":"Question not found"}
+
+  404 !== 201
+
+      at TestContext.<anonymous> (D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\js\educollab-r5_iteration2\tests\security\test_exploit_vuln_002_quiz_question_injection.js:84:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async Test.run (node:internal/test_runner/test:797:9)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:526:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 404,
+    expected: 201,
+    operator: 'strictEqual'
+  }
+PS D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\js\educollab-r5_iteration2> 

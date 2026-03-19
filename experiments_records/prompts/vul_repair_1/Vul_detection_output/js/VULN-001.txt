@@ -1,0 +1,81 @@
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.8,
+  "severity_level": "high",
+  "confidence_score": 95,
+  "confidence_level": "high",
+  "summary": "A teacher or course admin in one course can modify or remove membership records belonging to a different course by supplying a foreign membership_id. This allows unauthorized role changes or member removal across course boundaries.",
+  "entry_points": [
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id/members/:membership_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "DELETE",
+      "route": "/api/courses/:course_id/members/:membership_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/members/:membership_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/members/:membership_id/delete"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 37,
+      "line_end": 40,
+      "function_name": null,
+      "code": "router.post('/courses/:course_id/members', auth.requireLogin, auth.requireCourseMember, auth.requireTeacherOrAdmin, membershipCtrl.addMember);\nrouter.get('/courses/:course_id/members', auth.requireLogin, auth.requireCourseMember, membershipCtrl.listMembers);\nrouter.put('/courses/:course_id/members/:membership_id', auth.requireLogin, auth.requireCourseMember, auth.requireTeacherOrAdmin, membershipCtrl.updateMemberRole);\nrouter.delete('/courses/:course_id/members/:membership_id', auth.requireLogin, auth.requireCourseMember, auth.requireTeacherOrAdmin, membershipCtrl.removeMember);",
+      "reason": "Authorization is based on the course_id in the route, but the update and delete operations target a separate membership_id object supplied by the client."
+    },
+    {
+      "file_path": "src/controllers/membershipController.js",
+      "line_start": 30,
+      "line_end": 42,
+      "function_name": "updateMemberRole / removeMember",
+      "code": "const course_id = Number(req.params.course_id);\nconst membership_id = Number(req.params.membership_id);\nconst { role_in_course } = req.body;\nconst updated = membershipRepo.updateRole(membership_id, role_in_course);\n...\nmembershipRepo.removeMember(membership_id);",
+      "reason": "The controller never loads the target membership record to verify that it belongs to req.params.course_id before changing or deleting it."
+    },
+    {
+      "file_path": "src/repos/membershipRepo.js",
+      "line_start": 28,
+      "line_end": 34,
+      "function_name": "updateRole / removeMember",
+      "code": "db.prepare('UPDATE memberships SET role_in_course=? WHERE membership_id=?').run(role_in_course, membership_id);\n...\ndb.prepare('DELETE FROM memberships WHERE membership_id=?').run(membership_id);",
+      "reason": "Database writes are scoped only by membership_id and do not constrain the operation to the authorized course."
+    }
+  ],
+  "root_cause_code": 11,
+  "root_cause": "The code trusts a cross-boundary object identifier (membership_id) without verifying that the referenced membership row belongs to the course on which authorization was performed.",
+  "patch_locations": [
+    {
+      "file_path": "src/controllers/membershipController.js",
+      "line_start": 30,
+      "line_end": 45,
+      "function_name": "updateMemberRole / removeMember"
+    },
+    {
+      "file_path": "src/repos/membershipRepo.js",
+      "line_start": 10,
+      "line_end": 34,
+      "function_name": "getById / updateRole / removeMember"
+    }
+  ],
+  "repair_plan": "Before updating or deleting a membership, load the target membership by membership_id and verify that its course_id matches the route course_id and that the acting user is authorized for that specific course. Scope the write path by both membership_id and course_id, or replace membership_id-only mutations with course-scoped repository methods.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

@@ -1,0 +1,95 @@
+{
+"vulnerability_id": "VULN-008",
+"vulnerability_type_code": 13,
+"vulnerability_type": "Business Logic",
+"cwe_id": "CWE-841",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.2,
+"severity_level": "high",
+"confidence_score": 94,
+"confidence_level": "high",
+"summary": "Quiz attempt integrity can be bypassed because the server accepts arbitrary question_id values for an attempt and also permits answer updates after the attempt has already been submitted. A student can therefore record answers for questions not bound to the quiz and continue changing answers after final submission.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 34,
+"line_end": 46,
+"function_name": "answer",
+"code": "$questionId = (int)($_POST['question_id'] ?? 0); ... $attempt = $repo->getAttemptById($attemptId); if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { ... } $repo->upsertAnswer($attemptId, $questionId, $answerJson);",
+"reason": "The controller verifies attempt ownership but does not verify that question_id belongs to the quiz or that the attempt is still open."
+},
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 49,
+"line_end": 58,
+"function_name": "submit",
+"code": "$attempt = $repo->getAttemptById($attemptId); if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { ... } $repo->submitAttempt($attemptId);",
+"reason": "Submission only sets submitted_at; no later write paths check this state before accepting additional answers."
+},
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 79,
+"line_end": 103,
+"function_name": "apiAnswer/apiSubmit",
+"code": "$questionId = (int)($data['question_id'] ?? 0); ... if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) ... $repo->upsertAnswer($attemptId, $questionId, $answerJson); ... $repo->submitAttempt($attemptId);",
+"reason": "The API has the same missing quiz-question binding validation and missing post-submission state enforcement."
+},
+{
+"file_path": "src/repos/QuizRepo.php",
+"line_start": 66,
+"line_end": 74,
+"function_name": "upsertAnswer/submitAttempt",
+"code": "INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) VALUES (?,?,?,?) ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json ... UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?",
+"reason": "The persistence layer accepts any question_id for the attempt and explicitly supports overwriting an existing answer even after submission because it never checks submitted_at or quiz membership."
+}
+],
+"root_cause_code": 12,
+"root_cause": "The quiz workflow does not enforce the intended state machine or quiz-question binding: answers are trusted by identifier alone, and the system never prevents writes after an attempt has transitioned to submitted.",
+"patch_locations": [
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 34,
+"line_end": 58,
+"function_name": "answer/submit"
+},
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 79,
+"line_end": 103,
+"function_name": "apiAnswer/apiSubmit"
+},
+{
+"file_path": "src/repos/QuizRepo.php",
+"line_start": 47,
+"line_end": 74,
+"function_name": "listQuizQuestions/upsertAnswer/submitAttempt"
+}
+],
+"repair_plan": "Before accepting an answer, verify that the attempt belongs to the specified quiz and course, ensure submitted_at is still null, and confirm that the provided question_id is one of the quiz_questions bound to that quiz. After submission, reject all further answer writes server-side. The same checks must be enforced in both the HTML and API quiz attempt handlers.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

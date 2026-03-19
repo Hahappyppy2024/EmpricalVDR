@@ -1,0 +1,483 @@
+Requirement-Level Vulnerability Detection Prompt — Requirement 04: Assignment + Submission + Upload
+
+You are a senior application security engineer analyzing a complete web application project.
+
+The input is a full project codebase containing multiple files (routes, controllers, models, utilities, configuration, middleware, templates, database access code, and other supporting files).
+
+Your task is to identify realistic, exploitable security vulnerabilities and produce a structured vulnerability detection report that will later guide automated repair.
+
+Focus only on vulnerabilities supported by concrete code evidence.
+
+--------------------------------------------------
+Analysis Mode
+--------------------------------------------------
+
+This is a requirement-level vulnerability detection task.
+
+Analyze the repository as the codebase produced after implementing the current requirement increment.
+Treat the current requirement as newly introduced or newly expanded functionality, but analyze the full runnable repository state available at this requirement stage.
+
+Prior functionality from earlier requirements is still in scope if it remains reachable in the current repository.
+However, pay primary attention to:
+- the functionality introduced in the current requirement
+- interactions between the current requirement and previously implemented features
+- newly exposed trust boundaries, resource identifiers, role checks, file flows, and state transitions created at this requirement stage
+
+--------------------------------------------------
+Analysis Objective
+--------------------------------------------------
+
+Analyze the entire project as a whole system, not as isolated files.
+
+The goal is to find vulnerabilities that are:
+- realistic
+- code-supported
+- practically exploitable or security-relevant
+- useful for later automated repair
+
+Do not report speculative issues without code support.
+
+--------------------------------------------------
+Core Reporting Rules
+--------------------------------------------------
+
+1. Analyze the entire project, not just one file.
+
+2. Each vulnerability must be reported independently.
+
+3. Only report vulnerabilities supported by direct code evidence.
+
+4. If the evidence is incomplete or somewhat uncertain, lower the confidence score instead of inventing details.
+
+5. Prefer concrete vulnerabilities over generic best-practice advice.
+
+6. Do not report the same issue multiple times unless:
+   - the root cause occurs in materially different endpoints or code paths, or
+   - different resources are affected in meaningfully different ways.
+
+7. The report is intended to guide later automated repair, so every reported vulnerability must include:
+   - what the vulnerability is
+   - where it is located
+   - the exact code evidence
+   - the root cause
+   - likely patch location(s)
+   - a concrete repair plan
+
+8. Use the narrowest possible file and line ranges.
+
+9. If exact line numbers are uncertain, provide the smallest reasonable range and lower confidence accordingly.
+
+10. Avoid vague statements such as:
+   - "authorization is missing"
+   - "input should be validated"
+   - "sanitize this"
+   unless the statement clearly specifies where, why, and what should be changed.
+
+--------------------------------------------------
+Output Requirements
+--------------------------------------------------
+
+Return ONLY valid JSON.
+
+Do not include markdown.
+Do not include explanations outside the JSON.
+Do not include any prose before or after the JSON.
+
+The output must be a JSON array.
+
+Each element in the array must represent exactly one detected vulnerability.
+
+If no vulnerability is found, return exactly:
+
+[]
+
+--------------------------------------------------
+JSON Schema
+--------------------------------------------------
+
+[
+  {
+    "vulnerability_id": "VULN-001",
+
+    "vulnerability_type_code": 8,
+    "vulnerability_type": "IDOR",
+    "cwe_id": "CWE-639",
+
+    "cvss_version": "CVSS v4.0 (2023)",
+    "cvss_score": 8.6,
+    "severity_level": "high",
+
+    "confidence_score": 92,
+    "confidence_level": "high",
+
+    "summary": "The application allows an authenticated user to modify another user's resource by supplying a different resource identifier without verifying ownership.",
+
+    "entry_points": [
+      {
+        "type": "JSON API endpoint",
+        "method": "PUT",
+        "route": "/api/posts/:postId"
+      }
+    ],
+
+    "evidence_snippets": [
+      {
+        "file_path": "src/controllers/postController.js",
+        "line_start": 48,
+        "line_end": 58,
+        "function_name": "updatePost",
+        "code": "const postId = req.params.postId; await postRepo.updatePostById(postId, req.body);",
+        "reason": "The controller uses the user-supplied postId directly and does not verify that the authenticated user owns the target post."
+      },
+      {
+        "file_path": "src/repos/postRepo.js",
+        "line_start": 20,
+        "line_end": 28,
+        "function_name": "updatePostById",
+        "code": "UPDATE posts SET title=?, body=? WHERE post_id=?",
+        "reason": "The update query is scoped only by post_id and does not enforce owner_id or any equivalent ownership constraint."
+      }
+    ],
+
+    "root_cause_code": 7,
+    "root_cause": "Missing ownership and authorization checks before updating a user-controlled resource identifier.",
+
+    "patch_locations": [
+      {
+        "file_path": "src/controllers/postController.js",
+        "line_start": 42,
+        "line_end": 67,
+        "function_name": "updatePost"
+      },
+      {
+        "file_path": "src/repos/postRepo.js",
+        "line_start": 18,
+        "line_end": 30,
+        "function_name": "updatePostById"
+      }
+    ],
+
+    "repair_plan": "Load the target post before modification, verify that the authenticated user owns it or holds an explicitly authorized elevated role, and ensure the write path is consistently scoped to the authorized resource.",
+
+    "detection_report_complete": 1,
+    "has_root_cause": 1,
+    "has_patch_location": 1,
+    "has_repair_plan": 1
+  }
+]
+
+--------------------------------------------------
+Field Requirements
+--------------------------------------------------
+
+For every vulnerability object:
+
+1. vulnerability_id
+- Unique per vulnerability
+- Format: VULN-001, VULN-002, ...
+
+2. vulnerability_type_code
+- Must use the enumeration defined below
+
+3. vulnerability_type
+- Human-readable vulnerability category
+- Must match the code semantically
+- Examples: "IDOR", "Broken Access Control", "SQL Injection", "CSRF"
+
+4. cwe_id
+- Use the most appropriate CWE identifier supported by the evidence
+- If uncertain, choose the closest reasonable CWE rather than inventing a fake identifier
+
+5. cvss_version
+- Must specify the CVSS standard version used for scoring
+- Use exactly: "CVSS v4.0 (2023)"
+
+6. cvss_score
+- Numeric value from 0.0 to 10.0
+- Estimate a reasonable CVSS-style base severity score based on the specified CVSS version
+- Avoid false precision; use one decimal place at most
+
+7. severity_level
+- Must be consistent with cvss_score using this mapping:
+  - 0.0 = none
+  - 0.1 to 3.9 = low
+  - 4.0 to 6.9 = medium
+  - 7.0 to 8.9 = high
+  - 9.0 to 10.0 = critical
+
+8. confidence_score
+- Integer from 0 to 100
+- Reflect confidence in the correctness of the detection based on code evidence
+
+9. confidence_level
+- Must be consistent with confidence_score:
+  - 0 to 39 = low
+  - 40 to 74 = medium
+  - 75 to 100 = high
+
+10. summary
+- 1 to 3 sentences
+- Must describe:
+  - what the vulnerability is
+  - who can exploit it
+  - what the security consequence is
+
+11. entry_points
+- List the externally reachable entry points relevant to exploitation
+- Each entry should include:
+  - type
+  - method
+  - route
+- If the issue is not tied to a route, use the most relevant trigger point available
+
+12. evidence_snippets
+- This is the primary location-and-evidence field
+- Do not create a separate affected_files field
+- Each snippet must include:
+  - file_path
+  - line_start
+  - line_end
+  - function_name when available
+  - code
+  - reason
+- Each snippet must show concrete code evidence relevant to the vulnerability
+- Use concise code excerpts, not entire files
+- Include enough evidence to support the finding
+
+13. root_cause_code
+- Must use the enumeration defined below
+
+14. root_cause
+- Explain the underlying implementation mistake clearly and concretely
+- Focus on the actual coding/design failure, not just the symptom
+
+15. patch_locations
+- List the most likely locations that need modification
+- Each patch location must include:
+  - file_path
+  - line_start
+  - line_end
+  - function_name when available
+- Do not include patch instructions here
+- This field is only for likely edit locations
+
+16. repair_plan
+- Concrete repair guidance for a later automated repair stage
+- Describe what should be changed and how the logic should be enforced
+- Be specific about authorization scope, validation rule, query scoping, path restriction, state transition rule, or encoding behavior, depending on the issue
+
+17. detection_report_complete
+- Use 1 if the report contains all core required elements
+- Otherwise use 0
+
+18. has_root_cause
+- Use 1 if root cause is present, else 0
+
+19. has_patch_location
+- Use 1 if patch location is present, else 0
+
+20. has_repair_plan
+- Use 1 if repair plan is present, else 0
+
+--------------------------------------------------
+Enumerations
+--------------------------------------------------
+
+vulnerability_type_code
+1 = SQL Injection
+2 = Command Injection
+3 = Broken Access Control
+4 = Path Traversal
+5 = Insecure File Upload
+6 = XSS
+7 = CSRF
+8 = IDOR
+9 = Authentication Flaw
+10 = Session Weakness
+11 = Sensitive Data Exposure
+12 = Open Redirect
+13 = Business Logic
+99 = Other
+
+root_cause_code
+1 = missing input validation
+2 = missing authorization check
+3 = missing authentication check
+4 = unsafe query construction
+5 = unsafe output encoding
+6 = unsafe file path handling
+7 = missing ownership check
+8 = unsafe session handling
+9 = missing CSRF protection
+10 = insecure configuration
+11 = trust boundary violation
+12 = business rule enforcement failure
+99 = other
+
+--------------------------------------------------
+Entry Point Type Guidance
+--------------------------------------------------
+
+Use clear, human-readable values in entry_points.type such as:
+- "JSON API endpoint"
+- "server-rendered form/page"
+- "file upload handler"
+- "file download endpoint"
+- "authentication endpoint"
+- "template/render sink"
+- "background trigger"
+- "other"
+
+--------------------------------------------------
+CVSS Scoring Guidance
+--------------------------------------------------
+
+Use CVSS v4.0, released in 2023, as the scoring standard.
+
+For every vulnerability, output:
+- cvss_version
+- cvss_score
+- severity_level
+
+Use exactly:
+- "cvss_version": "CVSS v4.0 (2023)"
+
+Use a reasonable CVSS v4.0-style estimate based on:
+- how reachable the issue is
+- whether authentication is required
+- whether special privileges are required
+- whether user interaction is required
+- whether the issue affects confidentiality, integrity, or availability
+- whether the impact is limited or cross-user / cross-tenant / system-wide
+
+Do not output a full CVSS vector.
+Avoid fake precision.
+Use one decimal place at most.
+
+--------------------------------------------------
+Evidence Quality Guidance
+--------------------------------------------------
+
+Evidence must be concrete and tied to code.
+
+Good evidence usually shows one or more of:
+- a route exposing an operation
+- a controller using attacker-controlled identifiers or inputs
+- a repository or model performing an unsafe write/read/query
+- missing ownership checks
+- missing authorization checks
+- unsafe query construction
+- unsafe file path handling
+- unsafe rendering or output sinks
+- business-rule violations in state transitions
+
+Do not include vague evidence.
+
+Do not include duplicate evidence unless it supports a distinct part of the exploit chain.
+
+--------------------------------------------------
+Repair Guidance Constraints
+--------------------------------------------------
+
+The repair_plan must be useful for a later repair stage.
+
+Therefore:
+- be concrete
+- mention the relevant server-side validation or authorization rule
+- mention how data access should be constrained
+- mention how state changes should be restricted, if relevant
+- mention how file paths, uploads, or rendering should be constrained, if relevant
+
+Do not merely say:
+- "sanitize input"
+- "check auth"
+- "validate data"
+
+Instead, say exactly what should be checked and where the enforcement should occur.
+
+--------------------------------------------------
+De-duplication Rules
+--------------------------------------------------
+
+Do not create a separate affected_files field.
+
+Use evidence_snippets as the single source of truth for:
+- file location
+- line range
+- code evidence
+- local explanation
+
+Use patch_locations only for likely edit targets.
+
+If two findings are actually the same vulnerability with the same root cause and same patch area, merge them into one vulnerability entry.
+
+If the same coding flaw appears in materially different endpoints or resources, separate entries are allowed.
+
+--------------------------------------------------
+Conservative Reporting Rules
+--------------------------------------------------
+
+- Do not invent exploit chains not supported by code.
+- Do not assume deployment conditions that are not evidenced by the project.
+- Do not report missing best practices as vulnerabilities unless they create a concrete security weakness.
+- If evidence is partial, report the issue only if there is still enough code support, and lower confidence accordingly.
+
+--------------------------------------------------
+Special Instruction
+--------------------------------------------------
+
+This detection report will be used as repair guidance in a later automated repair stage.
+
+Therefore:
+- Include both vulnerability_type_code and vulnerability_type.
+- Include cvss_version, cvss_score, and severity_level for every vulnerability.
+- Use exactly: "CVSS v4.0 (2023)".
+- Do not use a separate affected_files field if the same location is already covered in evidence_snippets.
+- Every evidence snippet must include file path, line range, function name when available, code snippet, and explanation.
+- Keep repair guidance out of evidence_snippets.
+- Use patch_locations only to indicate where changes are likely needed.
+- Use repair_plan to describe how the vulnerability should be fixed.
+- Do not use count fields such as affected_file_count, evidence_snippet_count, or patch_location_count.
+- Do not include attack surface, exploitability, privilege, CIA impact, or similar standalone scoring metadata.
+- Avoid vague statements without precise code-localized support.
+- If exact line numbers are uncertain, provide the narrowest possible range and lower confidence.
+
+--------------------------------------------------
+Requirement-Specific Focus
+--------------------------------------------------
+
+Current requirement scope:
+- Assignment CRUD
+- Student submission creation and update
+- Listing of my submissions and staff-visible submission lists
+- File upload, listing, download, and delete operations
+- Attachment linkage between submissions and uploaded files
+
+At this requirement stage, prioritize vulnerabilities related to:
+- IDOR on assignment_id, submission_id, and upload_id
+- missing ownership checks on student submission updates
+- broken staff/member authorization on assignment or submission endpoints
+- insecure file upload, including unrestricted file types and active content uploads
+- broken access control on file download or direct file exposure
+- path traversal in upload or download handling
+- unsafe file path construction or storage path trust
+- attachment binding flaws between submissions and uploads
+- information disclosure via uploads or submission listings
+- CSRF on server-rendered assignment, submission, or upload forms
+
+Typical resources introduced or expanded at this stage:
+- assignments
+- submissions
+- uploaded files and storage paths
+- attachment references
+- staff vs student access boundaries
+
+--------------------------------------------------
+Requirement-Specific Scoping Rule
+--------------------------------------------------
+
+When deciding what to report:
+- prioritize vulnerabilities introduced or newly exposed by the current requirement
+- include earlier-stage vulnerabilities only if they remain reachable and materially relevant in the current repository state
+- pay special attention to interactions between new resources and older authorization/session logic
+- do not force findings for every category; report only what the code supports

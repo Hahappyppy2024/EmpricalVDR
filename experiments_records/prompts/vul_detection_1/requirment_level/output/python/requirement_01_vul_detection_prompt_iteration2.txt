@@ -1,0 +1,68 @@
+[
+{
+"vulnerability_id": "VULN-002",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 10,
+"vulnerability_type": "Session Weakness",
+"cwe_id": "CWE-321",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.8,
+"severity_level": "high",
+"confidence_score": 84,
+"confidence_level": "high",
+"summary": "The previous repair removed the literal hard-coded Flask SECRET_KEY from source, but authentication for the current requirement stage still relies entirely on a client-side signed session cookie that directly carries current_user_id. Anyone who can obtain or reuse the active signing key can still forge a session and impersonate another user, including the seeded administrator.",
+"entry_points": [
+{
+"type": "other",
+"method": "COOKIE",
+"route": "Flask session cookie"
+},
+{
+"type": "background trigger",
+"method": "INIT",
+"route": "application bootstrap"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 13,
+"line_end": 17,
+"function_name": "_load_secret_key",
+"code": "def _load_secret_key():\n    configured_secret = os.environ.get('EDUCOLLAB_SECRET_KEY', '').strip()\n    if configured_secret and configured_secret != 'educollab-dev-secret-key':\n        return configured_secret\n    return secrets.token_hex(32)",
+"reason": "The repair changed secret loading but does not refuse startup when no deployment-managed secret is configured, leaving session integrity dependent on whichever runtime signing key the process happens to use rather than enforcing the stronger deployment boundary required by the original repair plan."
+},
+{
+"file_path": "utils/auth.py",
+"line_start": 14,
+"line_end": 25,
+"function_name": "get_current_user / login_user",
+"code": "def get_current_user():\n    user_id = session.get(SESSION_USER_KEY)\n    if not user_id:\n        return None\n    return get_user_by_id(user_id)\n\n\ndef login_user(user):\n    existing_csrf_token = session.get(CSRF_TOKEN_KEY)\n    session.clear()\n    session[SESSION_USER_KEY] = user['user_id']\n    session[CSRF_TOKEN_KEY] = existing_csrf_token or secrets.token_urlsafe(32)",
+"reason": "The application still derives the authenticated identity directly from current_user_id stored in the Flask session cookie. Clearing the session on login/logout does not change the fact that a correctly signed forged cookie still controls the effective logged-in identity."
+}
+],
+"root_cause_code": 8,
+"root_cause": "The repair changed secret sourcing but did not remove the unsafe design in which authentication trusts client-side session state containing current_user_id as the sole identity assertion. The bootstrap path also fails to enforce a required deployment-managed secret and instead silently falls back to a generated process-local key.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 13,
+"line_end": 23,
+"function_name": "_load_secret_key / create_app"
+},
+{
+"file_path": "utils/auth.py",
+"line_start": 14,
+"line_end": 25,
+"function_name": "get_current_user / login_user"
+}
+],
+"repair_plan": "Require a deployment-provided strong SECRET_KEY at startup and fail initialization when it is missing, empty, or set to a known weak/default value. In addition, stop treating current_user_id in the signed client cookie as the only trusted authentication state: bind login state to a server-side session record or equivalent server-trusted session material, rotate session identifiers on login, and invalidate previously issued sessions when the signing configuration changes.",
+"repair_failure_root_cause": "The previous repair focused on replacing the literal constant secret but did not fully fix the original vulnerability boundary. It left authentication decisions bound to a forgeable signed client cookie and did not enforce the repair-plan requirement to refuse insecure or unmanaged secret configuration at bootstrap.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+}
+]

@@ -1,0 +1,694 @@
+1. Unified diff patch
+
+```diff
+diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -2,6 +2,7 @@
+ import uuid
+ from functools import wraps
+ from flask import Flask, request, session, redirect, url_for, jsonify, render_template, send_file
++from werkzeug.utils import secure_filename
+ 
+ from db import get_db, close_db
+ from repos.schema import SCHEMA_SQL
+@@ -90,6 +91,29 @@
+         return fn(course_id, *args, **kwargs)
+     return wrapper
+ 
++def is_site_admin():
++    return session.get("username") == "admin"
++
++def require_site_admin(fn):
++    @wraps(fn)
++    def wrapper(*args, **kwargs):
++        if not is_site_admin():
++            if wants_json():
++                return jsonify({"error":"admin_required"}), 403
++            return redirect(url_for("courses_list"))
++        return fn(*args, **kwargs)
++    return wrapper
++
++def can_manage_course(course, user_id):
++    if not course:
++        return False
++    if int(course["created_by"]) == int(user_id):
++        return True
++    return MembershipsRepo(get_db()).get_user_role(int(course["course_id"]), int(user_id)) in STAFF_ROLES
++
++def can_moderate_course(course_id, user_id):
++    return MembershipsRepo(get_db()).get_user_role(int(course_id), int(user_id)) in STAFF_ROLES
++
+ def ensure_upload_dir(course_id:int)->str:
+     p = os.path.join(UPLOAD_ROOT, str(course_id))
+     os.makedirs(p, exist_ok=True)
+@@ -214,12 +238,14 @@
+ # FR-U5 list_users()
+ @app.get("/admin/users")
+ @require_login
++@require_site_admin
+ def users_list():
+     db = get_db()
+     return render_template("users_list.html", users=UsersRepo(db).list_users())
+ 
+ @app.get("/api/users")
+ @require_login
++@require_site_admin
+ def api_users_list():
+     db = get_db()
+     return jsonify({"users": UsersRepo(db).list_users()})
+@@ -297,16 +323,22 @@
+     c = CoursesRepo(db).get_course(course_id)
+     if not c:
+         return "Not found", 404
++    if not can_manage_course(c, int(session["user_id"])):
++        return redirect(url_for("course_detail", course_id=course_id))
+     return render_template("course_edit.html", course=c)
+ 
+ @app.post("/courses/<int:course_id>")
+ @require_login
+ def course_update(course_id):
+     db = get_db()
++    c = CoursesRepo(db).get_course(course_id)
++    if not c:
++        return "Not found", 404
++    if not can_manage_course(c, int(session["user_id"])):
++        return redirect(url_for("course_detail", course_id=course_id))
+     title = (request.form.get("title") or "").strip()
+     description = (request.form.get("description") or "").strip()
+     if not title:
+-        c = CoursesRepo(db).get_course(course_id)
+         return render_template("course_edit.html", course=c, error="Title required")
+     CoursesRepo(db).update_course(course_id, title, description)
+     return redirect(url_for("course_detail", course_id=course_id))
+@@ -315,6 +347,11 @@
+ @require_login
+ def api_course_update(course_id):
+     db = get_db()
++    c = CoursesRepo(db).get_course(course_id)
++    if not c:
++        return jsonify({"error":"not_found"}), 404
++    if not can_manage_course(c, int(session["user_id"])):
++        return jsonify({"error":"forbidden"}), 403
+     data = request.get_json(force=True, silent=True) or {}
+     title = (data.get("title") or "").strip()
+     description = (data.get("description") or "").strip()
+@@ -328,6 +365,11 @@
+ @require_login
+ def course_delete(course_id):
+     db = get_db()
++    c = CoursesRepo(db).get_course(course_id)
++    if not c:
++        return "Not found", 404
++    if not can_manage_course(c, int(session["user_id"])):
++        return redirect(url_for("course_detail", course_id=course_id))
+     CoursesRepo(db).delete_course(course_id)
+     return redirect(url_for("courses_list"))
+ 
+@@ -335,6 +377,11 @@
+ @require_login
+ def api_course_delete(course_id):
+     db = get_db()
++    c = CoursesRepo(db).get_course(course_id)
++    if not c:
++        return jsonify({"error":"not_found"}), 404
++    if not can_manage_course(c, int(session["user_id"])):
++        return jsonify({"error":"forbidden"}), 403
+     CoursesRepo(db).delete_course(course_id)
+     return jsonify({"ok": True})
+@@ -394,10 +441,13 @@
+ @require_teacher_or_admin
+ def member_update(course_id, membership_id):
+     db = get_db()
++    membership = MembershipsRepo(db).get_membership(membership_id)
++    if not membership or int(membership["course_id"]) != int(course_id):
++        return "Not found", 404
+     role = request.form.get("role_in_course") or "student"
+     if role not in ROLE_SET:
+         role = "student"
+-    MembershipsRepo(db).update_role(membership_id, role)
++    MembershipsRepo(db).update_role(course_id, membership_id, role)
+     return redirect(url_for("members_list", course_id=course_id))
+ 
+ @app.put("/api/courses/<int:course_id>/members/<int:membership_id>")
+@@ -405,11 +455,14 @@
+ @require_teacher_or_admin
+ def api_member_update(course_id, membership_id):
+     db = get_db()
++    membership = MembershipsRepo(db).get_membership(membership_id)
++    if not membership or int(membership["course_id"]) != int(course_id):
++        return jsonify({"error":"not_found"}), 404
+     data = request.get_json(force=True, silent=True) or {}
+     role = data.get("role_in_course") or "student"
+     if role not in ROLE_SET:
+         return jsonify({"error":"invalid_role"}), 400
+-    MembershipsRepo(db).update_role(membership_id, role)
++    MembershipsRepo(db).update_role(course_id, membership_id, role)
+     return jsonify({"ok": True})
+@@ -418,7 +471,10 @@
+ @require_teacher_or_admin
+ def member_remove(course_id, membership_id):
+     db = get_db()
+-    MembershipsRepo(db).remove_member(membership_id)
++    membership = MembershipsRepo(db).get_membership(membership_id)
++    if not membership or int(membership["course_id"]) != int(course_id):
++        return "Not found", 404
++    MembershipsRepo(db).remove_member(course_id, membership_id)
+     return redirect(url_for("members_list", course_id=course_id))
+ 
+ @app.delete("/api/courses/<int:course_id>/members/<int:membership_id>")
+@@ -426,7 +482,10 @@
+ @require_teacher_or_admin
+ def api_member_remove(course_id, membership_id):
+     db = get_db()
+-    MembershipsRepo(db).remove_member(membership_id)
++    membership = MembershipsRepo(db).get_membership(membership_id)
++    if not membership or int(membership["course_id"]) != int(course_id):
++        return jsonify({"error":"not_found"}), 404
++    MembershipsRepo(db).remove_member(course_id, membership_id)
+     return jsonify({"ok": True})
+@@ -524,6 +583,9 @@
+     p = PostsRepo(db).get_post(course_id, post_id)
+     if not p:
+         return "Not found", 404
++    user_id = int(session["user_id"])
++    if int(p["author_id"]) != user_id and not can_moderate_course(course_id, user_id):
++        return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+     return render_template("post_edit.html", course_id=course_id, post=p)
+ 
+ @app.post("/courses/<int:course_id>/posts/<int:post_id>")
+@@ -531,9 +593,16 @@
+ @require_course_member
+ def post_update(course_id, post_id):
+     db = get_db()
++    p = PostsRepo(db).get_post(course_id, post_id)
++    if not p:
++        return "Not found", 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(p["author_id"]) != user_id and not is_staff:
++        return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+     title = (request.form.get("title") or "").strip()
+     body = (request.form.get("body") or "").strip()
+-    PostsRepo(db).update_post(course_id, post_id, title, body)
++    PostsRepo(db).update_post(course_id, post_id, title, body, None if is_staff else user_id)
+     return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+ 
+ @app.put("/api/courses/<int:course_id>/posts/<int:post_id>")
+@@ -541,8 +610,15 @@
+ @require_course_member
+ def api_post_update(course_id, post_id):
+     db = get_db()
++    p = PostsRepo(db).get_post(course_id, post_id)
++    if not p:
++        return jsonify({"error":"not_found"}), 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(p["author_id"]) != user_id and not is_staff:
++        return jsonify({"error":"forbidden"}), 403
+     data = request.get_json(force=True, silent=True) or {}
+-    PostsRepo(db).update_post(course_id, post_id, (data.get("title") or "").strip(), (data.get("body") or "").strip())
++    PostsRepo(db).update_post(course_id, post_id, (data.get("title") or "").strip(), (data.get("body") or "").strip(), None if is_staff else user_id)
+     return jsonify({"ok": True})
+@@ -551,7 +627,14 @@
+ @require_course_member
+ def post_delete(course_id, post_id):
+     db = get_db()
+-    PostsRepo(db).delete_post(course_id, post_id)
++    p = PostsRepo(db).get_post(course_id, post_id)
++    if not p:
++        return "Not found", 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(p["author_id"]) != user_id and not is_staff:
++        return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
++    PostsRepo(db).delete_post(course_id, post_id, None if is_staff else user_id)
+     return redirect(url_for("posts_list", course_id=course_id))
+ 
+ @app.delete("/api/courses/<int:course_id>/posts/<int:post_id>")
+@@ -559,7 +642,14 @@
+ @require_course_member
+ def api_post_delete(course_id, post_id):
+     db = get_db()
+-    PostsRepo(db).delete_post(course_id, post_id)
++    p = PostsRepo(db).get_post(course_id, post_id)
++    if not p:
++        return jsonify({"error":"not_found"}), 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(p["author_id"]) != user_id and not is_staff:
++        return jsonify({"error":"forbidden"}), 403
++    PostsRepo(db).delete_post(course_id, post_id, None if is_staff else user_id)
+     return jsonify({"ok": True})
+@@ -599,7 +689,14 @@
+ @require_course_member
+ def comment_update(course_id, post_id, comment_id):
+     db = get_db()
++    comment = CommentsRepo(db).get_comment(course_id, post_id, comment_id)
++    if not comment:
++        return "Not found", 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(comment["author_id"]) != user_id and not is_staff:
++        return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+     body = (request.form.get("body") or "").strip()
+-    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body)
++    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body, None if is_staff else user_id)
+     return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+ 
+ @app.put("/api/courses/<int:course_id>/posts/<int:post_id>/comments/<int:comment_id>")
+@@ -609,11 +706,18 @@
+ def api_comment_update(course_id, post_id, comment_id):
+     db = get_db()
++    comment = CommentsRepo(db).get_comment(course_id, post_id, comment_id)
++    if not comment:
++        return jsonify({"error":"not_found"}), 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(comment["author_id"]) != user_id and not is_staff:
++        return jsonify({"error":"forbidden"}), 403
+     data = request.get_json(force=True, silent=True) or {}
+     body = (data.get("body") or "").strip()
+     if not body:
+         return jsonify({"error":"body_required"}), 400
+-    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body)
++    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body, None if is_staff else user_id)
+     return jsonify({"ok": True})
+@@ -622,7 +726,14 @@
+ @require_course_member
+ def comment_delete(course_id, post_id, comment_id):
+     db = get_db()
+-    CommentsRepo(db).delete_comment(course_id, post_id, comment_id)
++    comment = CommentsRepo(db).get_comment(course_id, post_id, comment_id)
++    if not comment:
++        return "Not found", 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(comment["author_id"]) != user_id and not is_staff:
++        return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
++    CommentsRepo(db).delete_comment(course_id, post_id, comment_id, None if is_staff else user_id)
+     return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+ 
+ @app.delete("/api/courses/<int:course_id>/posts/<int:post_id>/comments/<int:comment_id>")
+@@ -630,7 +741,14 @@
+ @require_course_member
+ def api_comment_delete(course_id, post_id, comment_id):
+     db = get_db()
+-    CommentsRepo(db).delete_comment(course_id, post_id, comment_id)
++    comment = CommentsRepo(db).get_comment(course_id, post_id, comment_id)
++    if not comment:
++        return jsonify({"error":"not_found"}), 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(comment["author_id"]) != user_id and not is_staff:
++        return jsonify({"error":"forbidden"}), 403
++    CommentsRepo(db).delete_comment(course_id, post_id, comment_id, None if is_staff else user_id)
+     return jsonify({"ok": True})
+@@ -907,7 +1025,10 @@
+         return render_template("upload_new.html", course_id=course_id, error="file required")
+     folder = ensure_upload_dir(course_id)
+     token = uuid.uuid4().hex
+-    storage_path = os.path.join(folder, f"{token}_{f.filename}")
++    safe_name = secure_filename(f.filename or "") or "upload.bin"
++    storage_path = os.path.abspath(os.path.join(folder, f"{token}_{safe_name}"))
++    if os.path.commonpath([os.path.abspath(folder), storage_path]) != os.path.abspath(folder):
++        return render_template("upload_new.html", course_id=course_id, error="invalid_filename")
+     f.save(storage_path)
+     UploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)
+     return redirect(url_for("uploads_list", course_id=course_id))
+@@ -922,7 +1043,10 @@
+         return jsonify({"error":"file_required"}), 400
+     folder = ensure_upload_dir(course_id)
+     token = uuid.uuid4().hex
+-    storage_path = os.path.join(folder, f"{token}_{f.filename}")
++    safe_name = secure_filename(f.filename or "") or "upload.bin"
++    storage_path = os.path.abspath(os.path.join(folder, f"{token}_{safe_name}"))
++    if os.path.commonpath([os.path.abspath(folder), storage_path]) != os.path.abspath(folder):
++        return jsonify({"error":"invalid_filename"}), 400
+     f.save(storage_path)
+     upload_id = UploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)
+     return jsonify({"upload_id": upload_id})
+@@ -974,19 +1098,19 @@
+ # ========= K) Question bank =========
+ @app.get("/courses/<int:course_id>/questions")
+ @require_login
+-@require_course_member
++@require_course_staff
+ def questions_list(course_id):
+     db = get_db()
+-    items = QuestionsRepo(db).list_questions(course_id)
++    items = QuestionsRepo(db).list_questions(course_id, include_answer=True)
+     role = MembershipsRepo(db).get_user_role(course_id, int(session["user_id"]))
+     return render_template("questions_list.html", course_id=course_id, questions=items, my_role=role)
+ 
+ @app.get("/api/courses/<int:course_id>/questions")
+ @require_login
+-@require_course_member
++@require_course_staff
+ def api_questions_list(course_id):
+     db = get_db()
+-    return jsonify({"questions": QuestionsRepo(db).list_questions(course_id)})
++    return jsonify({"questions": QuestionsRepo(db).list_questions(course_id, include_answer=True)})
+@@ -1021,10 +1145,10 @@
+ 
+ @app.get("/courses/<int:course_id>/questions/<int:question_id>")
+ @require_login
+-@require_course_member
++@require_course_staff
+ def question_detail(course_id, question_id):
+     db = get_db()
+-    q = QuestionsRepo(db).get_question(course_id, question_id)
++    q = QuestionsRepo(db).get_question(course_id, question_id, include_answer=True)
+     if not q:
+         return "Not found", 404
+     role = MembershipsRepo(db).get_user_role(course_id, int(session["user_id"]))
+@@ -1032,10 +1156,10 @@
+ 
+ @app.get("/api/courses/<int:course_id>/questions/<int:question_id>")
+ @require_login
+-@require_course_member
++@require_course_staff
+ def api_question_detail(course_id, question_id):
+     db = get_db()
+-    q = QuestionsRepo(db).get_question(course_id, question_id)
++    q = QuestionsRepo(db).get_question(course_id, question_id, include_answer=True)
+     if not q:
+         return jsonify({"error":"not_found"}), 404
+     return jsonify({"question": q})
+@@ -1045,7 +1169,7 @@
+ @require_course_staff
+ def question_edit_form(course_id, question_id):
+     db = get_db()
+-    q = QuestionsRepo(db).get_question(course_id, question_id)
++    q = QuestionsRepo(db).get_question(course_id, question_id, include_answer=True)
+     if not q:
+         return "Not found", 404
+     return render_template("question_edit.html", course_id=course_id, q=q)
+@@ -1213,7 +1337,7 @@
+ def quiz_config_form(course_id, quiz_id):
+     db = get_db()
+     quiz = QuizzesRepo(db).get_quiz(course_id, quiz_id)
+-    questions = QuestionsRepo(db).list_questions(course_id)
++    questions = QuestionsRepo(db).list_questions(course_id, include_answer=True)
+     quiz_questions = QuizzesRepo(db).list_quiz_questions(quiz_id)
+     return render_template("quiz_config.html", course_id=course_id, quiz=quiz, questions=questions, quiz_questions=quiz_questions)
+@@ -1294,11 +1418,15 @@
+ def answer_question(course_id, quiz_id, attempt_id):
+     db = get_db()
+     attempt = QuizzesRepo(db).get_attempt(attempt_id)
+-    if not attempt or attempt["student_id"] != int(session["user_id"]):
++    if not attempt or attempt["student_id"] != int(session["user_id"]) or int(attempt["quiz_id"]) != int(quiz_id) or int(attempt["course_id"]) != int(course_id):
++        return "Not found", 404
++    if attempt.get("submitted_at"):
+         return "Not found", 404
+     question_id = int(request.form.get("question_id") or 0)
++    if not QuizzesRepo(db).quiz_has_question(quiz_id, question_id):
++        return "Not found", 404
+     answer_raw = (request.form.get("answer_json") or "").strip() or "{}"
+-    QuizzesRepo(db).upsert_answer(attempt_id, question_id, answer_raw)
++    QuizzesRepo(db).upsert_answer(attempt_id, quiz_id, question_id, answer_raw)
+     return redirect(url_for("take_quiz", course_id=course_id, quiz_id=quiz_id, attempt_id=attempt_id))
+ 
+ @app.post("/api/courses/<int:course_id>/quizzes/<int:quiz_id>/attempts/<int:attempt_id>/answers")
+@@ -1307,10 +1435,15 @@
+ def api_answer_question(course_id, quiz_id, attempt_id):
+     db = get_db()
+     attempt = QuizzesRepo(db).get_attempt(attempt_id)
+-    if not attempt or attempt["student_id"] != int(session["user_id"]):
++    if not attempt or attempt["student_id"] != int(session["user_id"]) or int(attempt["quiz_id"]) != int(quiz_id) or int(attempt["course_id"]) != int(course_id):
++        return jsonify({"error":"not_found"}), 404
++    if attempt.get("submitted_at"):
+         return jsonify({"error":"not_found"}), 404
+     data = request.get_json(force=True, silent=True) or {}
+-    QuizzesRepo(db).upsert_answer(attempt_id, int(data.get("question_id") or 0), json_dumps(data.get("answer_json")) or "{}")
++    question_id = int(data.get("question_id") or 0)
++    if not QuizzesRepo(db).quiz_has_question(quiz_id, question_id):
++        return jsonify({"error":"not_found"}), 404
++    QuizzesRepo(db).upsert_answer(attempt_id, quiz_id, question_id, json_dumps(data.get("answer_json")) or "{}")
+     return jsonify({"ok": True})
+@@ -1319,7 +1452,9 @@
+ def submit_attempt(course_id, quiz_id, attempt_id):
+     db = get_db()
+     attempt = QuizzesRepo(db).get_attempt(attempt_id)
+-    if not attempt or attempt["student_id"] != int(session["user_id"]):
++    if not attempt or attempt["student_id"] != int(session["user_id"]) or int(attempt["quiz_id"]) != int(quiz_id) or int(attempt["course_id"]) != int(course_id):
++        return "Not found", 404
++    if attempt.get("submitted_at"):
+         return "Not found", 404
+     QuizzesRepo(db).submit_attempt(attempt_id)
+     return redirect(url_for("quizzes_list", course_id=course_id))
+@@ -1330,7 +1465,9 @@
+ def api_submit_attempt(course_id, quiz_id, attempt_id):
+     db = get_db()
+     attempt = QuizzesRepo(db).get_attempt(attempt_id)
+-    if not attempt or attempt["student_id"] != int(session["user_id"]):
++    if not attempt or attempt["student_id"] != int(session["user_id"]) or int(attempt["quiz_id"]) != int(quiz_id) or int(attempt["course_id"]) != int(course_id):
++        return jsonify({"error":"not_found"}), 404
++    if attempt.get("submitted_at"):
+         return jsonify({"error":"not_found"}), 404
+     QuizzesRepo(db).submit_attempt(attempt_id)
+     return jsonify({"ok": True})
+diff --git a/repos/memberships_repo.py b/repos/memberships_repo.py
+--- a/repos/memberships_repo.py
++++ b/repos/memberships_repo.py
+@@ -26,12 +26,22 @@
+         r = self.db.execute("SELECT role_in_course FROM memberships WHERE course_id=? AND user_id=?", (course_id, user_id)).fetchone()
+         return r["role_in_course"] if r else None
+ 
+-    def update_role(self, membership_id, role_in_course):
+-        self.db.execute("UPDATE memberships SET role_in_course=? WHERE membership_id=?", (role_in_course, membership_id))
++    def get_membership(self, membership_id):
++        r = self.db.execute(
++            "SELECT m.*, u.username, u.display_name FROM memberships m JOIN users u ON u.user_id=m.user_id WHERE m.membership_id=?",
++            (membership_id,),
++        ).fetchone()
++        return dict(r) if r else None
++
++    def update_role(self, course_id, membership_id, role_in_course):
++        self.db.execute(
++            "UPDATE memberships SET role_in_course=? WHERE membership_id=? AND course_id=?",
++            (role_in_course, membership_id, course_id),
++        )
+         self.db.commit()
+ 
+-    def remove_member(self, membership_id):
+-        self.db.execute("DELETE FROM memberships WHERE membership_id=?", (membership_id,))
++    def remove_member(self, course_id, membership_id):
++        self.db.execute("DELETE FROM memberships WHERE membership_id=? AND course_id=?", (membership_id, course_id))
+         self.db.commit()
+ 
+     def my_memberships(self, user_id):
+diff --git a/repos/posts_repo.py b/repos/posts_repo.py
+--- a/repos/posts_repo.py
++++ b/repos/posts_repo.py
+@@ -27,15 +27,24 @@
+         ).fetchone()
+         return dict(r) if r else None
+ 
+-    def update_post(self, course_id, post_id, title, body):
+-        self.db.execute(
+-            "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?",
+-            (title, body, now_iso(), course_id, post_id),
+-        )
++    def update_post(self, course_id, post_id, title, body, author_id=None):
++        if author_id is None:
++            self.db.execute(
++                "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?",
++                (title, body, now_iso(), course_id, post_id),
++            )
++        else:
++            self.db.execute(
++                "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=? AND author_id=?",
++                (title, body, now_iso(), course_id, post_id, author_id),
++            )
+         self.db.commit()
+ 
+-    def delete_post(self, course_id, post_id):
+-        self.db.execute("DELETE FROM posts WHERE course_id=? AND post_id=?", (course_id, post_id))
++    def delete_post(self, course_id, post_id, author_id=None):
++        if author_id is None:
++            self.db.execute("DELETE FROM posts WHERE course_id=? AND post_id=?", (course_id, post_id))
++        else:
++            self.db.execute("DELETE FROM posts WHERE course_id=? AND post_id=? AND author_id=?", (course_id, post_id, author_id))
+         self.db.commit()
+ 
+     def search_posts(self, course_id, keyword):
+diff --git a/repos/comments_repo.py b/repos/comments_repo.py
+--- a/repos/comments_repo.py
++++ b/repos/comments_repo.py
+@@ -20,15 +20,34 @@
+         ).fetchall()
+         return [dict(r) for r in rows]
+ 
+-    def update_comment(self, course_id, post_id, comment_id, body):
+-        self.db.execute(
+-            "UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?",
+-            (body, now_iso(), course_id, post_id, comment_id),
+-        )
++    def get_comment(self, course_id, post_id, comment_id):
++        r = self.db.execute(
++            "SELECT c.*, u.username as author_username FROM comments c JOIN users u ON u.user_id=c.author_id WHERE c.course_id=? AND c.post_id=? AND c.comment_id=?",
++            (course_id, post_id, comment_id),
++        ).fetchone()
++        return dict(r) if r else None
++
++    def update_comment(self, course_id, post_id, comment_id, body, author_id=None):
++        if author_id is None:
++            self.db.execute(
++                "UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?",
++                (body, now_iso(), course_id, post_id, comment_id),
++            )
++        else:
++            self.db.execute(
++                "UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=? AND author_id=?",
++                (body, now_iso(), course_id, post_id, comment_id, author_id),
++            )
+         self.db.commit()
+ 
+-    def delete_comment(self, course_id, post_id, comment_id):
+-        self.db.execute("DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?", (course_id, post_id, comment_id))
++    def delete_comment(self, course_id, post_id, comment_id, author_id=None):
++        if author_id is None:
++            self.db.execute("DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?", (course_id, post_id, comment_id))
++        else:
++            self.db.execute(
++                "DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=? AND author_id=?",
++                (course_id, post_id, comment_id, author_id),
++            )
+         self.db.commit()
+ 
+     def search_comments(self, course_id, keyword):
+diff --git a/repos/questions_repo.py b/repos/questions_repo.py
+--- a/repos/questions_repo.py
++++ b/repos/questions_repo.py
+@@ -13,16 +13,18 @@
+         self.db.commit()
+         return int(cur.lastrowid)
+ 
+-    def list_questions(self, course_id):
++    def list_questions(self, course_id, include_answer=False):
++        select_fields = "q.*, u.username as creator_username" if include_answer else "q.question_id, q.course_id, q.created_by, q.qtype, q.prompt, q.options_json, q.created_at, q.updated_at, u.username as creator_username"
+         rows = self.db.execute(
+-            "SELECT q.*, u.username as creator_username FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? ORDER BY q.question_id DESC",
++            f"SELECT {select_fields} FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? ORDER BY q.question_id DESC",
+             (course_id,),
+         ).fetchall()
+         return [dict(r) for r in rows]
+ 
+-    def get_question(self, course_id, question_id):
++    def get_question(self, course_id, question_id, include_answer=False):
++        select_fields = "q.*, u.username as creator_username" if include_answer else "q.question_id, q.course_id, q.created_by, q.qtype, q.prompt, q.options_json, q.created_at, q.updated_at, u.username as creator_username"
+         r = self.db.execute(
+-            "SELECT q.*, u.username as creator_username FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? AND q.question_id=?",
++            f"SELECT {select_fields} FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? AND q.question_id=?",
+             (course_id, question_id),
+         ).fetchone()
+         return dict(r) if r else None
+diff --git a/repos/quizzes_repo.py b/repos/quizzes_repo.py
+--- a/repos/quizzes_repo.py
++++ b/repos/quizzes_repo.py
+@@ -68,15 +68,27 @@
+         r = self.db.execute("SELECT * FROM quiz_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
+         return dict(r) if r else None
+ 
++    def quiz_has_question(self, quiz_id, question_id):
++        r = self.db.execute(
++            "SELECT 1 FROM quiz_questions WHERE quiz_id=? AND question_id=?",
++            (quiz_id, question_id),
++        ).fetchone()
++        return bool(r)
++
+     def submit_attempt(self, attempt_id):
+-        self.db.execute("UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?", (now_iso(), attempt_id))
++        self.db.execute(
++            "UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=? AND submitted_at IS NULL",
++            (now_iso(), attempt_id),
++        )
+         self.db.commit()
+ 
+-    def upsert_answer(self, attempt_id, question_id, answer_json_text):
++    def upsert_answer(self, attempt_id, quiz_id, question_id, answer_json_text):
+         self.db.execute(
+-            "INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) VALUES (?,?,?,?) "
++            "INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) "
++            "SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM quiz_attempts WHERE attempt_id=? AND submitted_at IS NULL) "
++            "AND EXISTS (SELECT 1 FROM quiz_questions WHERE quiz_id=? AND question_id=?) "
+             "ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json, created_at=excluded.created_at",
+-            (attempt_id, question_id, answer_json_text, now_iso()),
++            (attempt_id, question_id, answer_json_text, now_iso(), attempt_id, quiz_id, question_id),
+         )
+         self.db.commit()
+```
+
+2. Per-vulnerability summary
+
+**VULN-002**
+
+* files changed: `app.py`
+* key checks added: `@require_site_admin` on `/admin/users` and `/api/users`
+* why mitigated: authenticated non-admin users can no longer enumerate all accounts; both endpoints now enforce an explicit server-side admin boundary.
+
+**VULN-003**
+
+* files changed: `app.py`
+* key checks added: `can_manage_course()` check before course edit form, update, and delete for both HTML and API routes
+* why mitigated: only the course creator or course staff can mutate a course; arbitrary logged-in users can no longer modify/delete foreign courses.
+
+**VULN-004**
+
+* files changed: `app.py`, `repos/memberships_repo.py`
+* key checks added: membership lookup before update/delete, `course_id` match validation, repository writes scoped by `course_id + membership_id`
+* why mitigated: foreign membership IDs from another course no longer pass; writes are bound to the authorized course context.
+
+**VULN-005**
+
+* files changed: `app.py`, `repos/posts_repo.py`
+* key checks added: load target post first, allow only author or course staff, repository write/delete can be scoped by `author_id`
+* why mitigated: same-course peers can no longer edit/delete another member’s post unless they have staff moderation privileges.
+
+**VULN-006**
+
+* files changed: `app.py`, `repos/comments_repo.py`
+* key checks added: load target comment first, allow only author or course staff, repository write/delete can be scoped by `author_id`
+* why mitigated: same-course peers can no longer edit/delete another member’s comment unless they have staff moderation privileges.
+
+**VULN-007**
+
+* files changed: `app.py`, `repos/questions_repo.py`
+* key checks added: question bank list/detail routes changed from course-member to course-staff only; repo supports safe retrieval without `answer_json` by default
+* why mitigated: students and ordinary members can no longer access answer-bearing question bank endpoints, and quiz delivery can use sanitized question reads.
+
+**VULN-008**
+
+* files changed: `app.py`
+* key checks added: `secure_filename`, absolute-path construction, containment check with `os.path.commonpath`
+* why mitigated: untrusted filenames can no longer escape the intended course upload directory through `../` or separator tricks.
+
+**VULN-009**
+
+* files changed: `app.py`, `repos/quizzes_repo.py`
+* key checks added: verify attempt belongs to `course_id + quiz_id + student_id`, reject if `submitted_at` already set, verify `question_id` belongs to the quiz, repository upsert guarded by quiz membership and unsubmitted state
+* why mitigated: post-submission answer overwrites are blocked, and arbitrary non-quiz question IDs can no longer be injected into a valid attempt.
+
+3. Functional verification commands
+
+The ZIP does not contain a `tests/` directory, so I could not confirm the exact in-repo functional suite path. The patch does compile, and a small Flask test-client smoke check passed for login, user-list authorization, and course update authorization.
+
+Use these copy-paste commands from the project root:
+
+```bash
+pip install -r requirements.txt
+python -m py_compile app.py repos/*.py
+```
+
+If your functional suite is mounted alongside this repo in the usual project layout, run:
+
+```bash
+pytest tests/functional_tests -v
+```
+
+Minimal smoke command:
+
+```bash
+python app.py
+```

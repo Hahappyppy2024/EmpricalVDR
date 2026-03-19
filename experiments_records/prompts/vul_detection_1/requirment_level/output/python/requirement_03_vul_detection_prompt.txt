@@ -1,0 +1,328 @@
+[
+{
+"vulnerability_id": "VULN-001",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.8,
+"severity_level": "high",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "Any member of a course can edit or delete another member's post by supplying that post_id. The application verifies only course membership and never checks that the caller owns the target post or holds an explicitly authorized moderation role.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/posts/:post_id/edit"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 162,
+"line_end": 169,
+"function_name": "edit_post_page",
+"code": "@post_bp.route('/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/edit', methods=['GET'])\n@login_required\n@require_course_member\ndef edit_post_page(course_id, post_id):\n    course, post = _load_course_and_post(course_id, post_id)\n    if course is None or post is None:\n        return render_template('404.html', current_user=get_current_user()), 404\n    return render_template('posts/edit.html', course=course, post=post, current_user=get_current_user())",
+"reason": "Any logged-in course member can load the edit page for any post in the course. The route does not verify that the current user is the post author or an authorized moderator."
+},
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 172,
+"line_end": 227,
+"function_name": "update_post_submit / api_update_post / delete_post_submit / api_delete_post",
+"code": "@post_bp.route('/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)', methods=['POST'])\n@login_required\n@require_course_member\ndef update_post_submit(course_id, post_id):\n    ...\n    update_post(course_id, post_id, title, body)\n\[n@post_bp.route](mailto:n@post_bp.route)('/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)', methods=['PUT'])\n@login_required\n@require_course_member\ndef api_update_post(course_id, post_id):\n    ...\n    updated = update_post(course_id, post_id, title, body)\n\[n@post_bp.route](mailto:n@post_bp.route)('/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/delete', methods=['POST'])\n@login_required\n@require_course_member\ndef delete_post_submit(course_id, post_id):\n    ...\n    delete_post(course_id, post_id)\n\[n@post_bp.route](mailto:n@post_bp.route)('/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)', methods=['DELETE'])\n@login_required\n@require_course_member\ndef api_delete_post(course_id, post_id):\n    ...\n    delete_post(course_id, post_id)",
+"reason": "All post mutation paths require only course membership, then directly update or delete the user-supplied post_id without any ownership or moderation authorization check."
+},
+{
+"file_path": "models/post_repo.py",
+"line_start": 39,
+"line_end": 54,
+"function_name": "update_post / delete_post",
+"code": "def update_post(course_id, post_id, title, body):\n    db = get_db()\n    db.execute(\n        'UPDATE posts SET title = ?, body = ?, updated_at = CURRENT_TIMESTAMP WHERE course_id = ? AND post_id = ?',\n        (title, body, course_id, post_id),\n    )\n    db.commit()\n    return get_post_by_id(course_id, post_id)\n\n\ndef delete_post(course_id, post_id):\n    db = get_db()\n    db.execute('DELETE FROM comments WHERE course_id = ? AND post_id = ?', (course_id, post_id))\n    db.execute('DELETE FROM posts WHERE course_id = ? AND post_id = ?', (course_id, post_id))",
+"reason": "The write operations are scoped only by course_id and post_id, with no author_id or equivalent ownership constraint."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Post mutation endpoints treat course membership as sufficient authorization and omit an ownership or moderator check for the specific post being edited or deleted.",
+"patch_locations": [
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 162,
+"line_end": 227,
+"function_name": "edit_post_page / update_post_submit / api_update_post / delete_post_submit / api_delete_post"
+},
+{
+"file_path": "models/post_repo.py",
+"line_start": 39,
+"line_end": 54,
+"function_name": "update_post / delete_post"
+}
+],
+"repair_plan": "Load the target post before rendering the edit page or applying any mutation, verify that the current user is the post author or holds an explicitly authorized course moderation role, and reject unauthorized requests. Where practical, scope repository updates and deletes by both post_id and author_id unless a separately verified staff path is used.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.6,
+"severity_level": "high",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "Any member of a course can edit or delete another member's comment by supplying that comment_id. The application verifies only course membership and never checks that the caller owns the target comment or has an explicitly authorized moderation role.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 284,
+"line_end": 333,
+"function_name": "update_comment_submit / api_update_comment / delete_comment_submit / api_delete_comment",
+"code": "@post_bp.route('/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)', methods=['POST'])\n@login_required\n@require_course_member\ndef update_comment_submit(course_id, post_id, comment_id):\n    ...\n    if body:\n        update_comment(course_id, post_id, comment_id, body)\n\[n@post_bp.route](mailto:n@post_bp.route)('/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)', methods=['PUT'])\n@login_required\n@require_course_member\ndef api_update_comment(course_id, post_id, comment_id):\n    ...\n    updated = update_comment(course_id, post_id, comment_id, body)\n\[n@post_bp.route](mailto:n@post_bp.route)('/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)/delete', methods=['POST'])\n@login_required\n@require_course_member\ndef delete_comment_submit(course_id, post_id, comment_id):\n    ...\n    delete_comment(course_id, post_id, comment_id)\n\[n@post_bp.route](mailto:n@post_bp.route)('/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)', methods=['DELETE'])\n@login_required\n@require_course_member\ndef api_delete_comment(course_id, post_id, comment_id):\n    ...\n    delete_comment(course_id, post_id, comment_id)",
+"reason": "All comment mutation paths require only course membership, then directly update or delete the user-supplied comment_id without any ownership or moderation authorization check."
+},
+{
+"file_path": "models/comment_repo.py",
+"line_start": 39,
+"line_end": 57,
+"function_name": "update_comment / delete_comment",
+"code": "def update_comment(course_id, post_id, comment_id, body):\n    db = get_db()\n    db.execute(\n        'UPDATE comments SET body = ?, updated_at = CURRENT_TIMESTAMP '\n        'WHERE course_id = ? AND post_id = ? AND comment_id = ?',\n        (body, course_id, post_id, comment_id),\n    )\n    db.commit()\n    return get_comment_by_id(course_id, post_id, comment_id)\n\n\ndef delete_comment(course_id, post_id, comment_id):\n    db = get_db()\n    db.execute(\n        'DELETE FROM comments WHERE course_id = ? AND post_id = ? AND comment_id = ?',\n        (course_id, post_id, comment_id),\n    )",
+"reason": "The write operations are scoped only by course_id, post_id, and comment_id, with no author_id or equivalent ownership constraint."
+},
+{
+"file_path": "templates/posts/detail.html",
+"line_start": 25,
+"line_end": 37,
+"function_name": null,
+"code": "<h2>Comments</h2>\n{% for comment in comments %}\n<div class="card">\n  <p>{{ comment['body'] }}</p>\n  <p>By {{ comment['display_name'] }} at {{ comment['created_at'] }}</p>\n  <form method="post" action="{{ url_for('posts.update_comment_submit', course_id=course['course_id'], post_id=post['post_id'], comment_id=comment['comment_id']) }}">\n    <label for="comment-{{ comment['comment_id'] }}">Edit comment</label>\n    <textarea id="comment-{{ comment['comment_id'] }}" name="body" rows="3">{{ comment['body'] }}</textarea>\n    <button type="submit">Update Comment</button>\n  </form>\n  <form method="post" action="{{ url_for('posts.delete_comment_submit', course_id=course['course_id'], post_id=post['post_id'], comment_id=comment['comment_id']) }}">\n    <button type="submit">Delete Comment</button>\n  </form>",
+"reason": "The UI exposes edit and delete actions for every displayed comment to any course member viewing the post, consistent with the missing ownership check in the route handlers."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Comment mutation endpoints treat course membership as sufficient authorization and omit an ownership or moderator check for the specific comment being edited or deleted.",
+"patch_locations": [
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 284,
+"line_end": 333,
+"function_name": "update_comment_submit / api_update_comment / delete_comment_submit / api_delete_comment"
+},
+{
+"file_path": "models/comment_repo.py",
+"line_start": 39,
+"line_end": 57,
+"function_name": "update_comment / delete_comment"
+},
+{
+"file_path": "templates/posts/detail.html",
+"line_start": 25,
+"line_end": 37,
+"function_name": null
+}
+],
+"repair_plan": "Load the target comment before mutation, verify that the current user is the comment author or holds an explicitly authorized moderation role in the course, and reject unauthorized requests. Repository update and delete operations should be scoped to the authorized owner unless a separately verified staff path is used, and the UI should only render edit and delete controls for authorized users.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-003",
+"vulnerability_type_code": 7,
+"vulnerability_type": "CSRF",
+"cwe_id": "CWE-352",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.2,
+"severity_level": "high",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "The server-rendered discussion forms do not include any CSRF token or equivalent anti-CSRF validation. A malicious site can cause a logged-in course member to create or modify posts and comments, or delete their own accessible discussion content, using the victim's existing session.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "templates/posts/new.html",
+"line_start": 5,
+"line_end": 10,
+"function_name": null,
+"code": "<form method="post" action="{{ url_for('posts.create_post_submit', course_id=course['course_id']) }}">\n  <label for="title">Title</label>\n  <input id="title" name="title" required>\n  <label for="body">Body</label>\n  <textarea id="body" name="body" rows="8"></textarea>\n  <button type="submit">Create Post</button>",
+"reason": "The post-creation form performs a state-changing request but contains no CSRF token or nonce."
+},
+{
+"file_path": "templates/posts/edit.html",
+"line_start": 5,
+"line_end": 10,
+"function_name": null,
+"code": "<form method="post" action="{{ url_for('posts.update_post_submit', course_id=course['course_id'], post_id=post['post_id']) }}">\n  <label for="title">Title</label>\n  <input id="title" name="title" value="{{ post['title'] }}" required>\n  <label for="body">Body</label>\n  <textarea id="body" name="body" rows="8">{{ post['body'] }}</textarea>\n  <button type="submit">Update Post</button>",
+"reason": "The post-update form is forgeable because no anti-CSRF field is present."
+},
+{
+"file_path": "templates/posts/detail.html",
+"line_start": 14,
+"line_end": 37,
+"function_name": null,
+"code": "<form method="post" action="{{ url_for('posts.delete_post_submit', course_id=course['course_id'], post_id=post['post_id']) }}">\n  <button type="submit">Delete Post</button>\n</form>\n\n<h2>Add Comment</h2>\n<form method="post" action="{{ url_for('posts.create_comment_submit', course_id=course['course_id'], post_id=post['post_id']) }}">\n  <label for="body">Comment</label>\n  <textarea id="body" name="body" rows="4"></textarea>\n  <button type="submit">Add Comment</button>\n</form>\n...\n<form method="post" action="{{ url_for('posts.update_comment_submit', course_id=course['course_id'], post_id=post['post_id'], comment_id=comment['comment_id']) }}">\n...\n</form>\n<form method="post" action="{{ url_for('posts.delete_comment_submit', course_id=course['course_id'], post_id=post['post_id'], comment_id=comment['comment_id']) }}">\n  <button type="submit">Delete Comment</button>\n</form>",
+"reason": "The delete-post, create-comment, update-comment, and delete-comment forms all perform state-changing requests without any request authenticity token."
+},
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 77,
+"line_end": 95,
+"function_name": "create_post_submit",
+"code": "@post_bp.route('/courses/[int:course_id](int:course_id)/posts', methods=['POST'])\n@login_required\n@require_course_member\ndef create_post_submit(course_id):\n    ...\n    post = create_post(course_id, get_current_user()['user_id'], title, body)\n    return redirect(url_for('posts.get_post_page', course_id=course_id, post_id=post['post_id']))",
+"reason": "The handler accepts browser form POST requests using only cookie-based session state and does not verify any CSRF token."
+},
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 172,
+"line_end": 190,
+"function_name": "update_post_submit",
+"code": "@post_bp.route('/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)', methods=['POST'])\n@login_required\n@require_course_member\ndef update_post_submit(course_id, post_id):\n    ...\n    update_post(course_id, post_id, title, body)\n    return redirect(url_for('posts.get_post_page', course_id=course_id, post_id=post_id))",
+"reason": "The post update handler processes authenticated browser POST requests without validating request authenticity."
+},
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 209,
+"line_end": 242,
+"function_name": "delete_post_submit / create_comment_submit",
+"code": "@post_bp.route('/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/delete', methods=['POST'])\n@login_required\n@require_course_member\ndef delete_post_submit(course_id, post_id):\n    ...\n    delete_post(course_id, post_id)\n    return redirect(url_for('posts.list_posts_page', course_id=course_id))\n\[n@post_bp.route](mailto:n@post_bp.route)('/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments', methods=['POST'])\n@login_required\n@require_course_member\ndef create_comment_submit(course_id, post_id):\n    ...\n    create_comment(post_id, course_id, get_current_user()['user_id'], body)\n    return redirect(url_for('posts.get_post_page', course_id=course_id, post_id=post_id))",
+"reason": "These state-changing discussion handlers rely solely on cookie-authenticated sessions and contain no CSRF validation."
+},
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 284,
+"line_end": 322,
+"function_name": "update_comment_submit / delete_comment_submit",
+"code": "@post_bp.route('/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)', methods=['POST'])\n@login_required\n@require_course_member\ndef update_comment_submit(course_id, post_id, comment_id):\n    ...\n    if body:\n        update_comment(course_id, post_id, comment_id, body)\n    return redirect(url_for('posts.get_post_page', course_id=course_id, post_id=post_id))\n\[n@post_bp.route](mailto:n@post_bp.route)('/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)/delete', methods=['POST'])\n@login_required\n@require_course_member\ndef delete_comment_submit(course_id, post_id, comment_id):\n    ...\n    delete_comment(course_id, post_id, comment_id)\n    return redirect(url_for('posts.get_post_page', course_id=course_id, post_id=post_id))",
+"reason": "These discussion mutation handlers accept authenticated browser POST requests without verifying a per-session CSRF token or equivalent defense."
+}
+],
+"root_cause_code": 9,
+"root_cause": "Server-rendered discussion endpoints rely on cookie-based authentication but do not require a request authenticity token or equivalent CSRF defense for state-changing form submissions.",
+"patch_locations": [
+{
+"file_path": "templates/posts/new.html",
+"line_start": 5,
+"line_end": 10,
+"function_name": null
+},
+{
+"file_path": "templates/posts/edit.html",
+"line_start": 5,
+"line_end": 10,
+"function_name": null
+},
+{
+"file_path": "templates/posts/detail.html",
+"line_start": 14,
+"line_end": 37,
+"function_name": null
+},
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 77,
+"line_end": 95,
+"function_name": "create_post_submit"
+},
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 172,
+"line_end": 190,
+"function_name": "update_post_submit"
+},
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 209,
+"line_end": 242,
+"function_name": "delete_post_submit / create_comment_submit"
+},
+{
+"file_path": "controllers/post_controller.py",
+"line_start": 284,
+"line_end": 322,
+"function_name": "update_comment_submit / delete_comment_submit"
+}
+],
+"repair_plan": "Introduce server-side CSRF protection for all browser discussion workflows by generating a per-session token, embedding it in every state-changing post and comment form, and rejecting requests whose token is missing or invalid. Apply this consistently to create, update, and delete actions for both posts and comments.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}
+]

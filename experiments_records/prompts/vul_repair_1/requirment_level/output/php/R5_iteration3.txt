@@ -1,0 +1,77 @@
+1. Unified diff patch (git apply compatible). Include only changed files.
+
+```diff
+--- a/app/controllers/QuizController.php
++++ b/app/controllers/QuizController.php
+@@ -222,13 +222,15 @@ final class QuizController
+     public function configureQuestionsApi(int $courseId, int $quizId): void
+     {
+         require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+-        $result = $this->configureQuestion($courseId, $quizId, request_data());
++        $data = request_data();
++        $result = $this->configureQuestion($courseId, $quizId, $data);
+         if (!$result['success']) {
+             $status = in_array($result['error'], ['Quiz not found', 'Question not found'], true) ? 404 : 422;
+             json_response($result, $status);
+         }
+-        json_response($result, 200);
++        $status = (($data['action'] ?? 'add') === 'remove') ? 200 : 201;
++        json_response($result, $status);
+     }
+ 
+     private function configureQuestion(int $courseId, int $quizId, array $data): array
+```
+
+2. Per-vulnerability summary (group by vulnerability_id):
+
+**R5 requirement-stage vulnerabilities preserved; regression repair only**
+
+* files changed
+
+  * `app/controllers/QuizController.php`
+* key checks added
+
+  * No authorization, ownership, relationship, or state checks were removed.
+  * `require_course_staff(...)` remains enforced for quiz-question configuration.
+  * Course-scoped quiz and question lookups remain unchanged.
+* regression restored (if any)
+
+  * Restored the expected API contract for quiz-question attachment creation: add/configure now returns `201 Created`, while remove continues to return `200 OK`.
+* why the vulnerability is mitigated (brief)
+
+  * This change repairs only the response-contract regression shown by the functional trace. Existing server-side protections for course membership, staff-only quiz management, student-only attempts, hidden answers for non-staff, and post-submission immutability remain in place.
+
+3. Functional verification commands (copy-paste):
+
+* run the full functional test suite (exact command)
+
+```bash
+pytest -q tests/test_api_functional_r5.py
+```
+
+* optional minimal functional smoke command if full suite is slow
+
+```bash
+php -l app/controllers/QuizController.php && pytest -q tests/test_api_functional_r5.py -k configure_quiz_question
+```
+
+4. Security verification commands (copy-paste):
+
+* run the relevant security tests affected by the repaired vulnerabilities
+
+```bash
+pytest -q tests/test_api_exploit_r5.py
+```
+
+* optional single-test commands for the most relevant repaired paths
+
+```bash
+pytest -q tests/test_api_exploit_r5.py -k answers
+```
+
+```bash
+pytest -q tests/test_api_exploit_r5.py -k submitted
+```
+
+Notes:
+The concrete functional failure you provided is a status-code regression on quiz-question configuration, and the patch above repairs that contract. I could not truthfully verify the full PHP run inside this container because the local PHP runtime here is missing the SQLite PDO driver (`could not find driver`). The later `create_course` 200/body mismatch in your rerun is not supported by the repository code I inspected in the ZIP: `CourseController::createApi()` already returns `201` with a `course` payload, so if that mismatch persists in your local run it likely comes from a local file drift or an incomplete prior copy-over outside the inspected ZIP state.

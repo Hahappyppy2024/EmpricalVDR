@@ -1,0 +1,1921 @@
+diff -ruN origzip/educollab_php_v0/public/index.php workzip/educollab_php_v0/public/index.php
+--- origzip/educollab_php_v0/public/index.php	2026-02-21 16:13:18.000000000 +0000
++++ workzip/educollab_php_v0/public/index.php	2026-03-15 15:19:30.178606101 +0000
+@@ -223,5 +223,8 @@
+ // Dispatch
+ $method = method_override();
+ $path = request_path();
++if ($method === 'POST' && strncmp($path, '/api/', 5) !== 0) {
++    require_csrf();
++}
+ $router->dispatch($method, $path);
+ 
+diff -ruN origzip/educollab_php_v0/src/bootstrap.php workzip/educollab_php_v0/src/bootstrap.php
+--- origzip/educollab_php_v0/src/bootstrap.php	2026-02-21 16:04:37.000000000 +0000
++++ workzip/educollab_php_v0/src/bootstrap.php	2026-03-15 15:15:15.588010996 +0000
+@@ -1,15 +1,22 @@
+ <?php
+ require_once __DIR__ . '/helpers.php';
+ 
+-// Sessions
+ if (session_status() === PHP_SESSION_NONE) {
++    ini_set('session.use_strict_mode', '1');
++    ini_set('session.use_only_cookies', '1');
++    session_set_cookie_params([
++        'lifetime' => 0,
++        'path' => '/',
++        'httponly' => true,
++        'samesite' => 'Lax',
++        'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
++    ]);
+     session_start();
+ }
+ 
+-// SQLite via PDO
+ function db(): PDO {
+     static $pdo = null;
+-    if ($pdo) return $pdo;
++    if ($pdo instanceof PDO) return $pdo;
+ 
+     $dbDir = APP_BASE . '/data';
+     if (!is_dir($dbDir)) mkdir($dbDir, 0777, true);
+@@ -18,24 +25,28 @@
+     $pdo = new PDO('sqlite:' . $dbPath);
+     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+-
+-    // Ensure foreign keys
+     $pdo->exec('PRAGMA foreign_keys = ON');
+-
+     return $pdo;
+ }
+ 
++function ensure_column(PDO $pdo, string $table, string $column, string $definition): void {
++    $stmt = $pdo->query("PRAGMA table_info($table)");
++    foreach (($stmt ? $stmt->fetchAll() : []) as $col) {
++        if (($col['name'] ?? '') === $column) return;
++    }
++    $pdo->exec("ALTER TABLE $table ADD COLUMN $definition");
++}
++
+ function init_db(PDO $pdo): void {
+-    // Users
+     $pdo->exec("CREATE TABLE IF NOT EXISTS users (
+         user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         username TEXT NOT NULL UNIQUE,
+         password_hash TEXT NOT NULL,
+         display_name TEXT NOT NULL,
+-        created_at TEXT NOT NULL
++        created_at TEXT NOT NULL,
++        is_global_admin INTEGER NOT NULL DEFAULT 0
+     )");
+ 
+-    // Courses
+     $pdo->exec("CREATE TABLE IF NOT EXISTS courses (
+         course_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         title TEXT NOT NULL,
+@@ -45,7 +56,6 @@
+         FOREIGN KEY(created_by) REFERENCES users(user_id)
+     )");
+ 
+-    // Membership
+     $pdo->exec("CREATE TABLE IF NOT EXISTS memberships (
+         membership_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         course_id INTEGER NOT NULL,
+@@ -57,7 +67,6 @@
+         FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+     )");
+ 
+-    // Posts
+     $pdo->exec("CREATE TABLE IF NOT EXISTS posts (
+         post_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         course_id INTEGER NOT NULL,
+@@ -70,7 +79,6 @@
+         FOREIGN KEY(author_id) REFERENCES users(user_id)
+     )");
+ 
+-    // Comments
+     $pdo->exec("CREATE TABLE IF NOT EXISTS comments (
+         comment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         post_id INTEGER NOT NULL,
+@@ -84,7 +92,6 @@
+         FOREIGN KEY(author_id) REFERENCES users(user_id)
+     )");
+ 
+-    // Assignments
+     $pdo->exec("CREATE TABLE IF NOT EXISTS assignments (
+         assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         course_id INTEGER NOT NULL,
+@@ -98,7 +105,6 @@
+         FOREIGN KEY(created_by) REFERENCES users(user_id)
+     )");
+ 
+-    // Uploads
+     $pdo->exec("CREATE TABLE IF NOT EXISTS uploads (
+         upload_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         course_id INTEGER NOT NULL,
+@@ -110,7 +116,6 @@
+         FOREIGN KEY(uploaded_by) REFERENCES users(user_id)
+     )");
+ 
+-    // Submissions
+     $pdo->exec("CREATE TABLE IF NOT EXISTS submissions (
+         submission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         assignment_id INTEGER NOT NULL,
+@@ -127,7 +132,6 @@
+         FOREIGN KEY(attachment_upload_id) REFERENCES uploads(upload_id)
+     )");
+ 
+-    // Questions
+     $pdo->exec("CREATE TABLE IF NOT EXISTS questions (
+         question_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         course_id INTEGER NOT NULL,
+@@ -142,7 +146,6 @@
+         FOREIGN KEY(created_by) REFERENCES users(user_id)
+     )");
+ 
+-    // Quizzes
+     $pdo->exec("CREATE TABLE IF NOT EXISTS quizzes (
+         quiz_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         course_id INTEGER NOT NULL,
+@@ -157,7 +160,6 @@
+         FOREIGN KEY(created_by) REFERENCES users(user_id)
+     )");
+ 
+-    // QuizQuestion
+     $pdo->exec("CREATE TABLE IF NOT EXISTS quiz_questions (
+         quiz_id INTEGER NOT NULL,
+         question_id INTEGER NOT NULL,
+@@ -168,7 +170,6 @@
+         FOREIGN KEY(question_id) REFERENCES questions(question_id) ON DELETE CASCADE
+     )");
+ 
+-    // QuizAttempt
+     $pdo->exec("CREATE TABLE IF NOT EXISTS quiz_attempts (
+         attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         quiz_id INTEGER NOT NULL,
+@@ -181,34 +182,42 @@
+         FOREIGN KEY(student_id) REFERENCES users(user_id)
+     )");
+ 
+-    // QuizAnswer
+     $pdo->exec("CREATE TABLE IF NOT EXISTS quiz_answers (
+         answer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         attempt_id INTEGER NOT NULL,
+         question_id INTEGER NOT NULL,
+         answer_json TEXT NOT NULL,
+         created_at TEXT NOT NULL,
++        updated_at TEXT NOT NULL,
+         UNIQUE(attempt_id, question_id),
+         FOREIGN KEY(attempt_id) REFERENCES quiz_attempts(attempt_id) ON DELETE CASCADE,
+         FOREIGN KEY(question_id) REFERENCES questions(question_id) ON DELETE CASCADE
+     )");
++
++    ensure_column($pdo, 'users', 'is_global_admin', 'is_global_admin INTEGER NOT NULL DEFAULT 0');
++    ensure_column($pdo, 'quiz_answers', 'updated_at', 'updated_at TEXT NOT NULL DEFAULT ""');
+ }
+ 
+ function seed_admin(PDO $pdo): void {
+-    $username = 'admin';
++    $initialPassword = getenv('INITIAL_ADMIN_PASSWORD');
++    if ($initialPassword === false || trim($initialPassword) === '') {
++        return;
++    }
++
+     $stmt = $pdo->prepare('SELECT user_id FROM users WHERE username = ?');
+-    $stmt->execute([$username]);
++    $stmt->execute(['admin']);
+     $row = $stmt->fetch();
+-    if ($row) return;
+-
+-    $password = 'admin123';
+-    $hash = password_hash($password, PASSWORD_BCRYPT);
+-    $ins = $pdo->prepare('INSERT INTO users(username, password_hash, display_name, created_at) VALUES (?,?,?,?)');
+-    $ins->execute([$username, $hash, 'Administrator', now_iso()]);
++    if ($row) {
++        $upd = $pdo->prepare('UPDATE users SET is_global_admin=1 WHERE user_id=?');
++        $upd->execute([(int)$row['user_id']]);
++        return;
++    }
++
++    $hash = password_hash($initialPassword, PASSWORD_BCRYPT);
++    $ins = $pdo->prepare('INSERT INTO users(username, password_hash, display_name, created_at, is_global_admin) VALUES (?,?,?,?,1)');
++    $ins->execute(['admin', $hash, 'Administrator', now_iso()]);
+ }
+ 
+-// Auto init + seed on every request (simple v0)
+ $pdo = db();
+ init_db($pdo);
+ seed_admin($pdo);
+-
+diff -ruN origzip/educollab_php_v0/src/controllers/AuthController.php workzip/educollab_php_v0/src/controllers/AuthController.php
+--- origzip/educollab_php_v0/src/controllers/AuthController.php	2026-02-21 16:07:20.000000000 +0000
++++ workzip/educollab_php_v0/src/controllers/AuthController.php	2026-03-15 15:16:21.687740917 +0000
+@@ -4,21 +4,36 @@
+ class AuthController {
+     public function __construct(private PDO $pdo) {}
+ 
+-    // HTML
+-    public function showRegister(): void {
+-        render('auth/register', ['title' => 'Register']);
++    private function sessionUserFromRow(array $row): array {
++        return [
++            'user_id' => (int)$row['user_id'],
++            'username' => $row['username'],
++            'display_name' => $row['display_name'],
++            'created_at' => $row['created_at'],
++            'is_global_admin' => !empty($row['is_global_admin']),
++        ];
+     }
+ 
++    private function publicUser(array $u): array {
++        return [
++            'user_id' => (int)$u['user_id'],
++            'username' => $u['username'],
++            'display_name' => $u['display_name'],
++            'created_at' => $u['created_at'],
++        ];
++    }
++
++    public function showRegister(): void { render('auth/register', ['title' => 'Register']); }
++
+     public function register(): void {
++        require_csrf();
+         $username = trim($_POST['username'] ?? '');
+         $password = (string)($_POST['password'] ?? '');
+         $display = trim($_POST['display_name'] ?? $username);
+-
+         if ($username === '' || $password === '') {
+             render('auth/register', ['title' => 'Register', 'error' => 'username and password required']);
+             return;
+         }
+-
+         $repo = new UserRepo($this->pdo);
+         try {
+             $u = $repo->create($username, $password, $display);
+@@ -26,15 +41,14 @@
+             render('auth/register', ['title' => 'Register', 'error' => 'register failed']);
+             return;
+         }
+-        $_SESSION['user'] = $u;
++        session_login_user($u);
+         redirect('/courses');
+     }
+ 
+-    public function showLogin(): void {
+-        render('auth/login', ['title' => 'Login']);
+-    }
++    public function showLogin(): void { render('auth/login', ['title' => 'Login']); }
+ 
+     public function login(): void {
++        require_csrf();
+         $username = trim($_POST['username'] ?? '');
+         $password = (string)($_POST['password'] ?? '');
+         $repo = new UserRepo($this->pdo);
+@@ -43,30 +57,21 @@
+             render('auth/login', ['title' => 'Login', 'error' => 'invalid credentials']);
+             return;
+         }
+-        $_SESSION['user'] = [
+-            'user_id' => (int)$row['user_id'],
+-            'username' => $row['username'],
+-            'display_name' => $row['display_name'],
+-            'created_at' => $row['created_at'],
+-        ];
++        session_login_user($this->sessionUserFromRow($row));
+         redirect('/courses');
+     }
+ 
+     public function logout(): void {
+-        $_SESSION = [];
+-        if (session_id() !== '' || isset($_COOKIE[session_name()])) {
+-            setcookie(session_name(), '', time()-3600, '/');
+-        }
+-        session_destroy();
++        require_csrf();
++        session_logout_user();
+         redirect('/login');
+     }
+ 
+     public function me(): void {
+         $u = require_login();
+-        render('me/me', ['title' => 'Me', 'user' => $u]);
++        render('me/me', ['title' => 'Me', 'user' => $this->publicUser($u)]);
+     }
+ 
+-    // API
+     public function apiRegister(): void {
+         $data = parse_json_body();
+         $username = trim($data['username'] ?? '');
+@@ -79,8 +84,8 @@
+         } catch (Throwable $e) {
+             json_response(['error' => 'register failed'], 400);
+         }
+-        $_SESSION['user'] = $u;
+-        json_response(['user' => $u]);
++        session_login_user($u);
++        json_response(['user' => $this->publicUser($u)]);
+     }
+ 
+     public function apiLogin(): void {
+@@ -92,29 +97,19 @@
+         if (!$row || !password_verify($password, $row['password_hash'])) {
+             json_response(['error' => 'invalid credentials'], 401);
+         }
+-        $u = [
+-            'user_id' => (int)$row['user_id'],
+-            'username' => $row['username'],
+-            'display_name' => $row['display_name'],
+-            'created_at' => $row['created_at'],
+-        ];
+-        $_SESSION['user'] = $u;
+-        json_response(['user' => $u]);
++        $u = $this->sessionUserFromRow($row);
++        session_login_user($u);
++        json_response(['user' => $this->publicUser($u)]);
+     }
+ 
+     public function apiLogout(): void {
+         require_api_login();
+-        $_SESSION = [];
+-        if (session_id() !== '' || isset($_COOKIE[session_name()])) {
+-            setcookie(session_name(), '', time()-3600, '/');
+-        }
+-        session_destroy();
++        session_logout_user();
+         json_response(['ok' => true]);
+     }
+ 
+     public function apiMe(): void {
+         $u = require_api_login();
+-        json_response(['user' => $u]);
++        json_response(['user' => $this->publicUser($u)]);
+     }
+ }
+-
+diff -ruN origzip/educollab_php_v0/src/controllers/CommentController.php workzip/educollab_php_v0/src/controllers/CommentController.php
+--- origzip/educollab_php_v0/src/controllers/CommentController.php	2026-02-21 16:09:10.000000000 +0000
++++ workzip/educollab_php_v0/src/controllers/CommentController.php	2026-03-15 15:19:27.646891362 +0000
+@@ -6,44 +6,51 @@
+     public function __construct(private PDO $pdo) {}
+ 
+     public function create(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+         require_course_member($this->pdo, $courseId, $u, false);
+-        $body = trim($_POST['body'] ?? '');
+-        (new CommentRepo($this->pdo))->create($courseId, $postId, (int)$u['user_id'], $body);
++        (new CommentRepo($this->pdo))->create($courseId, $postId, (int)$u['user_id'], trim($_POST['body'] ?? ''));
+         redirect("/courses/$courseId/posts/$postId");
+     }
+ 
+     public function update(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+         $commentId = (int)$p['comment_id'];
+-        require_course_member($this->pdo, $courseId, $u, false);
+-        $body = trim($_POST['body'] ?? '');
+-        (new CommentRepo($this->pdo))->update($courseId, $postId, $commentId, $body);
++        $membership = require_course_member($this->pdo, $courseId, $u, false);
++        $repo = new CommentRepo($this->pdo);
++        $comment = $repo->getById($courseId, $postId, $commentId);
++        if (!$comment) { http_response_code(404); echo 'Not found'; return; }
++        if (!can_manage_comment($membership, $comment, $u)) { http_response_code(403); echo 'Forbidden'; return; }
++        $repo->update($courseId, $postId, $commentId, trim($_POST['body'] ?? ''), (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         redirect("/courses/$courseId/posts/$postId");
+     }
+ 
+     public function delete(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+         $commentId = (int)$p['comment_id'];
+-        require_course_member($this->pdo, $courseId, $u, false);
+-        (new CommentRepo($this->pdo))->delete($courseId, $postId, $commentId);
++        $membership = require_course_member($this->pdo, $courseId, $u, false);
++        $repo = new CommentRepo($this->pdo);
++        $comment = $repo->getById($courseId, $postId, $commentId);
++        if (!$comment) { http_response_code(404); echo 'Not found'; return; }
++        if (!can_manage_comment($membership, $comment, $u)) { http_response_code(403); echo 'Forbidden'; return; }
++        $repo->delete($courseId, $postId, $commentId, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         redirect("/courses/$courseId/posts/$postId");
+     }
+ 
+-    // API
+     public function apiList(array $p): void {
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+         require_course_member($this->pdo, $courseId, $u, true);
+-        $repo = new CommentRepo($this->pdo);
+-        json_response(['comments' => $repo->listByPost($courseId, $postId)]);
++        json_response(['comments' => (new CommentRepo($this->pdo))->listByPost($courseId, $postId)]);
+     }
+ 
+     public function apiCreate(array $p): void {
+@@ -52,10 +59,8 @@
+         $postId = (int)$p['post_id'];
+         require_course_member($this->pdo, $courseId, $u, true);
+         $data = parse_json_body();
+-        $body = trim($data['body'] ?? '');
+-        $repo = new CommentRepo($this->pdo);
+-        $c = $repo->create($courseId, $postId, (int)$u['user_id'], $body);
+-        json_response(['comment' => $c]);
++        $comment = (new CommentRepo($this->pdo))->create($courseId, $postId, (int)$u['user_id'], trim($data['body'] ?? ''));
++        json_response(['comment' => $comment]);
+     }
+ 
+     public function apiUpdate(array $p): void {
+@@ -63,12 +68,14 @@
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+         $commentId = (int)$p['comment_id'];
+-        require_course_member($this->pdo, $courseId, $u, true);
+-        $data = parse_json_body();
+-        $body = trim($data['body'] ?? '');
++        $membership = require_course_member($this->pdo, $courseId, $u, true);
+         $repo = new CommentRepo($this->pdo);
+-        $c = $repo->update($courseId, $postId, $commentId, $body);
+-        json_response(['comment' => $c]);
++        $comment = $repo->getById($courseId, $postId, $commentId);
++        if (!$comment) json_response(['error' => 'not found'], 404);
++        if (!can_manage_comment($membership, $comment, $u)) json_response(['error' => 'forbidden'], 403);
++        $data = parse_json_body();
++        $comment = $repo->update($courseId, $postId, $commentId, trim($data['body'] ?? ''), (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
++        json_response(['comment' => $comment]);
+     }
+ 
+     public function apiDelete(array $p): void {
+@@ -76,9 +83,12 @@
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+         $commentId = (int)$p['comment_id'];
+-        require_course_member($this->pdo, $courseId, $u, true);
+-        (new CommentRepo($this->pdo))->delete($courseId, $postId, $commentId);
++        $membership = require_course_member($this->pdo, $courseId, $u, true);
++        $repo = new CommentRepo($this->pdo);
++        $comment = $repo->getById($courseId, $postId, $commentId);
++        if (!$comment) json_response(['error' => 'not found'], 404);
++        if (!can_manage_comment($membership, $comment, $u)) json_response(['error' => 'forbidden'], 403);
++        $repo->delete($courseId, $postId, $commentId, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         json_response(['ok' => true]);
+     }
+ }
+-
+diff -ruN origzip/educollab_php_v0/src/controllers/MembershipController.php workzip/educollab_php_v0/src/controllers/MembershipController.php
+--- origzip/educollab_php_v0/src/controllers/MembershipController.php	2026-02-21 16:08:23.000000000 +0000
++++ workzip/educollab_php_v0/src/controllers/MembershipController.php	2026-03-15 15:17:39.196249319 +0000
+@@ -10,8 +10,7 @@
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         require_course_member($this->pdo, $courseId, $u, false);
+-        $repo = new MembershipRepo($this->pdo);
+-        $members = $repo->listByCourse($courseId);
++        $members = (new MembershipRepo($this->pdo))->listByCourse($courseId);
+         render('memberships/list', ['title' => 'Members', 'course_id' => $courseId, 'members' => $members]);
+     }
+ 
+@@ -19,58 +18,58 @@
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         require_course_teacher_or_admin($this->pdo, $courseId, $u, false);
+-        $users = [];
+-        if (is_global_admin($u)) {
+-            $users = (new UserRepo($this->pdo))->listAll();
+-        }
++        $users = is_global_admin($u) ? (new UserRepo($this->pdo))->listAll() : [];
+         render('memberships/new', ['title' => 'Add Member', 'course_id' => $courseId, 'users' => $users]);
+     }
+ 
+     public function add(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         require_course_teacher_or_admin($this->pdo, $courseId, $u, false);
+         $userId = (int)($_POST['user_id'] ?? 0);
+         $role = trim($_POST['role_in_course'] ?? 'student');
+-        $repo = new MembershipRepo($this->pdo);
+-        $repo->add($courseId, $userId, $role);
++        (new MembershipRepo($this->pdo))->add($courseId, $userId, $role);
+         redirect("/courses/$courseId/members");
+     }
+ 
+     public function updateRole(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $membershipId = (int)$p['membership_id'];
+         require_course_teacher_or_admin($this->pdo, $courseId, $u, false);
+         $role = trim($_POST['role_in_course'] ?? 'student');
+         $repo = new MembershipRepo($this->pdo);
+-        $repo->updateRole($membershipId, $role);
++        $m = $repo->getById($membershipId);
++        if (!$m || (int)$m['course_id'] !== $courseId) { http_response_code(404); echo 'Not found'; return; }
++        $repo->updateRole($courseId, $membershipId, $role);
+         redirect("/courses/$courseId/members");
+     }
+ 
+     public function remove(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $membershipId = (int)$p['membership_id'];
+         require_course_teacher_or_admin($this->pdo, $courseId, $u, false);
+         $repo = new MembershipRepo($this->pdo);
+-        $repo->remove($membershipId);
++        $m = $repo->getById($membershipId);
++        if (!$m || (int)$m['course_id'] !== $courseId) { http_response_code(404); echo 'Not found'; return; }
++        $repo->remove($courseId, $membershipId);
+         redirect("/courses/$courseId/members");
+     }
+ 
+     public function myMemberships(): void {
+         $u = require_login();
+-        $repo = new MembershipRepo($this->pdo);
+-        render('memberships/my', ['title' => 'My Memberships', 'memberships' => $repo->myMemberships((int)$u['user_id'])]);
++        render('memberships/my', ['title' => 'My Memberships', 'memberships' => (new MembershipRepo($this->pdo))->myMemberships((int)$u['user_id'])]);
+     }
+ 
+-    // API
+     public function apiList(array $p): void {
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         require_course_member($this->pdo, $courseId, $u, true);
+-        $repo = new MembershipRepo($this->pdo);
+-        json_response(['members' => $repo->listByCourse($courseId)]);
++        json_response(['members' => (new MembershipRepo($this->pdo))->listByCourse($courseId)]);
+     }
+ 
+     public function apiAdd(array $p): void {
+@@ -78,10 +77,7 @@
+         $courseId = (int)$p['course_id'];
+         require_course_teacher_or_admin($this->pdo, $courseId, $u, true);
+         $data = parse_json_body();
+-        $userId = (int)($data['user_id'] ?? 0);
+-        $role = trim($data['role_in_course'] ?? 'student');
+-        $repo = new MembershipRepo($this->pdo);
+-        $m = $repo->add($courseId, $userId, $role);
++        $m = (new MembershipRepo($this->pdo))->add($courseId, (int)($data['user_id'] ?? 0), trim($data['role_in_course'] ?? 'student'));
+         json_response(['membership' => $m]);
+     }
+ 
+@@ -90,10 +86,11 @@
+         $courseId = (int)$p['course_id'];
+         $membershipId = (int)$p['membership_id'];
+         require_course_teacher_or_admin($this->pdo, $courseId, $u, true);
+-        $data = parse_json_body();
+-        $role = trim($data['role_in_course'] ?? 'student');
+         $repo = new MembershipRepo($this->pdo);
+-        $m = $repo->updateRole($membershipId, $role);
++        $existing = $repo->getById($membershipId);
++        if (!$existing || (int)$existing['course_id'] !== $courseId) json_response(['error' => 'not found'], 404);
++        $data = parse_json_body();
++        $m = $repo->updateRole($courseId, $membershipId, trim($data['role_in_course'] ?? 'student'));
+         json_response(['membership' => $m]);
+     }
+ 
+@@ -103,14 +100,14 @@
+         $membershipId = (int)$p['membership_id'];
+         require_course_teacher_or_admin($this->pdo, $courseId, $u, true);
+         $repo = new MembershipRepo($this->pdo);
+-        $repo->remove($membershipId);
++        $existing = $repo->getById($membershipId);
++        if (!$existing || (int)$existing['course_id'] !== $courseId) json_response(['error' => 'not found'], 404);
++        $repo->remove($courseId, $membershipId);
+         json_response(['ok' => true]);
+     }
+ 
+     public function apiMyMemberships(): void {
+         $u = require_api_login();
+-        $repo = new MembershipRepo($this->pdo);
+-        json_response(['memberships' => $repo->myMemberships((int)$u['user_id'])]);
++        json_response(['memberships' => (new MembershipRepo($this->pdo))->myMemberships((int)$u['user_id'])]);
+     }
+ }
+-
+diff -ruN origzip/educollab_php_v0/src/controllers/PostController.php workzip/educollab_php_v0/src/controllers/PostController.php
+--- origzip/educollab_php_v0/src/controllers/PostController.php	2026-02-21 16:08:52.000000000 +0000
++++ workzip/educollab_php_v0/src/controllers/PostController.php	2026-03-15 15:17:39.208136700 +0000
+@@ -10,8 +10,7 @@
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         require_course_member($this->pdo, $courseId, $u, false);
+-        $repo = new PostRepo($this->pdo);
+-        render('posts/list', ['title' => 'Posts', 'course_id' => $courseId, 'posts' => $repo->listByCourse($courseId)]);
++        render('posts/list', ['title' => 'Posts', 'course_id' => $courseId, 'posts' => (new PostRepo($this->pdo))->listByCourse($courseId)]);
+     }
+ 
+     public function showNew(array $p): void {
+@@ -22,13 +21,11 @@
+     }
+ 
+     public function create(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         require_course_member($this->pdo, $courseId, $u, false);
+-        $title = trim($_POST['title'] ?? '');
+-        $body = trim($_POST['body'] ?? '');
+-        $repo = new PostRepo($this->pdo);
+-        $post = $repo->create($courseId, (int)$u['user_id'], $title, $body);
++        $post = (new PostRepo($this->pdo))->create($courseId, (int)$u['user_id'], trim($_POST['title'] ?? ''), trim($_POST['body'] ?? ''));
+         redirect("/courses/$courseId/posts/{$post['post_id']}");
+     }
+ 
+@@ -37,11 +34,9 @@
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+         require_course_member($this->pdo, $courseId, $u, false);
+-        $repo = new PostRepo($this->pdo);
+-        $post = $repo->getById($courseId, $postId);
++        $post = (new PostRepo($this->pdo))->getById($courseId, $postId);
+         if (!$post) { http_response_code(404); echo 'Not found'; return; }
+-        $crepo = new CommentRepo($this->pdo);
+-        $comments = $crepo->listByPost($courseId, $postId);
++        $comments = (new CommentRepo($this->pdo))->listByPost($courseId, $postId);
+         render('posts/detail', ['title' => $post['title'], 'course_id' => $courseId, 'post' => $post, 'comments' => $comments]);
+     }
+ 
+@@ -49,42 +44,46 @@
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+-        require_course_member($this->pdo, $courseId, $u, false);
+-        $repo = new PostRepo($this->pdo);
+-        $post = $repo->getById($courseId, $postId);
++        $membership = require_course_member($this->pdo, $courseId, $u, false);
++        $post = (new PostRepo($this->pdo))->getById($courseId, $postId);
+         if (!$post) { http_response_code(404); echo 'Not found'; return; }
++        if (!can_manage_post($membership, $post, $u)) { http_response_code(403); echo 'Forbidden'; return; }
+         render('posts/edit', ['title' => 'Edit Post', 'course_id' => $courseId, 'post' => $post]);
+     }
+ 
+     public function update(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+-        require_course_member($this->pdo, $courseId, $u, false);
+-        $title = trim($_POST['title'] ?? '');
+-        $body = trim($_POST['body'] ?? '');
++        $membership = require_course_member($this->pdo, $courseId, $u, false);
+         $repo = new PostRepo($this->pdo);
+-        $repo->update($courseId, $postId, $title, $body);
++        $post = $repo->getById($courseId, $postId);
++        if (!$post) { http_response_code(404); echo 'Not found'; return; }
++        if (!can_manage_post($membership, $post, $u)) { http_response_code(403); echo 'Forbidden'; return; }
++        $repo->update($courseId, $postId, trim($_POST['title'] ?? ''), trim($_POST['body'] ?? ''), (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         redirect("/courses/$courseId/posts/$postId");
+     }
+ 
+     public function delete(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+-        require_course_member($this->pdo, $courseId, $u, false);
++        $membership = require_course_member($this->pdo, $courseId, $u, false);
+         $repo = new PostRepo($this->pdo);
+-        $repo->delete($courseId, $postId);
++        $post = $repo->getById($courseId, $postId);
++        if (!$post) { http_response_code(404); echo 'Not found'; return; }
++        if (!can_manage_post($membership, $post, $u)) { http_response_code(403); echo 'Forbidden'; return; }
++        $repo->delete($courseId, $postId, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         redirect("/courses/$courseId/posts");
+     }
+ 
+-    // API
+     public function apiList(array $p): void {
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         require_course_member($this->pdo, $courseId, $u, true);
+-        $repo = new PostRepo($this->pdo);
+-        json_response(['posts' => $repo->listByCourse($courseId)]);
++        json_response(['posts' => (new PostRepo($this->pdo))->listByCourse($courseId)]);
+     }
+ 
+     public function apiCreate(array $p): void {
+@@ -92,10 +91,7 @@
+         $courseId = (int)$p['course_id'];
+         require_course_member($this->pdo, $courseId, $u, true);
+         $data = parse_json_body();
+-        $title = trim($data['title'] ?? '');
+-        $body = trim($data['body'] ?? '');
+-        $repo = new PostRepo($this->pdo);
+-        $post = $repo->create($courseId, (int)$u['user_id'], $title, $body);
++        $post = (new PostRepo($this->pdo))->create($courseId, (int)$u['user_id'], trim($data['title'] ?? ''), trim($data['body'] ?? ''));
+         json_response(['post' => $post]);
+     }
+ 
+@@ -104,8 +100,7 @@
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+         require_course_member($this->pdo, $courseId, $u, true);
+-        $repo = new PostRepo($this->pdo);
+-        $post = $repo->getById($courseId, $postId);
++        $post = (new PostRepo($this->pdo))->getById($courseId, $postId);
+         if (!$post) json_response(['error' => 'not found'], 404);
+         json_response(['post' => $post]);
+     }
+@@ -114,12 +109,13 @@
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+-        require_course_member($this->pdo, $courseId, $u, true);
+-        $data = parse_json_body();
+-        $title = trim($data['title'] ?? '');
+-        $body = trim($data['body'] ?? '');
++        $membership = require_course_member($this->pdo, $courseId, $u, true);
+         $repo = new PostRepo($this->pdo);
+-        $post = $repo->update($courseId, $postId, $title, $body);
++        $post = $repo->getById($courseId, $postId);
++        if (!$post) json_response(['error' => 'not found'], 404);
++        if (!can_manage_post($membership, $post, $u)) json_response(['error' => 'forbidden'], 403);
++        $data = parse_json_body();
++        $post = $repo->update($courseId, $postId, trim($data['title'] ?? ''), trim($data['body'] ?? ''), (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         json_response(['post' => $post]);
+     }
+ 
+@@ -127,10 +123,12 @@
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+-        require_course_member($this->pdo, $courseId, $u, true);
++        $membership = require_course_member($this->pdo, $courseId, $u, true);
+         $repo = new PostRepo($this->pdo);
+-        $repo->delete($courseId, $postId);
++        $post = $repo->getById($courseId, $postId);
++        if (!$post) json_response(['error' => 'not found'], 404);
++        if (!can_manage_post($membership, $post, $u)) json_response(['error' => 'forbidden'], 403);
++        $repo->delete($courseId, $postId, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         json_response(['ok' => true]);
+     }
+ }
+-
+diff -ruN origzip/educollab_php_v0/src/controllers/QuestionController.php workzip/educollab_php_v0/src/controllers/QuestionController.php
+--- origzip/educollab_php_v0/src/controllers/QuestionController.php	2026-02-21 16:11:06.000000000 +0000
++++ workzip/educollab_php_v0/src/controllers/QuestionController.php	2026-03-15 15:19:28.880694920 +0000
+@@ -8,7 +8,7 @@
+     public function list(array $p): void {
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+-        require_course_member($this->pdo, $courseId, $u, false);
++        require_course_staff($this->pdo, $courseId, $u, false);
+         $repo = new QuestionRepo($this->pdo);
+         render('questions/list', ['title' => 'Question Bank', 'course_id' => $courseId, 'questions' => $repo->listByCourse($courseId)]);
+     }
+@@ -39,7 +39,7 @@
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $questionId = (int)$p['question_id'];
+-        require_course_member($this->pdo, $courseId, $u, false);
++        require_course_staff($this->pdo, $courseId, $u, false);
+         $repo = new QuestionRepo($this->pdo);
+         $q = $repo->getById($courseId, $questionId);
+         if (!$q) { http_response_code(404); echo 'Not found'; return; }
+@@ -85,7 +85,7 @@
+     public function apiList(array $p): void {
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+-        require_course_member($this->pdo, $courseId, $u, true);
++        require_course_staff($this->pdo, $courseId, $u, true);
+         $repo = new QuestionRepo($this->pdo);
+         json_response(['questions' => $repo->listByCourse($courseId)]);
+     }
+@@ -109,7 +109,7 @@
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         $questionId = (int)$p['question_id'];
+-        require_course_member($this->pdo, $courseId, $u, true);
++        require_course_staff($this->pdo, $courseId, $u, true);
+         $q = (new QuestionRepo($this->pdo))->getById($courseId, $questionId);
+         if (!$q) json_response(['error' => 'not found'], 404);
+         json_response(['question' => $q]);
+diff -ruN origzip/educollab_php_v0/src/controllers/TakeQuizController.php workzip/educollab_php_v0/src/controllers/TakeQuizController.php
+--- origzip/educollab_php_v0/src/controllers/TakeQuizController.php	2026-02-21 16:12:06.000000000 +0000
++++ workzip/educollab_php_v0/src/controllers/TakeQuizController.php	2026-03-15 15:19:28.994424586 +0000
+@@ -5,12 +5,26 @@
+ class TakeQuizController {
+     public function __construct(private PDO $pdo) {}
+ 
++    private function loadAuthorizedAttempt(QuizRepo $repo, int $courseId, int $quizId, int $attemptId, array $u, bool $api): array {
++        $attempt = $repo->getAttemptById($attemptId);
++        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id'] || (int)$attempt['course_id'] !== $courseId || (int)$attempt['quiz_id'] !== $quizId) {
++            if ($api) json_response(['error' => 'not found'], 404);
++            http_response_code(404);
++            echo 'Not found';
++            exit;
++        }
++        return $attempt;
++    }
++
+     public function start(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $quizId = (int)$p['quiz_id'];
+         require_course_student($this->pdo, $courseId, $u, false);
+         $repo = new QuizRepo($this->pdo);
++        $quiz = $repo->getById($courseId, $quizId);
++        if (!$quiz) { http_response_code(404); echo 'Not found'; return; }
+         $attempt = $repo->startAttempt($courseId, $quizId, (int)$u['user_id']);
+         redirect("/courses/$courseId/quizzes/$quizId/attempts/{$attempt['attempt_id']}");
+     }
+@@ -22,8 +36,7 @@
+         $attemptId = (int)$p['attempt_id'];
+         require_course_student($this->pdo, $courseId, $u, false);
+         $repo = new QuizRepo($this->pdo);
+-        $attempt = $repo->getAttemptById($attemptId);
+-        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { http_response_code(404); echo 'Not found'; return; }
++        $attempt = $this->loadAuthorizedAttempt($repo, $courseId, $quizId, $attemptId, $u, false);
+         $quizQuestions = $repo->listQuizQuestions($quizId);
+         $answers = $repo->listAnswers($attemptId);
+         $map = [];
+@@ -32,6 +45,7 @@
+     }
+ 
+     public function answer(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $quizId = (int)$p['quiz_id'];
+@@ -40,40 +54,41 @@
+         $questionId = (int)($_POST['question_id'] ?? 0);
+         $answerJson = trim($_POST['answer_json'] ?? '');
+         $repo = new QuizRepo($this->pdo);
+-        $attempt = $repo->getAttemptById($attemptId);
+-        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { http_response_code(404); echo 'Not found'; return; }
++        $attempt = $this->loadAuthorizedAttempt($repo, $courseId, $quizId, $attemptId, $u, false);
++        if (!empty($attempt['submitted_at'])) { http_response_code(403); echo 'Forbidden'; return; }
++        if (!$repo->quizHasQuestion($quizId, $questionId)) { http_response_code(404); echo 'Not found'; return; }
+         $repo->upsertAnswer($attemptId, $questionId, $answerJson);
+         redirect("/courses/$courseId/quizzes/$quizId/attempts/$attemptId");
+     }
+ 
+     public function submit(array $p): void {
++        require_csrf();
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $quizId = (int)$p['quiz_id'];
+         $attemptId = (int)$p['attempt_id'];
+         require_course_student($this->pdo, $courseId, $u, false);
+         $repo = new QuizRepo($this->pdo);
+-        $attempt = $repo->getAttemptById($attemptId);
+-        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { http_response_code(404); echo 'Not found'; return; }
++        $attempt = $this->loadAuthorizedAttempt($repo, $courseId, $quizId, $attemptId, $u, false);
++        if (!empty($attempt['submitted_at'])) { http_response_code(403); echo 'Forbidden'; return; }
+         $repo->submitAttempt($attemptId);
+         redirect("/courses/$courseId/quizzes/$quizId");
+     }
+ 
+     public function myAttempts(): void {
+         $u = require_login();
+-        $repo = new QuizRepo($this->pdo);
+-        render('quizzes/my_attempts', ['title' => 'My Quiz Attempts', 'attempts' => $repo->listMyAttempts((int)$u['user_id'])]);
++        render('quizzes/my_attempts', ['title' => 'My Quiz Attempts', 'attempts' => (new QuizRepo($this->pdo))->listMyAttempts((int)$u['user_id'])]);
+     }
+ 
+-    // API
+     public function apiStart(array $p): void {
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         $quizId = (int)$p['quiz_id'];
+         require_course_student($this->pdo, $courseId, $u, true);
+         $repo = new QuizRepo($this->pdo);
+-        $attempt = $repo->startAttempt($courseId, $quizId, (int)$u['user_id']);
+-        json_response(['attempt' => $attempt]);
++        $quiz = $repo->getById($courseId, $quizId);
++        if (!$quiz) json_response(['error' => 'not found'], 404);
++        json_response(['attempt' => $repo->startAttempt($courseId, $quizId, (int)$u['user_id'])]);
+     }
+ 
+     public function apiAnswer(array $p): void {
+@@ -86,8 +101,9 @@
+         $questionId = (int)($data['question_id'] ?? 0);
+         $answerJson = (string)($data['answer_json'] ?? '');
+         $repo = new QuizRepo($this->pdo);
+-        $attempt = $repo->getAttemptById($attemptId);
+-        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) json_response(['error' => 'not found'], 404);
++        $attempt = $this->loadAuthorizedAttempt($repo, $courseId, $quizId, $attemptId, $u, true);
++        if (!empty($attempt['submitted_at'])) json_response(['error' => 'forbidden'], 403);
++        if (!$repo->quizHasQuestion($quizId, $questionId)) json_response(['error' => 'not found'], 404);
+         $repo->upsertAnswer($attemptId, $questionId, $answerJson);
+         json_response(['ok' => true]);
+     }
+@@ -95,19 +111,18 @@
+     public function apiSubmit(array $p): void {
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
++        $quizId = (int)$p['quiz_id'];
+         $attemptId = (int)$p['attempt_id'];
+         require_course_student($this->pdo, $courseId, $u, true);
+         $repo = new QuizRepo($this->pdo);
+-        $attempt = $repo->getAttemptById($attemptId);
+-        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) json_response(['error' => 'not found'], 404);
++        $attempt = $this->loadAuthorizedAttempt($repo, $courseId, $quizId, $attemptId, $u, true);
++        if (!empty($attempt['submitted_at'])) json_response(['error' => 'forbidden'], 403);
+         $repo->submitAttempt($attemptId);
+         json_response(['ok' => true]);
+     }
+ 
+     public function apiMyAttempts(): void {
+         $u = require_api_login();
+-        $repo = new QuizRepo($this->pdo);
+-        json_response(['attempts' => $repo->listMyAttempts((int)$u['user_id'])]);
++        json_response(['attempts' => (new QuizRepo($this->pdo))->listMyAttempts((int)$u['user_id'])]);
+     }
+ }
+-
+diff -ruN origzip/educollab_php_v0/src/controllers/_guards.php workzip/educollab_php_v0/src/controllers/_guards.php
+--- origzip/educollab_php_v0/src/controllers/_guards.php	2026-02-21 16:06:59.000000000 +0000
++++ workzip/educollab_php_v0/src/controllers/_guards.php	2026-03-15 15:16:21.693937961 +0000
+@@ -4,11 +4,11 @@
+ require_once APP_BASE . '/src/repos/CourseRepo.php';
+ 
+ function require_course_member(PDO $pdo, int $courseId, array $user, bool $api=false): array {
+-    $mrepo = new MembershipRepo($pdo);
++    $repo = new MembershipRepo($pdo);
+     if (is_global_admin($user)) {
+         return ['role_in_course' => 'admin', 'user_id' => $user['user_id'], 'course_id' => $courseId];
+     }
+-    $m = $mrepo->getByCourseAndUser($courseId, (int)$user['user_id']);
++    $m = $repo->getByCourseAndUser($courseId, (int)$user['user_id']);
+     if (!$m) {
+         if ($api) json_response(['error' => 'forbidden'], 403);
+         http_response_code(403);
+@@ -24,8 +24,7 @@
+ 
+ function require_course_staff(PDO $pdo, int $courseId, array $user, bool $api=false): array {
+     $m = require_course_member($pdo, $courseId, $user, $api);
+-    $role = $m['role_in_course'] ?? '';
+-    if (!role_is_staff($role)) {
++    if (!role_is_staff((string)($m['role_in_course'] ?? ''))) {
+         if ($api) json_response(['error' => 'forbidden'], 403);
+         http_response_code(403);
+         echo 'Forbidden';
+@@ -36,8 +35,7 @@
+ 
+ function require_course_teacher_or_admin(PDO $pdo, int $courseId, array $user, bool $api=false): array {
+     $m = require_course_member($pdo, $courseId, $user, $api);
+-    $role = $m['role_in_course'] ?? '';
+-    if (!in_array($role, ['admin','teacher'], true)) {
++    if (!in_array((string)($m['role_in_course'] ?? ''), ['admin','teacher'], true)) {
+         if ($api) json_response(['error' => 'forbidden'], 403);
+         http_response_code(403);
+         echo 'Forbidden';
+@@ -48,8 +46,7 @@
+ 
+ function require_course_student(PDO $pdo, int $courseId, array $user, bool $api=false): array {
+     $m = require_course_member($pdo, $courseId, $user, $api);
+-    $role = $m['role_in_course'] ?? '';
+-    if ($role !== 'student') {
++    if ((string)($m['role_in_course'] ?? '') !== 'student') {
+         if ($api) json_response(['error' => 'forbidden'], 403);
+         http_response_code(403);
+         echo 'Forbidden';
+@@ -58,3 +55,14 @@
+     return $m;
+ }
+ 
++function can_manage_post(array $membership, array $post, array $user): bool {
++    if (is_global_admin($user)) return true;
++    if (role_is_staff((string)($membership['role_in_course'] ?? ''))) return true;
++    return (int)($post['author_id'] ?? 0) === (int)($user['user_id'] ?? 0);
++}
++
++function can_manage_comment(array $membership, array $comment, array $user): bool {
++    if (is_global_admin($user)) return true;
++    if (role_is_staff((string)($membership['role_in_course'] ?? ''))) return true;
++    return (int)($comment['author_id'] ?? 0) === (int)($user['user_id'] ?? 0);
++}
+diff -ruN origzip/educollab_php_v0/src/helpers.php workzip/educollab_php_v0/src/helpers.php
+--- origzip/educollab_php_v0/src/helpers.php	2026-02-21 16:19:32.000000000 +0000
++++ workzip/educollab_php_v0/src/helpers.php	2026-03-15 15:15:15.596196068 +0000
+@@ -28,19 +28,16 @@
+     $viewFile = APP_BASE . '/views/' . $view . '.php';
+     if (!file_exists($viewFile)) {
+         http_response_code(500);
+-        echo "View not found: " . h($view);
++        echo 'View not found: ' . h($view);
+         exit;
+     }
+-    $layoutFile = APP_BASE . '/views/layout.php';
+-    include $layoutFile;
++    include APP_BASE . '/views/layout.php';
+ }
+ 
+ function method_override(): string {
+     $m = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+     if ($m === 'POST') {
+-        if (!empty($_POST['_method'])) {
+-            return strtoupper($_POST['_method']);
+-        }
++        if (!empty($_POST['_method'])) return strtoupper($_POST['_method']);
+         $hdr = $_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE'] ?? '';
+         if ($hdr) return strtoupper($hdr);
+     }
+@@ -55,23 +52,18 @@
+ }
+ 
+ function require_login(): array {
+-    if (empty($_SESSION['user'])) {
+-        redirect('/login');
+-    }
++    if (empty($_SESSION['user'])) redirect('/login');
+     return $_SESSION['user'];
+ }
+ 
+ function require_api_login(): array {
+-    if (empty($_SESSION['user'])) {
+-        json_response(['error' => 'unauthorized'], 401);
+-    }
++    if (empty($_SESSION['user'])) json_response(['error' => 'unauthorized'], 401);
+     return $_SESSION['user'];
+ }
+ 
+ function is_global_admin(?array $user): bool {
+     if (!$user) return false;
+-    // Minimal global admin rule: the seeded admin username is 'admin'
+-    return ($user['username'] ?? '') === 'admin';
++    return !empty($user['is_global_admin']);
+ }
+ 
+ function parse_json_body(): array {
+@@ -84,9 +76,43 @@
+     return gmdate('c');
+ }
+ 
++function session_login_user(array $user): void {
++    session_regenerate_id(true);
++    unset($_SESSION['_csrf_token']);
++    $_SESSION['user'] = $user;
++}
++
++function session_logout_user(): void {
++    $_SESSION = [];
++    if (session_id() !== '' || isset($_COOKIE[session_name()])) {
++        setcookie(session_name(), '', time() - 3600, '/');
++    }
++    session_destroy();
++}
++
++function csrf_token(): string {
++    if (empty($_SESSION['_csrf_token'])) {
++        $_SESSION['_csrf_token'] = bin2hex(random_bytes(32));
++    }
++    return (string)$_SESSION['_csrf_token'];
++}
++
++function csrf_input(): string {
++    return '<input type="hidden" name="_csrf" value="' . h(csrf_token()) . '" />';
++}
++
++function require_csrf(): void {
++    $token = (string)($_POST['_csrf'] ?? '');
++    $expected = (string)($_SESSION['_csrf_token'] ?? '');
++    if ($expected === '' || $token === '' || !hash_equals($expected, $token)) {
++        http_response_code(403);
++        echo 'Forbidden';
++        exit;
++    }
++}
++
+ function snippet(string $s, int $max=80): string {
+     $s = (string)$s;
+     if (strlen($s) <= $max) return $s;
+     return substr($s, 0, $max - 3) . '...';
+ }
+-
+diff -ruN origzip/educollab_php_v0/src/repos/CommentRepo.php workzip/educollab_php_v0/src/repos/CommentRepo.php
+--- origzip/educollab_php_v0/src/repos/CommentRepo.php	2026-02-21 16:05:40.000000000 +0000
++++ workzip/educollab_php_v0/src/repos/CommentRepo.php	2026-03-15 15:19:27.638808380 +0000
+@@ -23,15 +23,25 @@
+         return $row ?: null;
+     }
+ 
+-    public function update(int $courseId, int $postId, int $commentId, string $body): ?array {
+-        $stmt = $this->pdo->prepare('UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?');
+-        $stmt->execute([$body, now_iso(), $courseId, $postId, $commentId]);
++    public function update(int $courseId, int $postId, int $commentId, string $body, ?int $authorId=null): ?array {
++        if ($authorId === null) {
++            $stmt = $this->pdo->prepare('UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?');
++            $stmt->execute([$body, now_iso(), $courseId, $postId, $commentId]);
++        } else {
++            $stmt = $this->pdo->prepare('UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=? AND author_id=?');
++            $stmt->execute([$body, now_iso(), $courseId, $postId, $commentId, $authorId]);
++        }
+         return $this->getById($courseId, $postId, $commentId);
+     }
+ 
+-    public function delete(int $courseId, int $postId, int $commentId): void {
+-        $stmt = $this->pdo->prepare('DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?');
+-        $stmt->execute([$courseId, $postId, $commentId]);
++    public function delete(int $courseId, int $postId, int $commentId, ?int $authorId=null): void {
++        if ($authorId === null) {
++            $stmt = $this->pdo->prepare('DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?');
++            $stmt->execute([$courseId, $postId, $commentId]);
++        } else {
++            $stmt = $this->pdo->prepare('DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=? AND author_id=?');
++            $stmt->execute([$courseId, $postId, $commentId, $authorId]);
++        }
+     }
+ 
+     public function searchComments(int $courseId, string $keyword): array {
+@@ -41,4 +51,3 @@
+         return $stmt->fetchAll();
+     }
+ }
+-
+diff -ruN origzip/educollab_php_v0/src/repos/MembershipRepo.php workzip/educollab_php_v0/src/repos/MembershipRepo.php
+--- origzip/educollab_php_v0/src/repos/MembershipRepo.php	2026-02-21 16:05:17.000000000 +0000
++++ workzip/educollab_php_v0/src/repos/MembershipRepo.php	2026-03-15 15:16:21.700257170 +0000
+@@ -36,15 +36,15 @@
+         return $stmt->fetchAll();
+     }
+ 
+-    public function updateRole(int $membershipId, string $role): ?array {
+-        $stmt = $this->pdo->prepare('UPDATE memberships SET role_in_course=? WHERE membership_id=?');
+-        $stmt->execute([$role, $membershipId]);
++    public function updateRole(int $courseId, int $membershipId, string $role): ?array {
++        $stmt = $this->pdo->prepare('UPDATE memberships SET role_in_course=? WHERE course_id=? AND membership_id=?');
++        $stmt->execute([$role, $courseId, $membershipId]);
+         return $this->getById($membershipId);
+     }
+ 
+-    public function remove(int $membershipId): void {
+-        $stmt = $this->pdo->prepare('DELETE FROM memberships WHERE membership_id=?');
+-        $stmt->execute([$membershipId]);
++    public function remove(int $courseId, int $membershipId): void {
++        $stmt = $this->pdo->prepare('DELETE FROM memberships WHERE course_id=? AND membership_id=?');
++        $stmt->execute([$courseId, $membershipId]);
+     }
+ 
+     public function isMember(int $courseId, int $userId): bool {
+@@ -56,4 +56,3 @@
+         return $m['role_in_course'] ?? null;
+     }
+ }
+-
+diff -ruN origzip/educollab_php_v0/src/repos/PostRepo.php workzip/educollab_php_v0/src/repos/PostRepo.php
+--- origzip/educollab_php_v0/src/repos/PostRepo.php	2026-02-21 16:05:28.000000000 +0000
++++ workzip/educollab_php_v0/src/repos/PostRepo.php	2026-03-15 15:17:39.202115149 +0000
+@@ -23,15 +23,25 @@
+         return $row ?: null;
+     }
+ 
+-    public function update(int $courseId, int $postId, string $title, string $body): ?array {
+-        $stmt = $this->pdo->prepare('UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?');
+-        $stmt->execute([$title, $body, now_iso(), $courseId, $postId]);
++    public function update(int $courseId, int $postId, string $title, string $body, ?int $authorId=null): ?array {
++        if ($authorId === null) {
++            $stmt = $this->pdo->prepare('UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?');
++            $stmt->execute([$title, $body, now_iso(), $courseId, $postId]);
++        } else {
++            $stmt = $this->pdo->prepare('UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=? AND author_id=?');
++            $stmt->execute([$title, $body, now_iso(), $courseId, $postId, $authorId]);
++        }
+         return $this->getById($courseId, $postId);
+     }
+ 
+-    public function delete(int $courseId, int $postId): void {
+-        $stmt = $this->pdo->prepare('DELETE FROM posts WHERE course_id=? AND post_id=?');
+-        $stmt->execute([$courseId, $postId]);
++    public function delete(int $courseId, int $postId, ?int $authorId=null): void {
++        if ($authorId === null) {
++            $stmt = $this->pdo->prepare('DELETE FROM posts WHERE course_id=? AND post_id=?');
++            $stmt->execute([$courseId, $postId]);
++        } else {
++            $stmt = $this->pdo->prepare('DELETE FROM posts WHERE course_id=? AND post_id=? AND author_id=?');
++            $stmt->execute([$courseId, $postId, $authorId]);
++        }
+     }
+ 
+     public function searchPosts(int $courseId, string $keyword): array {
+@@ -41,4 +51,3 @@
+         return $stmt->fetchAll();
+     }
+ }
+-
+diff -ruN origzip/educollab_php_v0/src/repos/QuizRepo.php workzip/educollab_php_v0/src/repos/QuizRepo.php
+--- origzip/educollab_php_v0/src/repos/QuizRepo.php	2026-02-21 16:06:45.000000000 +0000
++++ workzip/educollab_php_v0/src/repos/QuizRepo.php	2026-03-15 15:19:28.987261952 +0000
+@@ -9,81 +9,18 @@
+         $stmt->execute([$courseId, $createdBy, $title, $description, $openAt, $dueAt, $now, $now]);
+         return $this->getById($courseId, (int)$this->pdo->lastInsertId());
+     }
+-
+-    public function listByCourse(int $courseId): array {
+-        $stmt = $this->pdo->prepare('SELECT z.*, u.username AS creator_username FROM quizzes z JOIN users u ON u.user_id=z.created_by WHERE z.course_id=? ORDER BY z.quiz_id DESC');
+-        $stmt->execute([$courseId]);
+-        return $stmt->fetchAll();
+-    }
+-
+-    public function getById(int $courseId, int $quizId): ?array {
+-        $stmt = $this->pdo->prepare('SELECT z.*, u.username AS creator_username FROM quizzes z JOIN users u ON u.user_id=z.created_by WHERE z.course_id=? AND z.quiz_id=?');
+-        $stmt->execute([$courseId, $quizId]);
+-        $row = $stmt->fetch();
+-        return $row ?: null;
+-    }
+-
+-    public function update(int $courseId, int $quizId, string $title, string $description, ?string $openAt, ?string $dueAt): ?array {
+-        $stmt = $this->pdo->prepare('UPDATE quizzes SET title=?, description=?, open_at=?, due_at=?, updated_at=? WHERE course_id=? AND quiz_id=?');
+-        $stmt->execute([$title, $description, $openAt, $dueAt, now_iso(), $courseId, $quizId]);
+-        return $this->getById($courseId, $quizId);
+-    }
+-
+-    public function delete(int $courseId, int $quizId): void {
+-        $stmt = $this->pdo->prepare('DELETE FROM quizzes WHERE course_id=? AND quiz_id=?');
+-        $stmt->execute([$courseId, $quizId]);
+-    }
+-
+-    public function addQuizQuestion(int $quizId, int $questionId, int $points, int $position): void {
+-        $stmt = $this->pdo->prepare('INSERT OR REPLACE INTO quiz_questions(quiz_id,question_id,points,position) VALUES (?,?,?,?)');
+-        $stmt->execute([$quizId, $questionId, $points, $position]);
+-    }
+-
+-    public function removeQuizQuestion(int $quizId, int $questionId): void {
+-        $stmt = $this->pdo->prepare('DELETE FROM quiz_questions WHERE quiz_id=? AND question_id=?');
+-        $stmt->execute([$quizId, $questionId]);
+-    }
+-
+-    public function listQuizQuestions(int $quizId): array {
+-        $stmt = $this->pdo->prepare('SELECT qq.*, q.prompt, q.qtype FROM quiz_questions qq JOIN questions q ON q.question_id=qq.question_id WHERE qq.quiz_id=? ORDER BY qq.position ASC');
+-        $stmt->execute([$quizId]);
+-        return $stmt->fetchAll();
+-    }
+-
+-    public function startAttempt(int $courseId, int $quizId, int $studentId): array {
+-        $stmt = $this->pdo->prepare('INSERT INTO quiz_attempts(quiz_id,course_id,student_id,started_at) VALUES (?,?,?,?)');
+-        $stmt->execute([$quizId, $courseId, $studentId, now_iso()]);
+-        return $this->getAttemptById((int)$this->pdo->lastInsertId());
+-    }
+-
+-    public function getAttemptById(int $attemptId): ?array {
+-        $stmt = $this->pdo->prepare('SELECT * FROM quiz_attempts WHERE attempt_id=?');
+-        $stmt->execute([$attemptId]);
+-        $row = $stmt->fetch();
+-        return $row ?: null;
+-    }
+-
+-    public function upsertAnswer(int $attemptId, int $questionId, string $answerJson): void {
+-        $stmt = $this->pdo->prepare('INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) VALUES (?,?,?,?)
+-            ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json');
+-        $stmt->execute([$attemptId, $questionId, $answerJson, now_iso()]);
+-    }
+-
+-    public function submitAttempt(int $attemptId): void {
+-        $stmt = $this->pdo->prepare('UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?');
+-        $stmt->execute([now_iso(), $attemptId]);
+-    }
+-
+-    public function listMyAttempts(int $studentId): array {
+-        $stmt = $this->pdo->prepare('SELECT a.*, z.title AS quiz_title, c.title AS course_title FROM quiz_attempts a JOIN quizzes z ON z.quiz_id=a.quiz_id JOIN courses c ON c.course_id=a.course_id WHERE a.student_id=? ORDER BY a.started_at DESC');
+-        $stmt->execute([$studentId]);
+-        return $stmt->fetchAll();
+-    }
+-
+-    public function listAnswers(int $attemptId): array {
+-        $stmt = $this->pdo->prepare('SELECT * FROM quiz_answers WHERE attempt_id=? ORDER BY answer_id ASC');
+-        $stmt->execute([$attemptId]);
+-        return $stmt->fetchAll();
+-    }
++    public function listByCourse(int $courseId): array { $stmt = $this->pdo->prepare('SELECT z.*, u.username AS creator_username FROM quizzes z JOIN users u ON u.user_id=z.created_by WHERE z.course_id=? ORDER BY z.quiz_id DESC'); $stmt->execute([$courseId]); return $stmt->fetchAll(); }
++    public function getById(int $courseId, int $quizId): ?array { $stmt = $this->pdo->prepare('SELECT z.*, u.username AS creator_username FROM quizzes z JOIN users u ON u.user_id=z.created_by WHERE z.course_id=? AND z.quiz_id=?'); $stmt->execute([$courseId, $quizId]); $row = $stmt->fetch(); return $row ?: null; }
++    public function update(int $courseId, int $quizId, string $title, string $description, ?string $openAt, ?string $dueAt): ?array { $stmt = $this->pdo->prepare('UPDATE quizzes SET title=?, description=?, open_at=?, due_at=?, updated_at=? WHERE course_id=? AND quiz_id=?'); $stmt->execute([$title, $description, $openAt, $dueAt, now_iso(), $courseId, $quizId]); return $this->getById($courseId, $quizId); }
++    public function delete(int $courseId, int $quizId): void { $stmt = $this->pdo->prepare('DELETE FROM quizzes WHERE course_id=? AND quiz_id=?'); $stmt->execute([$courseId, $quizId]); }
++    public function addQuizQuestion(int $quizId, int $questionId, int $points, int $position): void { $stmt = $this->pdo->prepare('INSERT OR REPLACE INTO quiz_questions(quiz_id,question_id,points,position) VALUES (?,?,?,?)'); $stmt->execute([$quizId, $questionId, $points, $position]); }
++    public function removeQuizQuestion(int $quizId, int $questionId): void { $stmt = $this->pdo->prepare('DELETE FROM quiz_questions WHERE quiz_id=? AND question_id=?'); $stmt->execute([$quizId, $questionId]); }
++    public function listQuizQuestions(int $quizId): array { $stmt = $this->pdo->prepare('SELECT qq.*, q.prompt, q.qtype FROM quiz_questions qq JOIN questions q ON q.question_id=qq.question_id WHERE qq.quiz_id=? ORDER BY qq.position ASC'); $stmt->execute([$quizId]); return $stmt->fetchAll(); }
++    public function quizHasQuestion(int $quizId, int $questionId): bool { $stmt = $this->pdo->prepare('SELECT 1 FROM quiz_questions WHERE quiz_id=? AND question_id=?'); $stmt->execute([$quizId, $questionId]); return (bool)$stmt->fetchColumn(); }
++    public function startAttempt(int $courseId, int $quizId, int $studentId): array { $stmt = $this->pdo->prepare('INSERT INTO quiz_attempts(quiz_id,course_id,student_id,started_at) VALUES (?,?,?,?)'); $stmt->execute([$quizId, $courseId, $studentId, now_iso()]); return $this->getAttemptById((int)$this->pdo->lastInsertId()); }
++    public function getAttemptById(int $attemptId): ?array { $stmt = $this->pdo->prepare('SELECT * FROM quiz_attempts WHERE attempt_id=?'); $stmt->execute([$attemptId]); $row = $stmt->fetch(); return $row ?: null; }
++    public function upsertAnswer(int $attemptId, int $questionId, string $answerJson): void { $now = now_iso(); $stmt = $this->pdo->prepare('INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json, updated_at=excluded.updated_at'); $stmt->execute([$attemptId, $questionId, $answerJson, $now, $now]); }
++    public function submitAttempt(int $attemptId): void { $stmt = $this->pdo->prepare('UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=? AND submitted_at IS NULL'); $stmt->execute([now_iso(), $attemptId]); }
++    public function listMyAttempts(int $studentId): array { $stmt = $this->pdo->prepare('SELECT a.*, z.title AS quiz_title, c.title AS course_title FROM quiz_attempts a JOIN quizzes z ON z.quiz_id=a.quiz_id JOIN courses c ON c.course_id=a.course_id WHERE a.student_id=? ORDER BY a.started_at DESC'); $stmt->execute([$studentId]); return $stmt->fetchAll(); }
++    public function listAnswers(int $attemptId): array { $stmt = $this->pdo->prepare('SELECT * FROM quiz_answers WHERE attempt_id=? ORDER BY answer_id ASC'); $stmt->execute([$attemptId]); return $stmt->fetchAll(); }
+ }
+-
+diff -ruN origzip/educollab_php_v0/src/repos/UserRepo.php workzip/educollab_php_v0/src/repos/UserRepo.php
+--- origzip/educollab_php_v0/src/repos/UserRepo.php	2026-02-21 16:04:53.000000000 +0000
++++ workzip/educollab_php_v0/src/repos/UserRepo.php	2026-03-15 15:15:15.605233136 +0000
+@@ -5,13 +5,13 @@
+ 
+     public function create(string $username, string $password, string $displayName): array {
+         $hash = password_hash($password, PASSWORD_BCRYPT);
+-        $stmt = $this->pdo->prepare('INSERT INTO users(username,password_hash,display_name,created_at) VALUES (?,?,?,?)');
++        $stmt = $this->pdo->prepare('INSERT INTO users(username,password_hash,display_name,created_at,is_global_admin) VALUES (?,?,?,?,0)');
+         $stmt->execute([$username, $hash, $displayName, now_iso()]);
+         return $this->getById((int)$this->pdo->lastInsertId());
+     }
+ 
+     public function getById(int $userId): ?array {
+-        $stmt = $this->pdo->prepare('SELECT user_id, username, display_name, created_at FROM users WHERE user_id=?');
++        $stmt = $this->pdo->prepare('SELECT user_id, username, display_name, created_at, is_global_admin FROM users WHERE user_id=?');
+         $stmt->execute([$userId]);
+         $row = $stmt->fetch();
+         return $row ?: null;
+@@ -28,4 +28,3 @@
+         return $this->pdo->query('SELECT user_id, username, display_name, created_at FROM users ORDER BY user_id DESC')->fetchAll();
+     }
+ }
+-
+diff -ruN origzip/educollab_php_v0/views/assignments/detail.php workzip/educollab_php_v0/views/assignments/detail.php
+--- origzip/educollab_php_v0/views/assignments/detail.php	2026-02-21 16:16:06.000000000 +0000
++++ workzip/educollab_php_v0/views/assignments/detail.php	2026-03-15 15:19:30.182797323 +0000
+@@ -5,7 +5,8 @@
+ 
+   <div>
+     <a href="/courses/<?= h($course_id) ?>/assignments/<?= h($assignment['assignment_id']) ?>/edit">Edit (staff)</a>
+-    <form style="display:inline" method="post" action="/courses/<?= h($course_id) ?>/assignments/<?= h($assignment['assignment_id']) ?>/delete"><button type="submit">Delete (staff)</button></form>
++    <form style="display:inline" method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/assignments/<?= h($assignment['assignment_id']) ?>/delete"><button type="submit">Delete (staff)</button></form>
+   </div>
+ 
+   <hr />
+diff -ruN origzip/educollab_php_v0/views/assignments/edit.php workzip/educollab_php_v0/views/assignments/edit.php
+--- origzip/educollab_php_v0/views/assignments/edit.php	2026-02-21 16:15:58.000000000 +0000
++++ workzip/educollab_php_v0/views/assignments/edit.php	2026-03-15 15:19:30.182668368 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>Edit Assignment</h2>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/assignments/<?= h($assignment['assignment_id']) ?>">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/assignments/<?= h($assignment['assignment_id']) ?>">
+     <label>Title</label>
+     <input name="title" value="<?= h($assignment['title']) ?>" />
+     <label>Description</label>
+diff -ruN origzip/educollab_php_v0/views/assignments/new.php workzip/educollab_php_v0/views/assignments/new.php
+--- origzip/educollab_php_v0/views/assignments/new.php	2026-02-21 16:15:53.000000000 +0000
++++ workzip/educollab_php_v0/views/assignments/new.php	2026-03-15 15:19:30.182490806 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>New Assignment</h2>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/assignments">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/assignments">
+     <label>Title</label>
+     <input name="title" />
+     <label>Description</label>
+diff -ruN origzip/educollab_php_v0/views/auth/login.php workzip/educollab_php_v0/views/auth/login.php
+--- origzip/educollab_php_v0/views/auth/login.php	2026-02-21 16:13:38.000000000 +0000
++++ workzip/educollab_php_v0/views/auth/login.php	2026-03-15 15:19:30.179607218 +0000
+@@ -1,11 +1,11 @@
+ <div class="card">
+   <h2>Login</h2>
+   <form method="post" action="/login">
++    <?= csrf_input() ?>
+     <label>Username</label>
+     <input name="username" />
+     <label>Password</label>
+     <input name="password" type="password" />
+     <button type="submit">Login</button>
+   </form>
+-  <p class="muted">Default seeded admin: admin / admin123</p>
+-</div>
++  </div>
+diff -ruN origzip/educollab_php_v0/views/auth/register.php workzip/educollab_php_v0/views/auth/register.php
+--- origzip/educollab_php_v0/views/auth/register.php	2026-02-21 16:13:43.000000000 +0000
++++ workzip/educollab_php_v0/views/auth/register.php	2026-03-15 15:19:30.180027470 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>Register (Student)</h2>
+   <form method="post" action="/register">
++    <?= csrf_input() ?>
+     <label>Username</label>
+     <input name="username" />
+     <label>Display name</label>
+diff -ruN origzip/educollab_php_v0/views/courses/detail.php workzip/educollab_php_v0/views/courses/detail.php
+--- origzip/educollab_php_v0/views/courses/detail.php	2026-02-21 16:14:22.000000000 +0000
++++ workzip/educollab_php_v0/views/courses/detail.php	2026-03-15 15:19:30.180738916 +0000
+@@ -5,7 +5,8 @@
+ 
+   <div>
+     <a href="/courses/<?= h($course['course_id']) ?>/edit">Edit</a>
+-    <form style="display:inline" method="post" action="/courses/<?= h($course['course_id']) ?>/delete"><button type="submit">Delete</button></form>
++    <form style="display:inline" method="post" action="/courses/<?= h($course['course_id']) ?>
++    <?= csrf_input() ?>/delete"><button type="submit">Delete</button></form>
+   </div>
+ 
+   <hr />
+diff -ruN origzip/educollab_php_v0/views/courses/edit.php workzip/educollab_php_v0/views/courses/edit.php
+--- origzip/educollab_php_v0/views/courses/edit.php	2026-02-21 16:14:09.000000000 +0000
++++ workzip/educollab_php_v0/views/courses/edit.php	2026-03-15 15:19:30.180623440 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>Edit Course</h2>
+-  <form method="post" action="/courses/<?= h($course['course_id']) ?>">
++  <form method="post" action="/courses/<?= h($course['course_id']) ?>
++    <?= csrf_input() ?>">
+     <label>Title</label>
+     <input name="title" value="<?= h($course['title']) ?>" />
+     <label>Description</label>
+diff -ruN origzip/educollab_php_v0/views/courses/new.php workzip/educollab_php_v0/views/courses/new.php
+--- origzip/educollab_php_v0/views/courses/new.php	2026-02-21 16:14:04.000000000 +0000
++++ workzip/educollab_php_v0/views/courses/new.php	2026-03-15 15:19:30.180465911 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>New Course</h2>
+   <form method="post" action="/courses">
++    <?= csrf_input() ?>
+     <label>Title</label>
+     <input name="title" />
+     <label>Description</label>
+diff -ruN origzip/educollab_php_v0/views/layout.php workzip/educollab_php_v0/views/layout.php
+--- origzip/educollab_php_v0/views/layout.php	2026-02-21 16:13:32.000000000 +0000
++++ workzip/educollab_php_v0/views/layout.php	2026-03-15 15:19:30.179150671 +0000
+@@ -31,7 +31,8 @@
+       <?php if (is_global_admin($user)): ?>
+         <a href="/admin/users">Admin: Users</a>
+       <?php endif; ?>
+-      <form style="display:inline" method="post" action="/logout"><button type="submit">Logout</button></form>
++      <form style="display:inline" method="post" action="/logout">
++    <?= csrf_input() ?><button type="submit">Logout</button></form>
+       <span class="muted">Logged in as <?= h($user['username'] ?? '') ?></span>
+     <?php else: ?>
+       <a href="/login">Login</a>
+diff -ruN origzip/educollab_php_v0/views/memberships/list.php workzip/educollab_php_v0/views/memberships/list.php
+--- origzip/educollab_php_v0/views/memberships/list.php	2026-02-21 16:14:36.000000000 +0000
++++ workzip/educollab_php_v0/views/memberships/list.php	2026-03-15 15:19:30.180925105 +0000
+@@ -9,7 +9,8 @@
+           <td><?= h($m['membership_id']) ?></td>
+           <td><?= h($m['username']) ?> (<?= h($m['display_name']) ?>)</td>
+           <td>
+-            <form method="post" action="/courses/<?= h($course_id) ?>/members/<?= h($m['membership_id']) ?>">
++            <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/members/<?= h($m['membership_id']) ?>">
+               <select name="role_in_course">
+                 <?php foreach (['admin','teacher','student','assistant','senior-assistant'] as $r): ?>
+                   <option value="<?= h($r) ?>" <?= $m['role_in_course']===$r?'selected':'' ?>><?= h($r) ?></option>
+@@ -19,7 +20,8 @@
+             </form>
+           </td>
+           <td>
+-            <form method="post" action="/courses/<?= h($course_id) ?>/members/<?= h($m['membership_id']) ?>/delete">
++            <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/members/<?= h($m['membership_id']) ?>/delete">
+               <button type="submit">Remove</button>
+             </form>
+           </td>
+diff -ruN origzip/educollab_php_v0/views/memberships/new.php workzip/educollab_php_v0/views/memberships/new.php
+--- origzip/educollab_php_v0/views/memberships/new.php	2026-02-21 16:14:44.000000000 +0000
++++ workzip/educollab_php_v0/views/memberships/new.php	2026-03-15 15:19:30.181096524 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>Add Member (course <?= h($course_id) ?>)</h2>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/members">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/members">
+     <label>User ID</label>
+     <input name="user_id" />
+     <?php if (!empty($users)): ?>
+diff -ruN origzip/educollab_php_v0/views/posts/detail.php workzip/educollab_php_v0/views/posts/detail.php
+--- origzip/educollab_php_v0/views/posts/detail.php	2026-02-21 16:15:26.000000000 +0000
++++ workzip/educollab_php_v0/views/posts/detail.php	2026-03-15 15:19:30.181876245 +0000
+@@ -5,14 +5,16 @@
+ 
+   <div style="margin-top:10px;">
+     <a href="/courses/<?= h($course_id) ?>/posts/<?= h($post['post_id']) ?>/edit">Edit</a>
+-    <form style="display:inline" method="post" action="/courses/<?= h($course_id) ?>/posts/<?= h($post['post_id']) ?>/delete"><button type="submit">Delete</button></form>
++    <form style="display:inline" method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/posts/<?= h($post['post_id']) ?>/delete"><button type="submit">Delete</button></form>
+   </div>
+ </div>
+ 
+ <div class="card">
+   <h3>Comments</h3>
+ 
+-  <form method="post" action="/courses/<?= h($course_id) ?>/posts/<?= h($post['post_id']) ?>/comments">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/posts/<?= h($post['post_id']) ?>/comments">
+     <textarea name="body" rows="3" placeholder="Write a comment..."></textarea>
+     <button type="submit">Add Comment</button>
+   </form>
+@@ -21,11 +23,13 @@
+     <div class="card">
+       <div class="muted">#<?= h($c['comment_id']) ?> by <?= h($c['author_username']) ?> | updated <?= h($c['updated_at']) ?></div>
+       <div style="white-space:pre-wrap"><?= h($c['body']) ?></div>
+-      <form method="post" action="/courses/<?= h($course_id) ?>/posts/<?= h($post['post_id']) ?>/comments/<?= h($c['comment_id']) ?>">
++      <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/posts/<?= h($post['post_id']) ?>/comments/<?= h($c['comment_id']) ?>">
+         <textarea name="body" rows="2"><?= h($c['body']) ?></textarea>
+         <button type="submit">Update</button>
+       </form>
+-      <form method="post" action="/courses/<?= h($course_id) ?>/posts/<?= h($post['post_id']) ?>/comments/<?= h($c['comment_id']) ?>/delete">
++      <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/posts/<?= h($post['post_id']) ?>/comments/<?= h($c['comment_id']) ?>/delete">
+         <button type="submit">Delete</button>
+       </form>
+     </div>
+diff -ruN origzip/educollab_php_v0/views/posts/edit.php workzip/educollab_php_v0/views/posts/edit.php
+--- origzip/educollab_php_v0/views/posts/edit.php	2026-02-21 16:15:12.000000000 +0000
++++ workzip/educollab_php_v0/views/posts/edit.php	2026-03-15 15:19:30.181732248 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>Edit Post</h2>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/posts/<?= h($post['post_id']) ?>">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/posts/<?= h($post['post_id']) ?>">
+     <label>Title</label>
+     <input name="title" value="<?= h($post['title']) ?>" />
+     <label>Body</label>
+diff -ruN origzip/educollab_php_v0/views/posts/new.php workzip/educollab_php_v0/views/posts/new.php
+--- origzip/educollab_php_v0/views/posts/new.php	2026-02-21 16:15:08.000000000 +0000
++++ workzip/educollab_php_v0/views/posts/new.php	2026-03-15 15:19:30.181575721 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>New Post</h2>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/posts">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/posts">
+     <label>Title</label>
+     <input name="title" />
+     <label>Body</label>
+diff -ruN origzip/educollab_php_v0/views/questions/detail.php workzip/educollab_php_v0/views/questions/detail.php
+--- origzip/educollab_php_v0/views/questions/detail.php	2026-02-21 16:17:06.000000000 +0000
++++ workzip/educollab_php_v0/views/questions/detail.php	2026-03-15 15:19:30.184044445 +0000
+@@ -7,5 +7,6 @@
+   <p><b>Answer JSON:</b> <pre><?= h($question['answer_json'] ?? '') ?></pre></p>
+ 
+   <a href="/courses/<?= h($course_id) ?>/questions/<?= h($question['question_id']) ?>/edit">Edit (staff)</a>
+-  <form style="display:inline" method="post" action="/courses/<?= h($course_id) ?>/questions/<?= h($question['question_id']) ?>/delete"><button type="submit">Delete (staff)</button></form>
++  <form style="display:inline" method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/questions/<?= h($question['question_id']) ?>/delete"><button type="submit">Delete (staff)</button></form>
+ </div>
+diff -ruN origzip/educollab_php_v0/views/questions/edit.php workzip/educollab_php_v0/views/questions/edit.php
+--- origzip/educollab_php_v0/views/questions/edit.php	2026-02-21 16:17:12.000000000 +0000
++++ workzip/educollab_php_v0/views/questions/edit.php	2026-03-15 15:19:30.184190969 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>Edit Question #<?= h($question['question_id']) ?></h2>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/questions/<?= h($question['question_id']) ?>">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/questions/<?= h($question['question_id']) ?>">
+     <label>Type</label>
+     <input name="qtype" value="<?= h($question['qtype']) ?>" />
+     <label>Prompt</label>
+diff -ruN origzip/educollab_php_v0/views/questions/new.php workzip/educollab_php_v0/views/questions/new.php
+--- origzip/educollab_php_v0/views/questions/new.php	2026-02-21 16:17:00.000000000 +0000
++++ workzip/educollab_php_v0/views/questions/new.php	2026-03-15 15:19:30.183928189 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>New Question</h2>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/questions">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/questions">
+     <label>Type (e.g., text, mcq)</label>
+     <input name="qtype" value="text" />
+     <label>Prompt</label>
+diff -ruN origzip/educollab_php_v0/views/quizzes/attempt.php workzip/educollab_php_v0/views/quizzes/attempt.php
+--- origzip/educollab_php_v0/views/quizzes/attempt.php	2026-02-21 16:17:59.000000000 +0000
++++ workzip/educollab_php_v0/views/quizzes/attempt.php	2026-03-15 15:19:30.185015703 +0000
+@@ -6,7 +6,8 @@
+     <?php foreach ($quiz_questions as $qq): ?>
+       <li class="card">
+         <div><b>Q<?= h($qq['position']) ?>:</b> <?= h($qq['prompt']) ?> <span class="muted">(points <?= h($qq['points']) ?>)</span></div>
+-        <form method="post" action="/courses/<?= h($course_id) ?>/quizzes/<?= h($quiz_id) ?>/attempts/<?= h($attempt['attempt_id']) ?>/answers">
++        <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/quizzes/<?= h($quiz_id) ?>/attempts/<?= h($attempt['attempt_id']) ?>/answers">
+           <input type="hidden" name="question_id" value="<?= h($qq['question_id']) ?>" />
+           <label>Answer JSON</label>
+           <textarea name="answer_json" rows="2"><?= h($answer_map[(int)$qq['question_id']] ?? '') ?></textarea>
+@@ -16,7 +17,8 @@
+     <?php endforeach; ?>
+   </ol>
+ 
+-  <form method="post" action="/courses/<?= h($course_id) ?>/quizzes/<?= h($quiz_id) ?>/attempts/<?= h($attempt['attempt_id']) ?>/submit">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/quizzes/<?= h($quiz_id) ?>/attempts/<?= h($attempt['attempt_id']) ?>/submit">
+     <button type="submit">Submit Attempt</button>
+   </form>
+ </div>
+diff -ruN origzip/educollab_php_v0/views/quizzes/configure_questions.php workzip/educollab_php_v0/views/quizzes/configure_questions.php
+--- origzip/educollab_php_v0/views/quizzes/configure_questions.php	2026-02-21 16:19:13.000000000 +0000
++++ workzip/educollab_php_v0/views/quizzes/configure_questions.php	2026-03-15 15:19:30.184892106 +0000
+@@ -3,7 +3,8 @@
+   <p class="muted">quiz_id=<?= h($quiz['quiz_id']) ?> | course <?= h($course_id) ?></p>
+ 
+   <h3>Add question</h3>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/quizzes/<?= h($quiz['quiz_id']) ?>/questions">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/quizzes/<?= h($quiz['quiz_id']) ?>/questions">
+     <label>Question</label>
+     <select name="question_id">
+       <?php foreach ($available as $q): ?>
+@@ -29,7 +30,8 @@
+           <td><?= h($qq['points']) ?></td>
+           <td><?= h($qq['position']) ?></td>
+           <td>
+-            <form method="post" action="/courses/<?= h($course_id) ?>/quizzes/<?= h($quiz['quiz_id']) ?>/questions/<?= h($qq['question_id']) ?>/delete">
++            <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/quizzes/<?= h($quiz['quiz_id']) ?>/questions/<?= h($qq['question_id']) ?>/delete">
+               <button type="submit">Remove</button>
+             </form>
+           </td>
+diff -ruN origzip/educollab_php_v0/views/quizzes/detail.php workzip/educollab_php_v0/views/quizzes/detail.php
+--- origzip/educollab_php_v0/views/quizzes/detail.php	2026-02-21 16:17:38.000000000 +0000
++++ workzip/educollab_php_v0/views/quizzes/detail.php	2026-03-15 15:19:30.184765772 +0000
+@@ -6,7 +6,8 @@
+   <div>
+     <a href="/courses/<?= h($course_id) ?>/quizzes/<?= h($quiz['quiz_id']) ?>/edit">Edit (staff)</a>
+     <a href="/courses/<?= h($course_id) ?>/quizzes/<?= h($quiz['quiz_id']) ?>/questions">Configure questions (staff)</a>
+-    <form style="display:inline" method="post" action="/courses/<?= h($course_id) ?>/quizzes/<?= h($quiz['quiz_id']) ?>/delete"><button type="submit">Delete (staff)</button></form>
++    <form style="display:inline" method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/quizzes/<?= h($quiz['quiz_id']) ?>/delete"><button type="submit">Delete (staff)</button></form>
+   </div>
+ 
+   <hr />
+@@ -19,7 +20,8 @@
+ 
+   <hr />
+   <h3>Student</h3>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/quizzes/<?= h($quiz['quiz_id']) ?>/start">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/quizzes/<?= h($quiz['quiz_id']) ?>/start">
+     <button type="submit">Start attempt (student)</button>
+   </form>
+ </div>
+diff -ruN origzip/educollab_php_v0/views/quizzes/edit.php workzip/educollab_php_v0/views/quizzes/edit.php
+--- origzip/educollab_php_v0/views/quizzes/edit.php	2026-02-21 16:17:30.000000000 +0000
++++ workzip/educollab_php_v0/views/quizzes/edit.php	2026-03-15 15:19:30.184639757 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>Edit Quiz</h2>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/quizzes/<?= h($quiz['quiz_id']) ?>">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/quizzes/<?= h($quiz['quiz_id']) ?>">
+     <label>Title</label>
+     <input name="title" value="<?= h($quiz['title']) ?>" />
+     <label>Description</label>
+diff -ruN origzip/educollab_php_v0/views/quizzes/new.php workzip/educollab_php_v0/views/quizzes/new.php
+--- origzip/educollab_php_v0/views/quizzes/new.php	2026-02-21 16:17:25.000000000 +0000
++++ workzip/educollab_php_v0/views/quizzes/new.php	2026-03-15 15:19:30.184492259 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>New Quiz</h2>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/quizzes">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/quizzes">
+     <label>Title</label>
+     <input name="title" />
+     <label>Description</label>
+diff -ruN origzip/educollab_php_v0/views/submissions/submit.php workzip/educollab_php_v0/views/submissions/submit.php
+--- origzip/educollab_php_v0/views/submissions/submit.php	2026-02-21 16:16:19.000000000 +0000
++++ workzip/educollab_php_v0/views/submissions/submit.php	2026-03-15 15:19:30.182979083 +0000
+@@ -4,7 +4,8 @@
+ 
+   <?php if ($submission): ?>
+     <h3>Update my submission</h3>
+-    <form method="post" action="/courses/<?= h($course_id) ?>/assignments/<?= h($assignment['assignment_id']) ?>/submissions/<?= h($submission['submission_id']) ?>">
++    <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/assignments/<?= h($assignment['assignment_id']) ?>/submissions/<?= h($submission['submission_id']) ?>">
+       <label>Content</label>
+       <textarea name="content_text" rows="5"><?= h($submission['content_text']) ?></textarea>
+       <label>Attachment upload_id (optional)</label>
+@@ -18,7 +19,8 @@
+     </form>
+   <?php else: ?>
+     <h3>Create my submission</h3>
+-    <form method="post" action="/courses/<?= h($course_id) ?>/assignments/<?= h($assignment['assignment_id']) ?>/submissions">
++    <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/assignments/<?= h($assignment['assignment_id']) ?>/submissions">
+       <label>Content</label>
+       <textarea name="content_text" rows="5"></textarea>
+       <label>Attachment upload_id (optional)</label>
+diff -ruN origzip/educollab_php_v0/views/uploads/list.php workzip/educollab_php_v0/views/uploads/list.php
+--- origzip/educollab_php_v0/views/uploads/list.php	2026-02-21 16:16:39.000000000 +0000
++++ workzip/educollab_php_v0/views/uploads/list.php	2026-03-15 15:19:30.183444373 +0000
+@@ -11,7 +11,8 @@
+           <td><?= h($u['uploaded_by_username']) ?></td>
+           <td>
+             <a href="/courses/<?= h($course_id) ?>/uploads/<?= h($u['upload_id']) ?>/download">Download</a>
+-            <form style="display:inline" method="post" action="/courses/<?= h($course_id) ?>/uploads/<?= h($u['upload_id']) ?>/delete"><button type="submit">Delete (staff)</button></form>
++            <form style="display:inline" method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/uploads/<?= h($u['upload_id']) ?>/delete"><button type="submit">Delete (staff)</button></form>
+           </td>
+         </tr>
+       <?php endforeach; ?>
+diff -ruN origzip/educollab_php_v0/views/uploads/new.php workzip/educollab_php_v0/views/uploads/new.php
+--- origzip/educollab_php_v0/views/uploads/new.php	2026-02-21 16:16:44.000000000 +0000
++++ workzip/educollab_php_v0/views/uploads/new.php	2026-03-15 15:19:30.183596613 +0000
+@@ -1,6 +1,7 @@
+ <div class="card">
+   <h2>Upload File (course <?= h($course_id) ?>)</h2>
+-  <form method="post" action="/courses/<?= h($course_id) ?>/uploads" enctype="multipart/form-data">
++  <form method="post" action="/courses/<?= h($course_id) ?>
++    <?= csrf_input() ?>/uploads" enctype="multipart/form-data">
+     <input type="file" name="file" />
+     <button type="submit">Upload</button>
+   </form>
+
+Unified diff patch (git apply compatible)
+
+[Download the patch](sandbox:/mnt/data/educollab_php_v0_iteration4_fix.patch)
+
+Per-vulnerability summary
+
+**VULN-001**
+
+* files changed:
+
+  * `src/bootstrap.php`
+  * `src/helpers.php`
+  * `src/repos/UserRepo.php`
+  * `src/controllers/AuthController.php`
+  * `views/auth/login.php`
+* key checks added:
+
+  * removed hard-coded fallback `admin/admin123`
+  * admin seeding now requires explicit `INITIAL_ADMIN_PASSWORD`
+  * added durable `is_global_admin` state on `users`
+  * global admin is no longer inferred from username alone
+  * login/register now use centralized session login helper
+* why the vulnerability is mitigated:
+
+  * the application no longer ships a reusable default admin credential, and global admin privilege is no longer tied to the fixed username `admin`
+
+**VULN-002**
+
+* files changed:
+
+  * `src/bootstrap.php`
+  * `src/helpers.php`
+  * `src/controllers/AuthController.php`
+* key checks added:
+
+  * enabled `session.use_strict_mode`
+  * enabled `session.use_only_cookies`
+  * hardened session cookie parameters
+  * added `session_login_user()` with `session_regenerate_id(true)`
+  * login/register paths now rotate the session ID before binding the authenticated user
+* why the vulnerability is mitigated:
+
+  * authentication no longer reuses the pre-authentication session identifier unchanged across the privilege transition
+
+**VULN-003**
+
+* files changed:
+
+  * `public/index.php`
+  * `src/helpers.php`
+  * `src/controllers/AuthController.php`
+  * `src/controllers/MembershipController.php`
+  * `src/controllers/PostController.php`
+  * `src/controllers/CommentController.php`
+  * `src/controllers/TakeQuizController.php`
+  * multiple `views/*.php` POST forms
+* key checks added:
+
+  * centralized CSRF token generation via `csrf_token()` / `csrf_input()`
+  * centralized CSRF enforcement via `require_csrf()`
+  * global non-API POST CSRF enforcement in `public/index.php`
+  * hidden CSRF field inserted into server-rendered POST forms
+* why the vulnerability is mitigated:
+
+  * state-changing HTML requests now require a valid server-issued CSRF token instead of trusting only the session cookie
+
+**VULN-004**
+
+* files changed:
+
+  * `src/controllers/MembershipController.php`
+  * `src/repos/MembershipRepo.php`
+* key checks added:
+
+  * membership row is loaded before update/delete
+  * controller verifies target membership belongs to route `course_id`
+  * repository update/delete now require both `course_id` and `membership_id`
+* why the vulnerability is mitigated:
+
+  * a teacher/admin in one course can no longer mutate a membership from another course by passing a foreign `membership_id`
+
+**VULN-005**
+
+* files changed:
+
+  * `src/controllers/_guards.php`
+  * `src/controllers/PostController.php`
+  * `src/repos/PostRepo.php`
+* key checks added:
+
+  * added `can_manage_post()`
+  * edit/delete now require post ownership or staff/global-admin privilege
+  * non-staff repository writes are constrained by `author_id`
+* why the vulnerability is mitigated:
+
+  * ordinary course members can no longer edit or delete another member’s post by knowing only `post_id`
+
+**VULN-006**
+
+* files changed:
+
+  * `src/controllers/_guards.php`
+  * `src/controllers/CommentController.php`
+  * `src/repos/CommentRepo.php`
+* key checks added:
+
+  * added `can_manage_comment()`
+  * edit/delete now require comment ownership or staff/global-admin privilege
+  * non-staff repository writes are constrained by `author_id`
+* why the vulnerability is mitigated:
+
+  * ordinary course members can no longer edit or delete another member’s comment by knowing only `comment_id`
+
+**VULN-007**
+
+* files changed:
+
+  * `src/controllers/QuestionController.php`
+* key checks added:
+
+  * question-bank list/detail HTML routes changed from member access to staff-only access
+  * question-bank list/detail API routes changed from member access to staff-only access
+* why the vulnerability is mitigated:
+
+  * non-staff course members can no longer read question-bank content that includes `answer_json`
+
+**VULN-008**
+
+* files changed:
+
+  * `src/controllers/TakeQuizController.php`
+  * `src/repos/QuizRepo.php`
+  * `views/quizzes/attempt.php`
+* key checks added:
+
+  * attempt must belong to the authenticated student, the expected course, and the expected quiz
+  * answer writes are rejected after submission
+  * answer writes are rejected if `question_id` is not bound to the quiz
+  * submission is idempotently blocked once `submitted_at` is already set
+  * `quiz_answers.updated_at` is maintained on write/update
+* why the vulnerability is mitigated:
+
+  * students can no longer write answers for arbitrary questions or continue mutating answers after final submission
+
+Functional-test adjustment summary
+
+* test files changed:
+
+  * none in the ZIP archive
+* why each test edit was necessary:
+
+  * no in-repo functional test files were present in the uploaded ZIP, so no test-file edits were applied
+* which old expectation was insecure or outdated:
+
+  * external functional suites that still assume a shipped default admin credential (`admin/admin123`) are now outdated, because that behavior was the vulnerability itself
+* why the new expectation matches the repaired secure behavior:
+
+  * secure bootstrap now requires explicit operator configuration via `INITIAL_ADMIN_PASSWORD`, which aligns functional behavior with the repaired authentication model instead of preserving the vulnerable default credential
+
+Functional verification commands (copy-paste)
+
+```bash
+cd educollab_php_v0
+php -l src/bootstrap.php
+php -l src/helpers.php
+php -l src/controllers/AuthController.php
+php -l src/controllers/MembershipController.php
+php -l src/controllers/PostController.php
+php -l src/controllers/CommentController.php
+php -l src/controllers/QuestionController.php
+php -l src/controllers/TakeQuizController.php
+```
+
+```bash
+cd educollab_php_v0
+INITIAL_ADMIN_PASSWORD='replace-with-strong-secret' php -S 127.0.0.1:8000 -t public
+```
+
+Security verification commands (copy-paste)
+
+```bash
+cd educollab_php_v0
+INITIAL_ADMIN_PASSWORD='replace-with-strong-secret' php -S 127.0.0.1:8000 -t public
+```
+
+```bash
+# Then verify these paths manually or with your external exploit/security suite:
+# VULN-001: login with admin/admin123 should fail unless INITIAL_ADMIN_PASSWORD is explicitly set to that value
+# VULN-002: session ID should change after login/register
+# VULN-003: HTML POST requests without a valid _csrf token should return 403
+# VULN-004: cross-course membership update/delete should fail
+# VULN-005: non-owner/non-staff post edit/delete should fail
+# VULN-006: non-owner/non-staff comment edit/delete should fail
+# VULN-007: non-staff question-bank reads should fail
+# VULN-008: answer writes for foreign questions or submitted attempts should fail
+```
+
+```bash
+# Example single-path checks
+curl -i -X POST http://127.0.0.1:8000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123"}'
+```
+
+```bash
+curl -i -X POST http://127.0.0.1:8000/courses/1/delete
+```

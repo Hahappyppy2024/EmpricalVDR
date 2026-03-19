@@ -1,0 +1,82 @@
+{
+"vulnerability_id": "VULN-009",
+"vulnerability_type_code": 13,
+"vulnerability_type": "Business Logic",
+"cwe_id": "CWE-840",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.4,
+"severity_level": "high",
+"confidence_score": 90,
+"confidence_level": "high",
+"summary": "The quiz answer endpoints allow a student to submit or overwrite answers after the attempt has been marked submitted, and they also accept arbitrary question_id values without verifying that the question belongs to the quiz. This permits score manipulation and invalid answer injection within a valid student session.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 1291,
+"line_end": 1314,
+"function_name": "answer_question / api_answer_question",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/quizzes/[int:quiz_id](int:quiz_id)/attempts/[int:attempt_id](int:attempt_id)/answers")\n@require_login\n@require_student\ndef answer_question(course_id, quiz_id, attempt_id):\n    db = get_db()\n    attempt = QuizzesRepo(db).get_attempt(attempt_id)\n    if not attempt or attempt["student_id"] != int(session["user_id"]):\n        return "Not found", 404\n    question_id = int(request.form.get("question_id") or 0)\n    answer_raw = (request.form.get("answer_json") or "").strip() or "{}"\n    QuizzesRepo(db).upsert_answer(attempt_id, question_id, answer_raw)\n\[n@app.post](mailto:n@app.post)("/api/courses/[int:course_id](int:course_id)/quizzes/[int:quiz_id](int:quiz_id)/attempts/[int:attempt_id](int:attempt_id)/answers")\n@require_login\n@require_student\ndef api_answer_question(course_id, quiz_id, attempt_id):\n    ...\n    QuizzesRepo(db).upsert_answer(attempt_id, int(data.get("question_id") or 0), json_dumps(data.get("answer_json")) or "{}")",
+"reason": "The answer routes verify only attempt ownership. They never check whether the attempt is already submitted, nor whether the supplied question_id is configured for the specified quiz."
+},
+{
+"file_path": "app.py",
+"line_start": 1316,
+"line_end": 1335,
+"function_name": "submit_attempt / api_submit_attempt",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/quizzes/[int:quiz_id](int:quiz_id)/attempts/[int:attempt_id](int:attempt_id)/submit")\n@require_login\n@require_student\ndef submit_attempt(course_id, quiz_id, attempt_id):\n    db = get_db()\n    attempt = QuizzesRepo(db).get_attempt(attempt_id)\n    if not attempt or attempt["student_id"] != int(session["user_id"]):\n        return "Not found", 404\n    QuizzesRepo(db).submit_attempt(attempt_id)",
+"reason": "Submission only timestamps the attempt; no later write path is blocked after submitted_at has been set."
+},
+{
+"file_path": "repos/quizzes_repo.py",
+"line_start": 67,
+"line_end": 80,
+"function_name": "get_attempt / submit_attempt / upsert_answer",
+"code": "def get_attempt(self, attempt_id):\n    r = self.db.execute("SELECT * FROM quiz_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()\n    return dict(r) if r else None\n\ndef submit_attempt(self, attempt_id):\n    self.db.execute("UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?", (now_iso(), attempt_id))\n    self.db.commit()\n\ndef upsert_answer(self, attempt_id, question_id, answer_json_text):\n    self.db.execute(\n        "INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) VALUES (?,?,?,?) ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json, created_at=excluded.created_at",\n        (attempt_id, question_id, answer_json_text, now_iso()),\n    )",
+"reason": "The repository blindly updates answers for any question_id tied to the attempt_id and has no rule preventing writes after submission."
+}
+],
+"root_cause_code": 12,
+"root_cause": "Quiz attempt state and quiz-question membership rules are not enforced on the answer write path, so the application accepts logically invalid mutations that should be rejected after submission or when the question is not part of the quiz.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 1291,
+"line_end": 1314,
+"function_name": "answer_question / api_answer_question"
+},
+{
+"file_path": "app.py",
+"line_start": 1316,
+"line_end": 1335,
+"function_name": "submit_attempt / api_submit_attempt"
+},
+{
+"file_path": "repos/quizzes_repo.py",
+"line_start": 67,
+"line_end": 80,
+"function_name": "get_attempt / submit_attempt / upsert_answer"
+}
+],
+"repair_plan": "Before accepting an answer, load the attempt and reject writes if submitted_at is already set. Also verify that the supplied question_id belongs to the quiz associated with that attempt, ideally with a server-side existence check against quiz_questions scoped by quiz_id. Once submitted, make the attempt immutable except through an explicitly authorized re-open workflow.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

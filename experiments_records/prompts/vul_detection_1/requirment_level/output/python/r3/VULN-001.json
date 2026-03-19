@@ -1,0 +1,86 @@
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.8,
+  "severity_level": "high",
+  "confidence_score": 98,
+  "confidence_level": "high",
+  "summary": "Any member of a course can edit or delete another member's post by supplying that post_id. The application verifies only course membership and never checks that the caller owns the target post or holds an explicitly authorized moderation role.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/posts/:post_id/edit"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/posts/:post_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/posts/:post_id/delete"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id/posts/:post_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "DELETE",
+      "route": "/api/courses/:course_id/posts/:post_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "controllers/post_controller.py",
+      "line_start": 162,
+      "line_end": 169,
+      "function_name": "edit_post_page",
+      "code": "@post_bp.route('/courses/<int:course_id>/posts/<int:post_id>/edit', methods=['GET'])\n@login_required\n@require_course_member\ndef edit_post_page(course_id, post_id):\n    course, post = _load_course_and_post(course_id, post_id)\n    if course is None or post is None:\n        return render_template('404.html', current_user=get_current_user()), 404\n    return render_template('posts/edit.html', course=course, post=post, current_user=get_current_user())",
+      "reason": "Any logged-in course member can load the edit page for any post in the course. The route does not verify that the current user is the post author or an authorized moderator."
+    },
+    {
+      "file_path": "controllers/post_controller.py",
+      "line_start": 172,
+      "line_end": 227,
+      "function_name": "update_post_submit / api_update_post / delete_post_submit / api_delete_post",
+      "code": "@post_bp.route('/courses/<int:course_id>/posts/<int:post_id>', methods=['POST'])\n@login_required\n@require_course_member\ndef update_post_submit(course_id, post_id):\n    ...\n    update_post(course_id, post_id, title, body)\n\n@post_bp.route('/api/courses/<int:course_id>/posts/<int:post_id>', methods=['PUT'])\n@login_required\n@require_course_member\ndef api_update_post(course_id, post_id):\n    ...\n    updated = update_post(course_id, post_id, title, body)\n\n@post_bp.route('/courses/<int:course_id>/posts/<int:post_id>/delete', methods=['POST'])\n@login_required\n@require_course_member\ndef delete_post_submit(course_id, post_id):\n    ...\n    delete_post(course_id, post_id)\n\n@post_bp.route('/api/courses/<int:course_id>/posts/<int:post_id>', methods=['DELETE'])\n@login_required\n@require_course_member\ndef api_delete_post(course_id, post_id):\n    ...\n    delete_post(course_id, post_id)",
+      "reason": "All post mutation paths require only course membership, then directly update or delete the user-supplied post_id without any ownership or moderation authorization check."
+    },
+    {
+      "file_path": "models/post_repo.py",
+      "line_start": 39,
+      "line_end": 54,
+      "function_name": "update_post / delete_post",
+      "code": "def update_post(course_id, post_id, title, body):\n    db = get_db()\n    db.execute(\n        'UPDATE posts SET title = ?, body = ?, updated_at = CURRENT_TIMESTAMP WHERE course_id = ? AND post_id = ?',\n        (title, body, course_id, post_id),\n    )\n    db.commit()\n    return get_post_by_id(course_id, post_id)\n\n\ndef delete_post(course_id, post_id):\n    db = get_db()\n    db.execute('DELETE FROM comments WHERE course_id = ? AND post_id = ?', (course_id, post_id))\n    db.execute('DELETE FROM posts WHERE course_id = ? AND post_id = ?', (course_id, post_id))",
+      "reason": "The write operations are scoped only by course_id and post_id, with no author_id or equivalent ownership constraint."
+    }
+  ],
+  "root_cause_code": 7,
+  "root_cause": "Post mutation endpoints treat course membership as sufficient authorization and omit an ownership or moderator check for the specific post being edited or deleted.",
+  "patch_locations": [
+    {
+      "file_path": "controllers/post_controller.py",
+      "line_start": 162,
+      "line_end": 227,
+      "function_name": "edit_post_page / update_post_submit / api_update_post / delete_post_submit / api_delete_post"
+    },
+    {
+      "file_path": "models/post_repo.py",
+      "line_start": 39,
+      "line_end": 54,
+      "function_name": "update_post / delete_post"
+    }
+  ],
+  "repair_plan": "Load the target post before rendering the edit page or applying any mutation, verify that the current user is the post author or holds an explicitly authorized course moderation role, and reject unauthorized requests. Where practical, scope repository updates and deletes by both post_id and author_id unless a separately verified staff path is used.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

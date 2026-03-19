@@ -1,0 +1,93 @@
+{
+  "vulnerability_id": "VULN-004",
+  "vulnerability_type_code": 7,
+  "vulnerability_type": "CSRF",
+  "cwe_id": "CWE-352",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.5,
+  "severity_level": "medium",
+  "confidence_score": 90,
+  "confidence_level": "high",
+  "summary": "Server-rendered state-changing endpoints rely only on the session cookie and do not use anti-CSRF tokens. A malicious site can cause a logged-in victim to submit forged POST requests that create, update, or delete courses (and log out the user).",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/delete"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/logout"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/views/course_edit.ejs",
+      "line_start": 9,
+      "line_end": 19,
+      "function_name": null,
+      "code": "<form method=\\\"post\\\" action=\\\"/courses/<%= course.course_id %>\\\">\\n  ...\\n  <button type=\\\"submit\\\">Save</button>\\n</form>",
+      "reason": "A state-changing course update form is rendered without any CSRF token field."
+    },
+    {
+      "file_path": "src/views/course_show.ejs",
+      "line_start": 14,
+      "line_end": 16,
+      "function_name": null,
+      "code": "<form method=\\\"post\\\" action=\\\"/courses/<%= course.course_id %>/delete\\\">\\n  <button type=\\\"submit\\\">Delete</button>\\n</form>",
+      "reason": "A destructive POST form is rendered without a CSRF token."
+    },
+    {
+      "file_path": "src/routes/web.js",
+      "line_start": 28,
+      "line_end": 33,
+      "function_name": null,
+      "code": "router.post('/courses', requireAuthPage, courseController.createCourse);\\n...\\nrouter.post('/courses/:course_id', requireAuthPage, courseController.updateCourse);\\nrouter.post('/courses/:course_id/delete', requireAuthPage, courseController.deleteCourse);",
+      "reason": "The server accepts state-changing POST requests based on the session cookie and does not include any CSRF verification middleware."
+    }
+  ],
+  "root_cause_code": 9,
+  "root_cause": "The application does not generate or validate CSRF tokens for server-rendered POST workflows, so browser-submitted authenticated requests are trusted solely because the session cookie is present.",
+  "patch_locations": [
+    {
+      "file_path": "app.js",
+      "line_start": 18,
+      "line_end": 40,
+      "function_name": null
+    },
+    {
+      "file_path": "src/routes/web.js",
+      "line_start": 16,
+      "line_end": 33,
+      "function_name": null
+    },
+    {
+      "file_path": "src/views/course_edit.ejs",
+      "line_start": 9,
+      "line_end": 19,
+      "function_name": null
+    },
+    {
+      "file_path": "src/views/course_show.ejs",
+      "line_start": 14,
+      "line_end": 16,
+      "function_name": null
+    }
+  ],
+  "repair_plan": "Add a centralized CSRF defense for all server-rendered state-changing endpoints (e.g., per-session token stored server-side and embedded as a hidden field in every POST form, then validated on submit). Apply the check consistently across course create/update/delete and other POST actions such as logout.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

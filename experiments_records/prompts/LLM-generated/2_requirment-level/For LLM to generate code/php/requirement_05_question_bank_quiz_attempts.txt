@@ -1,0 +1,183 @@
+
+
+# Requirement-Level Prompt (EduCollab, PHP/SQLite/Server-Rendered MVC) — Requirement 05: Question Bank + Quiz + Student Attempts (Function-Only)
+
+You are a senior PHP engineer. Update the existing PHP web application using an MVC-style architecture. Implement ONLY the functional requirements below and keep everything else minimal and runnable.
+
+## Hard constraints
+
+* This is an incremental requirement-level update.
+* Start from the existing runnable repository produced earlier.
+* Preserve all existing working functionality.
+* Do not refactor unrelated modules.
+* The app must remain runnable with PHP’s built-in server, for example:
+
+  * `php -S 127.0.0.1:8000 -t public`
+* Keep dependencies minimal and standard.
+* Use the existing SQLite setup consistently.
+* Use the existing session/auth logic consistently.
+* Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or documentation.
+* HTML pages and JSON API under `/api` MUST use the SAME database and the SAME session/auth logic.
+* Do not rename existing routes, tables, or session keys unless explicitly required below.
+* Do not rewrite previously implemented modules.
+* Only add the minimum code needed for this requirement.
+* Keep all previously implemented pages and APIs working.
+
+## Language/Framework
+
+* PHP 8+
+* Plain PHP or lightweight custom MVC
+* SQLite: PDO with SQLite driver
+* Sessions: native PHP sessions
+* Server-rendered templates: PHP view files
+
+## Architecture requirement (MVC, function-only; no fixed file paths)
+
+* Model/Repository: DB access only
+* Controller: route handlers calling repositories
+* View: server-rendered PHP templates
+* Extend the existing app entry and routing cleanly
+
+## Scope for this requirement
+
+* Question Bank
+* Quiz
+* Student quiz attempts
+
+## Minimum data model to add in this requirement
+
+* Question(question_id, course_id, created_by, qtype, prompt, options_json nullable, answer_json nullable, created_at, updated_at)
+* Quiz(quiz_id, course_id, created_by, title, description, open_at, due_at, created_at, updated_at)
+* QuizQuestion(quiz_id, question_id, points, position)
+* QuizAttempt(attempt_id, quiz_id, course_id, student_id, started_at, submitted_at nullable)
+* QuizAnswer(answer_id, attempt_id, question_id, answer_json, created_at)
+
+## Functional Requirements (function-only)
+
+### K) Question Bank (staff)
+
+* FR-QB1 create_question()
+
+  * HTML: GET /courses/:course_id/questions/new, POST /courses/:course_id/questions
+  * API:  POST /api/courses/:course_id/questions {qtype, prompt, options_json?, answer_json?}
+* FR-QB2 list_questions()
+
+  * HTML: GET /courses/:course_id/questions
+  * API:  GET /api/courses/:course_id/questions
+* FR-QB3 get_question()
+
+  * HTML: GET /courses/:course_id/questions/:question_id
+  * API:  GET /api/courses/:course_id/questions/:question_id
+* FR-QB4 update_question()
+
+  * HTML: GET /courses/:course_id/questions/:question_id/edit, POST /courses/:course_id/questions/:question_id
+  * API:  PUT /api/courses/:course_id/questions/:question_id {qtype, prompt, options_json?, answer_json?}
+* FR-QB5 delete_question()
+
+  * HTML: POST /courses/:course_id/questions/:question_id/delete
+  * API:  DELETE /api/courses/:course_id/questions/:question_id
+
+### L) Quiz (staff manage)
+
+* FR-QZ1 create_quiz()
+
+  * HTML: GET /courses/:course_id/quizzes/new, POST /courses/:course_id/quizzes
+  * API:  POST /api/courses/:course_id/quizzes {title, description, open_at, due_at}
+* FR-QZ2 list_quizzes()
+
+  * HTML: GET /courses/:course_id/quizzes
+  * API:  GET /api/courses/:course_id/quizzes
+* FR-QZ3 get_quiz()
+
+  * HTML: GET /courses/:course_id/quizzes/:quiz_id
+  * API:  GET /api/courses/:course_id/quizzes/:quiz_id
+* FR-QZ4 update_quiz()
+
+  * HTML: GET /courses/:course_id/quizzes/:quiz_id/edit, POST /courses/:course_id/quizzes/:quiz_id
+  * API:  PUT /api/courses/:course_id/quizzes/:quiz_id {title, description, open_at, due_at}
+* FR-QZ5 delete_quiz()
+
+  * HTML: POST /courses/:course_id/quizzes/:quiz_id/delete
+  * API:  DELETE /api/courses/:course_id/quizzes/:quiz_id
+* FR-QZ6 configure_quiz_questions()
+
+  * HTML: GET /courses/:course_id/quizzes/:quiz_id/questions, POST /courses/:course_id/quizzes/:quiz_id/questions
+  * API:  POST /api/courses/:course_id/quizzes/:quiz_id/questions {question_id, points, position}
+  * API:  DELETE /api/courses/:course_id/quizzes/:quiz_id/questions/:question_id
+
+### M) Student Take Quiz (student only)
+
+* FR-TQ1 start_attempt()
+
+  * HTML: POST /courses/:course_id/quizzes/:quiz_id/start
+  * API:  POST /api/courses/:course_id/quizzes/:quiz_id/attempts/start
+* FR-TQ2 answer_question()
+
+  * HTML: POST /courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers
+  * API:  POST /api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers {question_id, answer_json}
+* FR-TQ3 submit_attempt()
+
+  * HTML: POST /courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit
+  * API:  POST /api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit
+* FR-TQ4 view_my_attempts()
+
+  * HTML: GET /my/quizzes (optional but preferred)
+  * API:  GET /api/my/quizzes/attempts
+
+## Role rules to implement in this requirement
+
+* teacher/assistant/senior-assistant can CRUD questions
+* teacher/assistant/senior-assistant can CRUD quizzes
+* teacher/assistant/senior-assistant can configure quiz-question mappings
+* student can start attempts, answer questions, submit attempts, and view own attempts
+* student cannot manage question bank or quizzes
+
+## Behavior and implementation rules
+
+* Preserve all routes and behavior from earlier requirements.
+* Keep route naming exactly as specified above.
+* Reuse existing membership and role checks.
+* `/api` routes must return JSON.
+* HTML routes may redirect after successful form submissions.
+* Keep views minimal.
+* Keep quiz handling function-only and minimal:
+
+  * no grading logic required unless needed for data consistency
+  * store answers as JSON text
+  * one quiz can have multiple questions
+* Use simple and consistent JSON serialization for options_json, answer_json, and QuizAnswer.answer_json.
+
+## Suggested implementation details
+
+* Extend DB initialization to create the Question, Quiz, QuizQuestion, QuizAttempt, and QuizAnswer tables if they do not exist.
+* Use PDO prepared statements for all question bank, quiz, mapping, attempt, and answer queries.
+* Reuse the existing course-scoped authorization helpers from earlier requirements.
+* Continue using the same session key for the current user established earlier.
+* Support JSON request parsing consistently for API endpoints.
+* Store `options_json`, `answer_json`, and attempt answers as JSON text in SQLite.
+* Keep attempt handling minimal and functional:
+
+  * starting an attempt creates a QuizAttempt row
+  * answering a question creates or updates a QuizAnswer row
+  * submitting an attempt sets `submitted_at`
+* Minimal HTML forms and pages are sufficient, but they must be functional.
+
+## Deliverables (must include)
+
+1. Updated runnable multi-file codebase.
+2. DB migration/init logic extended to include Question, Quiz, QuizQuestion, QuizAttempt, and QuizAnswer tables.
+3. Minimal PHP views for each major HTML page listed in this requirement.
+4. JSON responses for all `/api` endpoints in this requirement.
+5. Clear folder structure showing MVC separation.
+6. A short README update with example curl commands for key API calls in this requirement.
+
+## Output format (MUST follow exactly)
+
+A) Repository folder structure
+B) Full contents of all changed/new source files
+C) Database schema / init changes
+D) Run instructions
+E) Example curl commands
+F) Zip file includes all files
+
+

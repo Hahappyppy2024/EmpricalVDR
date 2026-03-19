@@ -1,0 +1,63 @@
+{
+"vulnerability_id": "VULN-002",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.8,
+"severity_level": "medium",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "Any authenticated user can enumerate all registered users through endpoints that appear administrative. This exposes account inventory and profile metadata without requiring an administrator role.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/users"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/admin/users"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 215,
+"line_end": 225,
+"function_name": "users_list / api_users_list",
+"code": "@app.get("/admin/users")\n@require_login\ndef users_list():\n    db = get_db()\n    return render_template("users_list.html", users=UsersRepo(db).list_users())\n\[n@app.get](mailto:n@app.get)("/api/users")\n@require_login\ndef api_users_list():\n    db = get_db()\n    return jsonify({"users": UsersRepo(db).list_users()})",
+"reason": "Both endpoints require only authentication and do not enforce an administrator or staff authorization check before returning all users."
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 39,
+"line_end": 40,
+"function_name": "list_users",
+"code": "rows = self.db.execute("SELECT user_id,username,display_name,created_at FROM users ORDER BY user_id").fetchall()",
+"reason": "The repository returns the full user listing to callers, so the missing role check in the route directly exposes all accounts."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Administrative listing endpoints are protected only by authentication and do not enforce a role-based authorization boundary before exposing user data.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 215,
+"line_end": 225,
+"function_name": "users_list / api_users_list"
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 39,
+"line_end": 40,
+"function_name": "list_users"
+}
+],
+"repair_plan": "Restrict these endpoints to explicitly authorized administrators. Add a server-side admin-role check before invoking list_users, and return 403 for non-admin users. If non-admin account discovery is needed, expose only a minimal, scoped directory view rather than the full user table.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

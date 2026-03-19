@@ -1,0 +1,234 @@
+{
+  "vulnerability_id": "VULN-004",
+  "vulnerability_type_code": 7,
+  "vulnerability_type": "CSRF",
+  "cwe_id": "CWE-352",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.4,
+  "severity_level": "high",
+  "confidence_score": 96,
+  "confidence_level": "high",
+  "summary": "The server-rendered assignment, submission, and upload forms do not include any CSRF token or equivalent anti-CSRF validation. A malicious site can cause a logged-in victim to create, modify, or delete assignments, submissions, and uploads using the victim's existing authenticated session.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/assignments"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/assignments/:assignment_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/assignments/:assignment_id/delete"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/assignments/:assignment_id/submissions"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/assignments/:assignment_id/submissions/:submission_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/uploads"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/uploads/:upload_id/delete"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "templates/assignments/new.html",
+      "line_start": 5,
+      "line_end": 12,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"{{ url_for('assignments.create_assignment_submit', course_id=course['course_id']) }}\">\n  <label for=\"title\">Title</label>\n  <input id=\"title\" name=\"title\" required>\n  <label for=\"description\">Description</label>\n  <textarea id=\"description\" name=\"description\" rows=\"6\"></textarea>\n  <label for=\"due_at\">Due At</label>\n  <input id=\"due_at\" name=\"due_at\" placeholder=\"2026-03-06 23:59\">",
+      "reason": "The assignment-creation form changes server state but includes no CSRF token or authenticity field."
+    },
+    {
+      "file_path": "templates/assignments/detail.html",
+      "line_start": 9,
+      "line_end": 13,
+      "function_name": null,
+      "code": "<p><a href=\"{{ url_for('assignments.edit_assignment_page', course_id=course['course_id'], assignment_id=assignment['assignment_id']) }}\">Edit assignment</a></p>\n<p><a href=\"{{ url_for('assignments.submit_assignment_page', course_id=course['course_id'], assignment_id=assignment['assignment_id']) }}\">Submit work</a></p>\n<p><a href=\"{{ url_for('assignments.list_submissions_for_assignment_page', course_id=course['course_id'], assignment_id=assignment['assignment_id']) }}\">View submissions</a></p>\n<form method=\"post\" action=\"{{ url_for('assignments.delete_assignment_submit', course_id=course['course_id'], assignment_id=assignment['assignment_id']) }}\">\n  <button type=\"submit\">Delete assignment</button>",
+      "reason": "The assignment-deletion form is forgeable because it carries no request authenticity token."
+    },
+    {
+      "file_path": "templates/submissions/new.html",
+      "line_start": 5,
+      "line_end": 15,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"{{ url_for('assignments.create_submission_submit', course_id=course['course_id'], assignment_id=assignment['assignment_id']) }}\">\n  <label for=\"content_text\">Submission Text</label>\n  <textarea id=\"content_text\" name=\"content_text\" rows=\"8\"></textarea>\n  <label for=\"attachment_upload_id\">Attachment Upload</label>\n  <select id=\"attachment_upload_id\" name=\"attachment_upload_id\">\n    <option value=\"\">No attachment</option>\n    {% for upload in uploads %}\n    <option value=\"{{ upload['upload_id'] }}\">{{ upload['original_name'] }}</option>\n    {% endfor %}",
+      "reason": "The submission form performs a state-changing request without any anti-CSRF field."
+    },
+    {
+      "file_path": "templates/submissions/edit.html",
+      "line_start": 5,
+      "line_end": 15,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"{{ url_for('assignments.update_submission_submit', course_id=course['course_id'], assignment_id=assignment['assignment_id'], submission_id=submission['submission_id']) }}\">\n  <label for=\"content_text\">Submission Text</label>\n  <textarea id=\"content_text\" name=\"content_text\" rows=\"8\">{{ submission['content_text'] }}</textarea>\n  <label for=\"attachment_upload_id\">Attachment Upload</label>\n  <select id=\"attachment_upload_id\" name=\"attachment_upload_id\">\n    <option value=\"\">No attachment</option>\n    {% for upload in uploads %}\n    <option value=\"{{ upload['upload_id'] }}\" {% if submission['attachment_upload_id'] == upload['upload_id'] %}selected{% endif %}>{{ upload['original_name'] }}</option>",
+      "reason": "The submission-update form lacks any request authenticity token."
+    },
+    {
+      "file_path": "templates/uploads/new.html",
+      "line_start": 5,
+      "line_end": 8,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"{{ url_for('assignments.create_upload_submit', course_id=course['course_id']) }}\" enctype=\"multipart/form-data\">\n  <label for=\"file\">File</label>\n  <input id=\"file\" type=\"file\" name=\"file\" required>\n  <button type=\"submit\">Upload</button>",
+      "reason": "The upload form performs a privileged state change without any CSRF protection."
+    },
+    {
+      "file_path": "templates/uploads/list.html",
+      "line_start": 9,
+      "line_end": 11,
+      "function_name": null,
+      "code": "<p><a href=\"{{ url_for('assignments.download_upload', course_id=course['course_id'], upload_id=upload['upload_id']) }}\">Download</a></p>\n<form method=\"post\" action=\"{{ url_for('assignments.delete_upload_submit', course_id=course['course_id'], upload_id=upload['upload_id']) }}\">\n  <button type=\"submit\">Delete</button>",
+      "reason": "The upload-deletion form is a state-changing POST with no CSRF token."
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 106,
+      "line_end": 119,
+      "function_name": "create_assignment_submit",
+      "code": "@assignment_bp.route('/courses/<int:course_id>/assignments', methods=['POST'])\n@login_required\n@require_course_staff\ndef create_assignment_submit(course_id):\n    ...\n    item = create_assignment(course_id, get_current_user()['user_id'], title, description, due_at)\n    return redirect(url_for('assignments.get_assignment_page', course_id=course_id, assignment_id=item['assignment_id']))",
+      "reason": "The assignment creation handler accepts cookie-authenticated browser POST requests without verifying any CSRF token."
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 187,
+      "line_end": 199,
+      "function_name": "update_assignment_submit",
+      "code": "@assignment_bp.route('/courses/<int:course_id>/assignments/<int:assignment_id>', methods=['POST'])\n@login_required\n@require_course_staff\ndef update_assignment_submit(course_id, assignment_id):\n    ...\n    update_assignment(course_id, assignment_id, title, description, due_at)\n    return redirect(url_for('assignments.get_assignment_page', course_id=course_id, assignment_id=assignment_id))",
+      "reason": "The assignment update handler performs state changes using only cookie-based authentication."
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 220,
+      "line_end": 228,
+      "function_name": "delete_assignment_submit",
+      "code": "@assignment_bp.route('/courses/<int:course_id>/assignments/<int:assignment_id>/delete', methods=['POST'])\n@login_required\n@require_course_staff\ndef delete_assignment_submit(course_id, assignment_id):\n    ...\n    delete_assignment(course_id, assignment_id)\n    return redirect(url_for('assignments.list_assignments_page', course_id=course_id))",
+      "reason": "The assignment deletion handler processes browser POST requests without request authenticity validation."
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 252,
+      "line_end": 297,
+      "function_name": "create_submission_submit / update_submission_submit",
+      "code": "@assignment_bp.route('/courses/<int:course_id>/assignments/<int:assignment_id>/submissions', methods=['POST'])\n@login_required\n@require_course_member\ndef create_submission_submit(course_id, assignment_id):\n    ...\n    item = create_submission(...)\n    return redirect(url_for('assignments.my_submissions_page'))\n\n@assignment_bp.route('/courses/<int:course_id>/assignments/<int:assignment_id>/submissions/<int:submission_id>', methods=['POST'])\n@login_required\n@require_course_member\ndef update_submission_submit(course_id, assignment_id, submission_id):\n    ...\n    update_submission(course_id, assignment_id, submission_id, content_text, attachment_upload_id)\n    return redirect(url_for('assignments.my_submissions_page'))",
+      "reason": "The submission create and update handlers accept authenticated browser POST requests without any anti-CSRF mechanism."
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 386,
+      "line_end": 397,
+      "function_name": "create_upload_submit",
+      "code": "@assignment_bp.route('/courses/<int:course_id>/uploads', methods=['POST'])\n@login_required\n@require_course_staff\ndef create_upload_submit(course_id):\n    ...\n    item = _save_upload(course_id, uploaded_file)\n    return redirect(url_for('assignments.list_uploads_page', course_id=course_id))",
+      "reason": "The upload creation handler accepts browser POST requests without CSRF validation."
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 469,
+      "line_end": 479,
+      "function_name": "delete_upload_submit",
+      "code": "@assignment_bp.route('/courses/<int:course_id>/uploads/<int:upload_id>/delete', methods=['POST'])\n@login_required\n@require_course_staff\ndef delete_upload_submit(course_id, upload_id):\n    ...\n    if os.path.exists(item['storage_path']):\n        os.remove(item['storage_path'])\n    delete_upload(course_id, upload_id)\n    return redirect(url_for('assignments.list_uploads_page', course_id=course_id))",
+      "reason": "The upload deletion handler is a state-changing POST that relies solely on the browser's authenticated cookies."
+    }
+  ],
+  "root_cause_code": 9,
+  "root_cause": "Server-rendered assignment, submission, and upload workflows rely on cookie-based authentication but do not require a request authenticity token or equivalent CSRF defense for state-changing form submissions.",
+  "patch_locations": [
+    {
+      "file_path": "templates/assignments/new.html",
+      "line_start": 5,
+      "line_end": 12,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/assignments/edit.html",
+      "line_start": 5,
+      "line_end": 12,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/assignments/detail.html",
+      "line_start": 9,
+      "line_end": 13,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/submissions/new.html",
+      "line_start": 5,
+      "line_end": 15,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/submissions/edit.html",
+      "line_start": 5,
+      "line_end": 15,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/uploads/new.html",
+      "line_start": 5,
+      "line_end": 8,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/uploads/list.html",
+      "line_start": 9,
+      "line_end": 11,
+      "function_name": null
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 106,
+      "line_end": 119,
+      "function_name": "create_assignment_submit"
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 187,
+      "line_end": 199,
+      "function_name": "update_assignment_submit"
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 220,
+      "line_end": 228,
+      "function_name": "delete_assignment_submit"
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 252,
+      "line_end": 297,
+      "function_name": "create_submission_submit / update_submission_submit"
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 386,
+      "line_end": 397,
+      "function_name": "create_upload_submit"
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 469,
+      "line_end": 479,
+      "function_name": "delete_upload_submit"
+    }
+  ],
+  "repair_plan": "Introduce server-side CSRF protection for all browser assignment, submission, and upload workflows by generating a per-session token, embedding it in every state-changing form, and rejecting requests whose token is missing or invalid. Apply the same protection consistently to create, update, and delete actions across assignments, submissions, and uploads.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

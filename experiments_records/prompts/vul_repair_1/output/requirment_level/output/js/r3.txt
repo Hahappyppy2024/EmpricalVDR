@@ -1,0 +1,405 @@
+## 1) Unified diff patch (git apply compatible)
+
+```diff
+diff --git a/src/controllers/commentController.js b/src/controllers/commentController.js
+index be72f19..d29c02f 100644
+--- a/src/controllers/commentController.js
++++ b/src/controllers/commentController.js
+@@ -2,6 +2,12 @@ const courseRepository = require('../repositories/courseRepository');
+ const postRepository = require('../repositories/postRepository');
+ const commentRepository = require('../repositories/commentRepository');
+ 
++const STAFF_ROLES = new Set(['teacher', 'admin', 'assistant', 'senior-assistant']);
++
++function isCourseStaff(membership) {
++  return !!(membership && STAFF_ROLES.has(membership.role_in_course));
++}
++
+ function ensureCourse(courseId) {
+   return courseRepository.findById(courseId);
+ }
+@@ -93,12 +99,24 @@ function updateComment(req, res) {
+     return res.status(404).send('Comment not found');
+   }
+ 
++  const staff = isCourseStaff(req.courseMembership);
++  const isAuthor = req.currentUser && String(req.currentUser.user_id) === String(comment.author_id);
++  if (!staff && !isAuthor) {
++    return res.status(403).send('Forbidden');
++  }
++
+   const { body } = req.body;
+   if (!body) {
+     return res.status(400).send('Comment body is required');
+   }
+ 
+-  commentRepository.updateComment(req.params.comment_id, { body });
++  const updated = staff
++    ? commentRepository.updateComment(req.params.comment_id, { body })
++    : commentRepository.updateCommentAsAuthor(req.params.comment_id, req.currentUser.user_id, { body });
++
++  if (!updated) {
++    return res.status(403).send('Forbidden');
++  }
+   return res.redirect(`/courses/${req.params.course_id}/posts/${req.params.post_id}`);
+ }
+ 
+@@ -118,12 +136,24 @@ function apiUpdateComment(req, res) {
+     return res.status(404).json({ success: false, error: 'Comment not found' });
+   }
+ 
++  const staff = isCourseStaff(req.courseMembership);
++  const isAuthor = req.currentUser && String(req.currentUser.user_id) === String(comment.author_id);
++  if (!staff && !isAuthor) {
++    return res.status(403).json({ success: false, error: 'Forbidden' });
++  }
++
+   const { body } = req.body;
+   if (!body) {
+     return res.status(400).json({ success: false, error: 'body is required' });
+   }
+ 
+-  const updated = commentRepository.updateComment(req.params.comment_id, { body });
++  const updated = staff
++    ? commentRepository.updateComment(req.params.comment_id, { body })
++    : commentRepository.updateCommentAsAuthor(req.params.comment_id, req.currentUser.user_id, { body });
++
++  if (!updated) {
++    return res.status(403).json({ success: false, error: 'Forbidden' });
++  }
+   return res.json({ success: true, comment: updated });
+ }
+ 
+@@ -143,7 +173,19 @@ function deleteComment(req, res) {
+     return res.status(404).send('Comment not found');
+   }
+ 
+-  commentRepository.deleteComment(req.params.comment_id);
++  const staff = isCourseStaff(req.courseMembership);
++  const isAuthor = req.currentUser && String(req.currentUser.user_id) === String(comment.author_id);
++  if (!staff && !isAuthor) {
++    return res.status(403).send('Forbidden');
++  }
++
++  const deleted = staff
++    ? commentRepository.deleteComment(req.params.comment_id)
++    : commentRepository.deleteCommentAsAuthor(req.params.comment_id, req.currentUser.user_id);
++
++  if (deleted && deleted.changes === 0) {
++    return res.status(403).send('Forbidden');
++  }
+   return res.redirect(`/courses/${req.params.course_id}/posts/${req.params.post_id}`);
+ }
+ 
+@@ -163,7 +205,19 @@ function apiDeleteComment(req, res) {
+     return res.status(404).json({ success: false, error: 'Comment not found' });
+   }
+ 
+-  commentRepository.deleteComment(req.params.comment_id);
++  const staff = isCourseStaff(req.courseMembership);
++  const isAuthor = req.currentUser && String(req.currentUser.user_id) === String(comment.author_id);
++  if (!staff && !isAuthor) {
++    return res.status(403).json({ success: false, error: 'Forbidden' });
++  }
++
++  const deleted = staff
++    ? commentRepository.deleteComment(req.params.comment_id)
++    : commentRepository.deleteCommentAsAuthor(req.params.comment_id, req.currentUser.user_id);
++
++  if (deleted && deleted.changes === 0) {
++    return res.status(403).json({ success: false, error: 'Forbidden' });
++  }
+   return res.json({ success: true });
+ }
+ 
+diff --git a/src/controllers/postController.js b/src/controllers/postController.js
+index 987b93a..41e99f9 100644
+--- a/src/controllers/postController.js
++++ b/src/controllers/postController.js
+@@ -2,6 +2,16 @@ const courseRepository = require('../repositories/courseRepository');
+ const postRepository = require('../repositories/postRepository');
+ const commentRepository = require('../repositories/commentRepository');
+ 
++const STAFF_ROLES = new Set(['teacher', 'admin', 'assistant', 'senior-assistant']);
++
++function isCourseStaff(membership) {
++  return !!(membership && STAFF_ROLES.has(membership.role_in_course));
++}
++
++function isAuthorOrStaff(currentUser, resourceAuthorId, membership) {
++  return (currentUser && String(currentUser.user_id) === String(resourceAuthorId)) || isCourseStaff(membership);
++}
++
+ function ensureCourse(courseId) {
+   return courseRepository.findById(courseId);
+ }
+@@ -124,6 +134,10 @@ function showEditPost(req, res) {
+     return res.status(404).send('Post not found');
+   }
+ 
++  if (!isAuthorOrStaff(req.currentUser, post.author_id, req.courseMembership)) {
++    return res.status(403).send('Forbidden');
++  }
++
+   return res.render('post_edit', { course, post, error: null });
+ }
+ 
+@@ -138,15 +152,24 @@ function updatePost(req, res) {
+     return res.status(404).send('Post not found');
+   }
+ 
++  const staff = isCourseStaff(req.courseMembership);
++  const isAuthor = req.currentUser && String(req.currentUser.user_id) === String(existing.author_id);
++  if (!staff && !isAuthor) {
++    return res.status(403).send('Forbidden');
++  }
++
+   const { title, body } = req.body;
+   if (!title) {
+     return res.status(400).render('post_edit', { course, post: existing, error: 'Title is required.' });
+   }
+ 
+-  postRepository.updatePost(req.params.post_id, {
+-    title,
+-    body: body || ''
+-  });
++  const updated = staff
++    ? postRepository.updatePost(req.params.post_id, { title, body: body || '' })
++    : postRepository.updatePostAsAuthor(req.params.post_id, req.currentUser.user_id, { title, body: body || '' });
++
++  if (!updated) {
++    return res.status(403).send('Forbidden');
++  }
+ 
+   return res.redirect(`/courses/${req.params.course_id}/posts/${req.params.post_id}`);
+ }
+@@ -162,15 +185,24 @@ function apiUpdatePost(req, res) {
+     return res.status(404).json({ success: false, error: 'Post not found' });
+   }
+ 
++  const staff = isCourseStaff(req.courseMembership);
++  const isAuthor = req.currentUser && String(req.currentUser.user_id) === String(existing.author_id);
++  if (!staff && !isAuthor) {
++    return res.status(403).json({ success: false, error: 'Forbidden' });
++  }
++
+   const { title, body } = req.body;
+   if (!title) {
+     return res.status(400).json({ success: false, error: 'title is required' });
+   }
+ 
+-  const post = postRepository.updatePost(req.params.post_id, {
+-    title,
+-    body: body || ''
+-  });
++  const post = staff
++    ? postRepository.updatePost(req.params.post_id, { title, body: body || '' })
++    : postRepository.updatePostAsAuthor(req.params.post_id, req.currentUser.user_id, { title, body: body || '' });
++
++  if (!post) {
++    return res.status(403).json({ success: false, error: 'Forbidden' });
++  }
+ 
+   return res.json({ success: true, post });
+ }
+@@ -186,7 +218,19 @@ function deletePost(req, res) {
+     return res.status(404).send('Post not found');
+   }
+ 
+-  postRepository.deletePost(req.params.post_id);
++  const staff = isCourseStaff(req.courseMembership);
++  const isAuthor = req.currentUser && String(req.currentUser.user_id) === String(post.author_id);
++  if (!staff && !isAuthor) {
++    return res.status(403).send('Forbidden');
++  }
++
++  const deleted = staff
++    ? postRepository.deletePost(req.params.post_id)
++    : postRepository.deletePostAsAuthor(req.params.post_id, req.currentUser.user_id);
++
++  if (deleted && deleted.changes === 0) {
++    return res.status(403).send('Forbidden');
++  }
+   return res.redirect(`/courses/${req.params.course_id}/posts`);
+ }
+ 
+@@ -201,7 +245,19 @@ function apiDeletePost(req, res) {
+     return res.status(404).json({ success: false, error: 'Post not found' });
+   }
+ 
+-  postRepository.deletePost(req.params.post_id);
++  const staff = isCourseStaff(req.courseMembership);
++  const isAuthor = req.currentUser && String(req.currentUser.user_id) === String(post.author_id);
++  if (!staff && !isAuthor) {
++    return res.status(403).json({ success: false, error: 'Forbidden' });
++  }
++
++  const deleted = staff
++    ? postRepository.deletePost(req.params.post_id)
++    : postRepository.deletePostAsAuthor(req.params.post_id, req.currentUser.user_id);
++
++  if (deleted && deleted.changes === 0) {
++    return res.status(403).json({ success: false, error: 'Forbidden' });
++  }
+   return res.json({ success: true });
+ }
+ 
+diff --git a/src/repositories/commentRepository.js b/src/repositories/commentRepository.js
+index a31870c..906cc5f 100644
+--- a/src/repositories/commentRepository.js
++++ b/src/repositories/commentRepository.js
+@@ -54,10 +54,27 @@ function updateComment(commentId, { body }) {
+   return findById(commentId);
+ }
+ 
++function updateCommentAsAuthor(commentId, authorId, { body }) {
++  const info = db.prepare(`
++    UPDATE comments
++    SET body = ?, updated_at = CURRENT_TIMESTAMP
++    WHERE comment_id = ? AND author_id = ?
++  `).run(body, commentId, authorId);
++
++  if (info.changes === 0) {
++    return null;
++  }
++  return findById(commentId);
++}
++
+ function deleteComment(commentId) {
+   return db.prepare(`DELETE FROM comments WHERE comment_id = ?`).run(commentId);
+ }
+ 
++function deleteCommentAsAuthor(commentId, authorId) {
++  return db.prepare(`DELETE FROM comments WHERE comment_id = ? AND author_id = ?`).run(commentId, authorId);
++}
++
+ function searchByCourse(courseId, keyword) {
+   const pattern = `%${keyword || ''}%`;
+   return db.prepare(`
+@@ -85,6 +102,8 @@ module.exports = {
+   listByPost,
+   findById,
+   updateComment,
++  updateCommentAsAuthor,
+   deleteComment,
++  deleteCommentAsAuthor,
+   searchByCourse
+ };
+diff --git a/src/repositories/postRepository.js b/src/repositories/postRepository.js
+index e8c1051..28246f3 100644
+--- a/src/repositories/postRepository.js
++++ b/src/repositories/postRepository.js
+@@ -54,11 +54,34 @@ function updatePost(postId, { title, body }) {
+   return findById(postId);
+ }
+ 
++function updatePostAsAuthor(postId, authorId, { title, body }) {
++  const info = db.prepare(`
++    UPDATE posts
++    SET title = ?, body = ?, updated_at = CURRENT_TIMESTAMP
++    WHERE post_id = ? AND author_id = ?
++  `).run(title, body || '', postId, authorId);
++
++  if (info.changes === 0) {
++    return null;
++  }
++  return findById(postId);
++}
++
+ function deletePost(postId) {
+   db.prepare(`DELETE FROM comments WHERE post_id = ?`).run(postId);
+   return db.prepare(`DELETE FROM posts WHERE post_id = ?`).run(postId);
+ }
+ 
++function deletePostAsAuthor(postId, authorId) {
++  return db.transaction(() => {
++    const info = db.prepare(`DELETE FROM posts WHERE post_id = ? AND author_id = ?`).run(postId, authorId);
++    if (info.changes > 0) {
++      db.prepare(`DELETE FROM comments WHERE post_id = ?`).run(postId);
++    }
++    return info;
++  })();
++}
++
+ function searchByCourse(courseId, keyword) {
+   const pattern = `%${keyword || ''}%`;
+   return db.prepare(`
+@@ -84,6 +107,8 @@ module.exports = {
+   listByCourse,
+   findById,
+   updatePost,
++  updatePostAsAuthor,
+   deletePost,
++  deletePostAsAuthor,
+   searchByCourse
+ };
+```
+
+---
+
+## 2) Per-vulnerability summary
+
+### VULN-001 (Post IDOR: edit/delete others’ posts)
+
+* **Files changed**
+
+  * `src/controllers/postController.js`
+  * `src/repositories/postRepository.js`
+* **Key checks added**
+
+  * Controller now enforces: caller must be **post author** OR **course staff** (`teacher/admin/assistant/senior-assistant`) for:
+
+    * web edit page (`GET .../edit`)
+    * web update (`POST /courses/:course_id/posts/:post_id`)
+    * web delete (`POST /courses/:course_id/posts/:post_id/delete`)
+    * API update (`PUT /api/courses/:course_id/posts/:post_id`)
+    * API delete (`DELETE /api/courses/:course_id/posts/:post_id`)
+  * Repository adds author-scoped write APIs:
+
+    * `updatePostAsAuthor(postId, authorId, ...)` uses `WHERE post_id = ? AND author_id = ?`
+    * `deletePostAsAuthor(postId, authorId)` deletes only if `author_id` matches (and only then deletes the post’s comments)
+* **Why mitigated**
+
+  * Possessing a `post_id` is no longer sufficient: non-staff users can only mutate rows they authored, and staff-only moderation remains possible.
+
+### VULN-002 (Comment IDOR: edit/delete others’ comments)
+
+* **Files changed**
+
+  * `src/controllers/commentController.js`
+  * `src/repositories/commentRepository.js`
+* **Key checks added**
+
+  * Controller now enforces: caller must be **comment author** OR **course staff** for:
+
+    * web update/delete routes
+    * API update/delete routes
+  * Repository adds author-scoped write APIs:
+
+    * `updateCommentAsAuthor(commentId, authorId, ...)` uses `WHERE comment_id = ? AND author_id = ?`
+    * `deleteCommentAsAuthor(commentId, authorId)` uses `WHERE comment_id = ? AND author_id = ?`
+* **Why mitigated**
+
+  * A course member cannot tamper with another member’s comment by `comment_id` alone; only authors (or staff moderators) can update/delete.
+
+---
+
+## 3) Functional verification commands (copy-paste)
+
+### Run the full functional test suite (exact command)
+
+```bash
+node --test
+```
+
+### Run functional tests relevant to this requirement (posts/comments) (exact command)
+
+```bash
+node --test tests/**/*.test.js
+```
+
+### Optional minimal functional smoke (if full suite is slow)
+
+```bash
+node scripts/initDb.js && node app.js
+```

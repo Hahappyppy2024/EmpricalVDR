@@ -1,0 +1,108 @@
+{
+  "vulnerability_id": "VULN-004",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.8,
+  "severity_level": "high",
+  "confidence_score": 98,
+  "confidence_level": "high",
+  "summary": "Any authenticated user can edit or delete any course by supplying that course's identifier. The application checks only whether the caller is logged in and never verifies that the caller created the course or holds an administrator role before performing the update or delete.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/edit"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/delete"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "DELETE",
+      "route": "/api/courses/:course_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 90,
+      "line_end": 99,
+      "function_name": "showEditForm",
+      "code": "require_login($this->config, false);\n$course = $this->courseRepo->findById($courseId);\n... render('courses/edit', ['title' => 'Edit Course', 'course' => $course, 'error' => null]);",
+      "reason": "Any authenticated user can open the edit form for any course_id because no ownership or admin check is performed."
+    },
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 102,
+      "line_end": 122,
+      "function_name": "updateHtml/updateApi",
+      "code": "require_login($this->config, false); $result = $this->update($courseId, request_data());\n...\nrequire_login($this->config, true); $result = $this->update($courseId, request_data());",
+      "reason": "Both HTML and API update handlers require only authentication before delegating to the write path."
+    },
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 125,
+      "line_end": 139,
+      "function_name": "update",
+      "code": "$course = $this->courseRepo->findById($courseId); ... $this->courseRepo->update($courseId, ['title' => $title, 'description' => $description]);",
+      "reason": "The update logic trusts the supplied course_id and never verifies that the current user owns the course or has elevated permission."
+    },
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 142,
+      "line_end": 166,
+      "function_name": "deleteHtml/deleteApi/delete",
+      "code": "require_login($this->config, false); $this->delete($courseId);\n...\nrequire_login($this->config, true); $result = $this->delete($courseId);\n...\n$this->courseRepo->delete($courseId);",
+      "reason": "Delete uses the same login-only check and then deletes by identifier alone."
+    },
+    {
+      "file_path": "app/repositories/CourseRepository.php",
+      "line_start": 52,
+      "line_end": 67,
+      "function_name": "update/delete",
+      "code": "UPDATE courses SET title = :title, description = :description WHERE course_id = :course_id\n...\nDELETE FROM courses WHERE course_id = :course_id",
+      "reason": "The repository write operations are scoped only by course_id and do not constrain the action to the course creator or an authorized administrator."
+    }
+  ],
+  "root_cause_code": 7,
+  "root_cause": "The course mutation flows trust the user-supplied course identifier across an authorization boundary and omit any ownership or privileged-role check before updating or deleting the targeted record.",
+  "patch_locations": [
+    {
+      "file_path": "app/controllers/CourseController.php",
+      "line_start": 90,
+      "line_end": 166,
+      "function_name": "showEditForm/updateHtml/updateApi/update/deleteHtml/deleteApi/delete"
+    },
+    {
+      "file_path": "app/repositories/CourseRepository.php",
+      "line_start": 38,
+      "line_end": 67,
+      "function_name": "findById/update/delete"
+    },
+    {
+      "file_path": "app/core/Auth.php",
+      "line_start": 7,
+      "line_end": 25,
+      "function_name": "current_user_id/require_login"
+    }
+  ],
+  "repair_plan": "Before showing the edit form or executing update/delete, load the target course and verify that the authenticated user is the course creator or an explicitly authorized administrator. Enforce the same rule in both HTML and API handlers, and consider scoping repository writes by both course_id and created_by for non-admin callers so direct identifier tampering cannot modify another user's course.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

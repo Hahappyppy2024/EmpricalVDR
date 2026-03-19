@@ -1,0 +1,75 @@
+Applied patch and packaged the modified repo.
+
+Files:
+[Unified diff patch](sandbox:/mnt/data/patch.diff)
+[Patched repository ZIP](sandbox:/mnt/data/educollab-r1-patched.zip)
+
+Per-vulnerability summary
+
+**VULN-001**
+Changed: `scripts/initDb.js`, `src/repositories/userRepository.js`, `src/middleware/auth.js`, `src/views/partials/header.ejs`
+Key checks:
+
+* replaced username-based admin checks with `is_admin`
+* added persistent `is_admin` user field
+* stopped hard-coded `admin/adminpass` seeding
+* admin seeding now only happens when `INITIAL_ADMIN_PASSWORD` is provided
+  Why mitigated:
+* privileged access is no longer tied to a predictable built-in credential or fixed username
+
+**VULN-002**
+Changed: `src/controllers/authController.js`
+Key checks:
+
+* session regeneration added after successful register/login for both web and API flows
+  Why mitigated:
+* authenticated identity is attached only after rotating the session, blocking fixation on a pre-auth session ID
+
+**VULN-003**
+Changed: `src/controllers/courseController.js`
+Key checks:
+
+* update/delete/edit course actions now require either course ownership or admin privilege
+* same authorization rule applied to both web and API handlers
+  Why mitigated:
+* attacker-controlled `course_id` is no longer sufficient to mutate another user’s course
+
+**VULN-004**
+Changed: `src/middleware/csrf.js`, `src/routes/web.js`, `src/views/course_new.ejs`, `src/views/course_edit.ejs`, `src/views/course_show.ejs`, `src/views/login.ejs`, `src/views/register.ejs`, `src/views/partials/header.ejs`
+Key checks:
+
+* per-session CSRF token issued server-side
+* POST web routes validate `_csrf`
+* hidden token fields added to server-rendered forms, including logout and course mutation forms
+  Why mitigated:
+* browser-submitted POST requests now require a valid token, so session cookie alone is no longer enough
+
+**VULN-005**
+Changed: `app.js`
+Key checks:
+
+* removed hard-coded session secret fallback
+* uses `SESSION_SECRET` when provided, otherwise generates a fresh random secret at startup
+* added `SameSite: 'lax'`
+  Why mitigated:
+* the application no longer ships with a predictable static signing secret
+
+Functional verification commands
+
+Full functional suite:
+
+```bash
+SESSION_SECRET=test-session-secret INITIAL_ADMIN_PASSWORD=adminpass node --test tests/api.functional.test.js
+```
+
+Current requirement functional tests:
+
+```bash
+SESSION_SECRET=test-session-secret INITIAL_ADMIN_PASSWORD=adminpass node --test tests/api.functional.test.js
+```
+
+Minimal smoke:
+
+```bash
+SESSION_SECRET=test-session-secret INITIAL_ADMIN_PASSWORD=adminpass node app.js
+```

@@ -1,0 +1,95 @@
+{
+"vulnerability_id": "VULN-004",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.8,
+"severity_level": "high",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "A teacher or admin in one course can change or delete memberships from a different course by supplying another course's membership_id. The controller authorizes against the route's course_id, but the repository update and delete operations are scoped only by membership_id.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/members/:membership_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 40,
+"line_end": 48,
+"function_name": "updateRole",
+"code": "$courseId = (int)$p['course_id']; $membershipId = (int)$p['membership_id']; require_course_teacher_or_admin($this->pdo, $courseId, $u, false); ... $repo->updateRole($membershipId, $role);",
+"reason": "Authorization is performed only against the attacker-controlled route course_id, but the target membership record is modified solely by membership_id."
+},
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 51,
+"line_end": 58,
+"function_name": "remove",
+"code": "$courseId = (int)$p['course_id']; $membershipId = (int)$p['membership_id']; require_course_teacher_or_admin($this->pdo, $courseId, $u, false); ... $repo->remove($membershipId);",
+"reason": "Deletion has the same cross-course trust boundary issue."
+},
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 88,
+"line_end": 106,
+"function_name": "apiUpdateRole/apiRemove",
+"code": "require_course_teacher_or_admin($this->pdo, $courseId, $u, true); ... $m = $repo->updateRole($membershipId, $role); ... $repo->remove($membershipId);",
+"reason": "The API endpoints repeat the same pattern and therefore expose the same vulnerability."
+},
+{
+"file_path": "src/repos/MembershipRepo.php",
+"line_start": 39,
+"line_end": 47,
+"function_name": "updateRole/remove",
+"code": "UPDATE memberships SET role_in_course=? WHERE membership_id=? ... DELETE FROM memberships WHERE membership_id=?",
+"reason": "The write queries are not constrained by course_id or any authorization-related ownership check."
+}
+],
+"root_cause_code": 11,
+"root_cause": "The code trusts a standalone membership identifier across a course boundary and never verifies that the targeted membership row belongs to the authorized course before updating or deleting it.",
+"patch_locations": [
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 40,
+"line_end": 58,
+"function_name": "updateRole/remove"
+},
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 88,
+"line_end": 106,
+"function_name": "apiUpdateRole/apiRemove"
+},
+{
+"file_path": "src/repos/MembershipRepo.php",
+"line_start": 19,
+"line_end": 47,
+"function_name": "getById/updateRole/remove"
+}
+],
+"repair_plan": "Load the membership row first and verify that its course_id matches the route course_id before allowing any role change or deletion. Scope repository writes by both membership_id and course_id, and reject requests when the target membership does not belong to the course for which the caller is authorized.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

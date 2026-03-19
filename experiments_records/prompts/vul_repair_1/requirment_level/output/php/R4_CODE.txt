@@ -1,0 +1,453 @@
+可以，下面是这次 **R4 修复**里所有被修改文件的**完整内容**。你直接按路径复制覆盖即可。
+
+---
+
+## 1. `app/controllers/UploadController.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require_once dirname(__DIR__) . '/core/View.php';
+require_once dirname(__DIR__) . '/core/Auth.php';
+
+final class UploadController
+{
+    public function __construct(
+        private UploadRepository $uploadRepo,
+        private CourseRepository $courseRepo,
+        private MembershipRepository $membershipRepo,
+        private array $config
+    ) {
+    }
+
+    private function allowedUploadPolicy(): array
+    {
+        return [
+            'max_bytes' => 5 * 1024 * 1024,
+            'extensions' => [
+                'txt' => ['text/plain'],
+                'md' => ['text/plain', 'text/markdown'],
+                'csv' => ['text/plain', 'text/csv', 'application/csv', 'application/vnd.ms-excel'],
+                'pdf' => ['application/pdf'],
+                'png' => ['image/png'],
+                'jpg' => ['image/jpeg'],
+                'jpeg' => ['image/jpeg'],
+                'gif' => ['image/gif'],
+                'webp' => ['image/webp'],
+            ],
+        ];
+    }
+
+    private function detectMimeType(string $tmpPath): string
+    {
+        if (!is_file($tmpPath)) {
+            return '';
+        }
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        if ($finfo === false) {
+            return '';
+        }
+        $mime = finfo_file($finfo, $tmpPath);
+        finfo_close($finfo);
+        return is_string($mime) ? strtolower($mime) : '';
+    }
+
+    private function validateUploadedFile(array $file): array
+    {
+        $policy = $this->allowedUploadPolicy();
+        $original = basename((string) ($file['name'] ?? 'upload.bin'));
+        $extension = strtolower((string) pathinfo($original, PATHINFO_EXTENSION));
+        if ($extension === '' || !isset($policy['extensions'][$extension])) {
+            return ['success' => false, 'error' => 'file type is not allowed'];
+        }
+
+        $size = (int) ($file['size'] ?? 0);
+        if ($size <= 0 || $size > $policy['max_bytes']) {
+            return ['success' => false, 'error' => 'file exceeds upload size limit'];
+        }
+
+        $mime = $this->detectMimeType((string) ($file['tmp_name'] ?? ''));
+        if ($mime === '' || !in_array($mime, $policy['extensions'][$extension], true)) {
+            return ['success' => false, 'error' => 'file content type is not allowed'];
+        }
+
+        return ['success' => true, 'original' => $original, 'extension' => $extension];
+    }
+
+    private function storageRoot(): string
+    {
+        $path = dirname(__DIR__, 2) . '/storage/uploads';
+        if (!is_dir($path)) {
+            mkdir($path, 0775, true);
+        }
+        return $path;
+    }
+
+    private function saveUploadedFile(int $courseId, int $userId): array
+    {
+        if (!isset($_FILES['file']) || !is_array($_FILES['file'])) {
+            return ['success' => false, 'error' => 'file is required'];
+        }
+
+        $file = $_FILES['file'];
+        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            return ['success' => false, 'error' => 'upload failed'];
+        }
+
+        $validation = $this->validateUploadedFile($file);
+        if (!$validation['success']) {
+            return $validation;
+        }
+
+        $original = (string) $validation['original'];
+        $extension = (string) $validation['extension'];
+        $baseName = pathinfo($original, PATHINFO_FILENAME);
+        $safeName = (preg_replace('/[^A-Za-z0-9_-]/', '_', $baseName) ?: 'upload') . '.' . $extension;
+        $relative = $courseId . '_' . $userId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '_' . $safeName;
+        $absolute = $this->storageRoot() . '/' . $relative;
+
+        if (!move_uploaded_file((string) $file['tmp_name'], $absolute)) {
+            return ['success' => false, 'error' => 'failed to store uploaded file'];
+        }
+
+        $uploadId = $this->uploadRepo->create([
+            'course_id' => $courseId,
+            'uploaded_by' => $userId,
+            'original_name' => $original,
+            'stored_name' => $relative,
+            'mime_type' => (string) ($file['type'] ?? 'application/octet-stream'),
+            'size_bytes' => (int) ($file['size'] ?? 0),
+        ]);
+
+        return ['success' => true, 'upload' => $this->uploadRepo->findById($courseId, $uploadId)];
+    }
+
+    public function showUploadForm(int $courseId): void
+    {
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        render('courses/uploads/new', [
+            'title' => 'Upload File',
+            'course' => $this->courseRepo->findById($courseId),
+            'error' => null,
+        ]);
+    }
+
+    public function uploadHtml(int $courseId): void
+    {
+        $userId = require_login($this->config, false);
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $result = $this->saveUploadedFile($courseId, $userId);
+        if (!$result['success']) {
+            render('courses/uploads/new', [
+                'title' => 'Upload File',
+                'course' => $this->courseRepo->findById($courseId),
+                'error' => $result['error'],
+            ]);
+            return;
+        }
+        redirect_to('/courses/' . $courseId . '/uploads');
+    }
+
+    public function uploadApi(int $courseId): void
+    {
+        $userId = require_login($this->config, true);
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $result = $this->saveUploadedFile($courseId, $userId);
+        if (!$result['success']) {
+            json_response($result, 422);
+        }
+        json_response($result, 201);
+    }
+
+    public function listHtml(int $courseId): void
+    {
+        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        render('courses/uploads/index', [
+            'title' => 'Uploads',
+            'course' => $this->courseRepo->findById($courseId),
+            'uploads' => $this->uploadRepo->listByCourse($courseId),
+            'can_upload' => current_user_can_manage_course($this->config, $this->membershipRepo, $this->courseRepo, $courseId),
+        ]);
+    }
+
+    public function listApi(int $courseId): void
+    {
+        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        json_response([
+            'success' => true,
+            'uploads' => $this->uploadRepo->listByCourse($courseId),
+        ]);
+    }
+}
+```
+
+---
+
+## 2. `app/controllers/SubmissionController.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require_once dirname(__DIR__) . '/core/View.php';
+require_once dirname(__DIR__) . '/core/Auth.php';
+
+final class SubmissionController
+{
+    public function __construct(
+        private SubmissionRepository $submissionRepo,
+        private AssignmentRepository $assignmentRepo,
+        private UploadRepository $uploadRepo,
+        private CourseRepository $courseRepo,
+        private MembershipRepository $membershipRepo,
+        private array $config
+    ) {
+    }
+
+    public function showSubmitForm(int $courseId, int $assignmentId): void
+    {
+        $userId = require_login($this->config, false);
+        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        render('courses/assignments/submit', [
+            'title' => 'Submit Assignment',
+            'course' => $this->courseRepo->findById($courseId),
+            'assignment' => $this->assignmentRepo->findById($courseId, $assignmentId),
+            'uploads' => $this->uploadRepo->listByCourseAndUploader($courseId, $userId),
+            'my_submissions' => array_values(array_filter(
+                $this->submissionRepo->listByUser($userId),
+                fn(array $s): bool => (int) $s['course_id'] === $courseId && (int) $s['assignment_id'] === $assignmentId
+            )),
+            'error' => null,
+        ]);
+    }
+
+    public function submitHtml(int $courseId, int $assignmentId): void
+    {
+        $userId = require_login($this->config, false);
+        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $result = $this->create($courseId, $assignmentId, $userId, request_data());
+        if (!$result['success']) {
+            render('courses/assignments/submit', [
+                'title' => 'Submit Assignment',
+                'course' => $this->courseRepo->findById($courseId),
+                'assignment' => $this->assignmentRepo->findById($courseId, $assignmentId),
+                'uploads' => $this->uploadRepo->listByCourseAndUploader($courseId, $userId),
+                'my_submissions' => [],
+                'error' => $result['error'],
+            ]);
+            return;
+        }
+        redirect_to('/courses/' . $courseId . '/assignments/' . $assignmentId . '/submit');
+    }
+
+    public function submitApi(int $courseId, int $assignmentId): void
+    {
+        $userId = require_login($this->config, true);
+        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $result = $this->create($courseId, $assignmentId, $userId, request_data());
+        if (!$result['success']) {
+            $status = in_array($result['error'], ['Assignment not found'], true) ? 404 : 422;
+            json_response($result, $status);
+        }
+        json_response($result, 201);
+    }
+
+    private function create(int $courseId, int $assignmentId, int $userId, array $data): array
+    {
+        if (!$this->assignmentRepo->findById($courseId, $assignmentId)) {
+            return ['success' => false, 'error' => 'Assignment not found'];
+        }
+
+        $contentText = trim((string) ($data['content_text'] ?? ''));
+        $attachmentUploadId = isset($data['attachment_upload_id']) && $data['attachment_upload_id'] !== ''
+            ? (int) $data['attachment_upload_id']
+            : null;
+
+        if ($contentText === '' && $attachmentUploadId === null) {
+            return ['success' => false, 'error' => 'content_text or attachment_upload_id is required'];
+        }
+
+        if ($attachmentUploadId !== null && !$this->uploadRepo->findByIdAndUploader($courseId, $attachmentUploadId, $userId)) {
+            return ['success' => false, 'error' => 'Attachment not found or not authorized for this submission'];
+        }
+
+        $submissionId = $this->submissionRepo->create([
+            'assignment_id' => $assignmentId,
+            'submitted_by' => $userId,
+            'content_text' => $contentText,
+            'attachment_upload_id' => $attachmentUploadId,
+        ]);
+
+        return ['success' => true, 'submission' => $this->submissionRepo->findById($courseId, $assignmentId, $submissionId)];
+    }
+
+    public function updateHtml(int $courseId, int $assignmentId, int $submissionId): void
+    {
+        $userId = require_login($this->config, false);
+        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $result = $this->update($courseId, $assignmentId, $submissionId, $userId, request_data());
+        if (!$result['success']) {
+            http_response_code($result['error'] === 'Forbidden' ? 403 : 422);
+            echo htmlspecialchars($result['error'], ENT_QUOTES, 'UTF-8');
+            return;
+        }
+        redirect_to('/courses/' . $courseId . '/assignments/' . $assignmentId . '/submit');
+    }
+
+    public function updateApi(int $courseId, int $assignmentId, int $submissionId): void
+    {
+        $userId = require_login($this->config, true);
+        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $result = $this->update($courseId, $assignmentId, $submissionId, $userId, request_data());
+        if (!$result['success']) {
+            $status = $result['error'] === 'Submission not found' ? 404 : ($result['error'] === 'Forbidden' ? 403 : 422);
+            json_response($result, $status);
+        }
+        json_response($result, 200);
+    }
+
+    private function update(int $courseId, int $assignmentId, int $submissionId, int $userId, array $data): array
+    {
+        $submission = $this->submissionRepo->findById($courseId, $assignmentId, $submissionId);
+        if (!$submission) {
+            return ['success' => false, 'error' => 'Submission not found'];
+        }
+        if ((int) $submission['submitted_by'] !== $userId) {
+            return ['success' => false, 'error' => 'Forbidden'];
+        }
+
+        $contentText = trim((string) ($data['content_text'] ?? ''));
+        $attachmentUploadId = isset($data['attachment_upload_id']) && $data['attachment_upload_id'] !== ''
+            ? (int) $data['attachment_upload_id']
+            : null;
+
+        if ($contentText === '' && $attachmentUploadId === null) {
+            return ['success' => false, 'error' => 'content_text or attachment_upload_id is required'];
+        }
+
+        if ($attachmentUploadId !== null && !$this->uploadRepo->findByIdAndUploader($courseId, $attachmentUploadId, $userId)) {
+            return ['success' => false, 'error' => 'Attachment not found or not authorized for this submission'];
+        }
+
+        $this->submissionRepo->update($courseId, $assignmentId, $submissionId, [
+            'content_text' => $contentText,
+            'attachment_upload_id' => $attachmentUploadId,
+        ]);
+
+        return ['success' => true, 'submission' => $this->submissionRepo->findById($courseId, $assignmentId, $submissionId)];
+    }
+}
+```
+
+---
+
+## 3. `app/repositories/UploadRepository.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+final class UploadRepository
+{
+    public function __construct(private PDO $pdo)
+    {
+    }
+
+    public function create(array $data): int
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO uploads (course_id, uploaded_by, original_name, stored_name, mime_type, size_bytes, created_at)
+             VALUES (:course_id, :uploaded_by, :original_name, :stored_name, :mime_type, :size_bytes, :created_at)'
+        );
+        $stmt->execute([
+            ':course_id' => $data['course_id'],
+            ':uploaded_by' => $data['uploaded_by'],
+            ':original_name' => $data['original_name'],
+            ':stored_name' => $data['stored_name'],
+            ':mime_type' => $data['mime_type'],
+            ':size_bytes' => $data['size_bytes'],
+            ':created_at' => date('c'),
+        ]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    public function listByCourse(int $courseId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT up.*, u.username AS uploader_username, u.display_name AS uploader_display_name
+             FROM uploads up
+             JOIN users u ON u.user_id = up.uploaded_by
+             WHERE up.course_id = :course_id
+             ORDER BY up.upload_id DESC'
+        );
+        $stmt->execute([':course_id' => $courseId]);
+        return $stmt->fetchAll();
+    }
+
+    public function listByCourseAndUploader(int $courseId, int $userId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT up.*, u.username AS uploader_username, u.display_name AS uploader_display_name
+             FROM uploads up
+             JOIN users u ON u.user_id = up.uploaded_by
+             WHERE up.course_id = :course_id AND up.uploaded_by = :uploaded_by
+             ORDER BY up.upload_id DESC'
+        );
+        $stmt->execute([':course_id' => $courseId, ':uploaded_by' => $userId]);
+        return $stmt->fetchAll();
+    }
+
+    public function findByIdAndUploader(int $courseId, int $uploadId, int $userId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT up.*, u.username AS uploader_username, u.display_name AS uploader_display_name
+             FROM uploads up
+             JOIN users u ON u.user_id = up.uploaded_by
+             WHERE up.course_id = :course_id AND up.upload_id = :upload_id AND up.uploaded_by = :uploaded_by
+             LIMIT 1'
+        );
+        $stmt->execute([':course_id' => $courseId, ':upload_id' => $uploadId, ':uploaded_by' => $userId]);
+        $row = $stmt->fetch();
+        return $row ?: null;
+    }
+
+    public function findById(int $courseId, int $uploadId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT up.*, u.username AS uploader_username, u.display_name AS uploader_display_name
+             FROM uploads up
+             JOIN users u ON u.user_id = up.uploaded_by
+             WHERE up.course_id = :course_id AND up.upload_id = :upload_id
+             LIMIT 1'
+        );
+        $stmt->execute([
+            ':course_id' => $courseId,
+            ':upload_id' => $uploadId,
+        ]);
+        $row = $stmt->fetch();
+        return $row ?: null;
+    }
+}
+```
+
+---
+
+## 4. `app/views/courses/uploads/new.php`
+
+```php
+<h1>Upload File</h1>
+<p><strong>Course:</strong> <?= htmlspecialchars($course['title'], ENT_QUOTES, 'UTF-8') ?></p>
+<?php if (!empty($error)): ?><p class="error"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></p><?php endif; ?>
+<form method="post" action="/courses/<?= htmlspecialchars((string) $course['course_id'], ENT_QUOTES, 'UTF-8') ?>/uploads" enctype="multipart/form-data">
+    <label>File</label>
+    <input type="file" name="file" accept=".txt,.md,.csv,.pdf,.png,.jpg,.jpeg,.gif,.webp" required>
+    <button type="submit">Upload file</button>
+</form>
+```
+
+如果你跑测试后有新的报错，直接把报错贴给我。

@@ -1,0 +1,99 @@
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 13,
+  "vulnerability_type": "Business Logic",
+  "cwe_id": "CWE-840",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.3,
+  "severity_level": "high",
+  "confidence_score": 95,
+  "confidence_level": "high",
+  "summary": "The quiz lifecycle ignores the configured open_at and due_at values when students start attempts, submit answers, or finalize attempts. Any enrolled student can therefore take or continue a quiz outside the intended availability window, undermining assessment integrity.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/start"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/start"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 255,
+      "line_end": 286,
+      "function_name": "create_quiz_submit / api_create_quiz",
+      "code": "title = request.form.get('title', '').strip()\ndescription = request.form.get('description', '').strip()\nopen_at = request.form.get('open_at', '').strip()\ndue_at = request.form.get('due_at', '').strip()\n...\nitem = create_quiz(course_id, get_current_user()['user_id'], title, description, open_at, due_at)",
+      "reason": "The quiz management logic accepts and stores open_at and due_at as meaningful scheduling controls."
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 454,
+      "line_end": 473,
+      "function_name": "start_attempt_submit / api_start_attempt",
+      "code": "@quiz_bp.route('/courses/<int:course_id>/quizzes/<int:quiz_id>/start', methods=['POST'])\n@login_required\n@require_course_member\ndef start_attempt_submit(course_id, quiz_id):\n    if not _student_only(course_id):\n        return redirect(url_for('quizzes.get_quiz_page', course_id=course_id, quiz_id=quiz_id))\n    attempt = create_quiz_attempt(quiz_id, course_id, get_current_user()['user_id'])\n\n@quiz_bp.route('/api/courses/<int:course_id>/quizzes/<int:quiz_id>/attempts/start', methods=['POST'])\n@login_required\n@require_course_member\ndef api_start_attempt(course_id, quiz_id):\n    ...\n    attempt = create_quiz_attempt(quiz_id, course_id, get_current_user()['user_id'])",
+      "reason": "Students can start attempts without any check against the quiz's open_at or due_at values."
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 476,
+      "line_end": 536,
+      "function_name": "answer_question_submit / api_answer_question / submit_attempt_submit / api_submit_attempt",
+      "code": "def answer_question_submit(course_id, quiz_id, attempt_id):\n    attempt = get_attempt_by_id(course_id, quiz_id, attempt_id)\n    ...\n    upsert_quiz_answer(attempt_id, question_id, answer_json)\n\ndef api_answer_question(course_id, quiz_id, attempt_id):\n    ...\n    item = upsert_quiz_answer(attempt_id, question_id, answer_json)\n\ndef submit_attempt_submit(course_id, quiz_id, attempt_id):\n    ...\n    submit_quiz_attempt(course_id, quiz_id, attempt_id)\n\ndef api_submit_attempt(course_id, quiz_id, attempt_id):\n    ...\n    item = submit_quiz_attempt(course_id, quiz_id, attempt_id)",
+      "reason": "Answer submission and final submission likewise occur with no server-side validation that the quiz is currently open or not past due."
+    },
+    {
+      "file_path": "models/quiz_repo.py",
+      "line_start": 4,
+      "line_end": 11,
+      "function_name": "create_quiz",
+      "code": "def create_quiz(course_id, created_by, title, description='', open_at='', due_at=''):\n    db.execute(\n        'INSERT INTO quizzes (course_id, created_by, title, description, open_at, due_at) VALUES (?, ?, ?, ?, ?, ?)',\n        (course_id, created_by, title, description, open_at, due_at),\n    )",
+      "reason": "The repository persists scheduling fields, confirming that the application models time-bounded quiz availability but does not enforce it on attempt actions."
+    }
+  ],
+  "root_cause_code": 12,
+  "root_cause": "The attempt lifecycle enforces only coarse role checks and never validates quiz availability rules against open_at and due_at before allowing start, answer, or submission actions.",
+  "patch_locations": [
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 454,
+      "line_end": 536,
+      "function_name": "start_attempt_submit / api_start_attempt / answer_question_submit / api_answer_question / submit_attempt_submit / api_submit_attempt"
+    },
+    {
+      "file_path": "models/quiz_repo.py",
+      "line_start": 23,
+      "line_end": 29,
+      "function_name": "get_quiz_by_id"
+    }
+  ],
+  "repair_plan": "Before creating an attempt, recording an answer, or accepting final submission, load the target quiz and enforce a consistent availability policy using open_at and due_at. Reject actions before the quiz opens and after it closes, and apply the same rule to both HTML and JSON endpoints so students cannot bypass scheduling constraints through alternate interfaces.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

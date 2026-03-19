@@ -1,0 +1,271 @@
+{
+  "vulnerability_id": "VULN-003",
+  "vulnerability_type_code": 7,
+  "vulnerability_type": "CSRF",
+  "cwe_id": "CWE-352",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.4,
+  "severity_level": "high",
+  "confidence_score": 96,
+  "confidence_level": "high",
+  "summary": "The server-rendered question, quiz, and attempt forms do not include any CSRF token or equivalent anti-CSRF validation. A malicious site can cause a logged-in victim to create or modify questions and quizzes, change quiz mappings, or start and submit attempts using the victim's existing session.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/questions"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/questions/:question_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/questions/:question_id/delete"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/delete"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/questions"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/start"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "templates/quizzes/question_new.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null,
+      "code": "{% extends \"base.html\" %}{% block content %}<h1>New Question</h1>{% if error %}<p>{{ error }}</p>{% endif %}<form method=\"post\" action=\"/courses/{{ course.course_id }}/questions\"><p>Type: <input name=\"qtype\"></p><p>Prompt: <textarea name=\"prompt\"></textarea></p><p>Options JSON: <textarea name=\"options_json\"></textarea></p><p>Answer JSON: <textarea name=\"answer_json\"></textarea></p><button type=\"submit\">Create</button></form>{% endblock %}",
+      "reason": "The question-creation form performs a state-changing request but contains no CSRF token or nonce."
+    },
+    {
+      "file_path": "templates/quizzes/question_edit.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null,
+      "code": "{% extends \"base.html\" %}{% block content %}<h1>Edit Question</h1>{% if error %}<p>{{ error }}</p>{% endif %}<form method=\"post\" action=\"/courses/{{ course.course_id }}/questions/{{ question.question_id }}\"><p>Type: <input name=\"qtype\" value=\"{{ question.qtype }}\"></p><p>Prompt: <textarea name=\"prompt\">{{ question.prompt }}</textarea></p><p>Options JSON: <textarea name=\"options_json\">{{ question.options_json }}</textarea></p><p>Answer JSON: <textarea name=\"answer_json\">{{ question.answer_json }}</textarea></p><button type=\"submit\">Save</button></form>{% endblock %}",
+      "reason": "The question-update form is forgeable because no anti-CSRF field is present."
+    },
+    {
+      "file_path": "templates/quizzes/quiz_new.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null,
+      "code": "{% extends \"base.html\" %}{% block content %}<h1>New Quiz</h1>{% if error %}<p>{{ error }}</p>{% endif %}<form method=\"post\" action=\"/courses/{{ course.course_id }}/quizzes\"><p>Title: <input name=\"title\"></p><p>Description: <textarea name=\"description\"></textarea></p><p>Open At: <input name=\"open_at\"></p><p>Due At: <input name=\"due_at\"></p><button type=\"submit\">Create</button></form>{% endblock %}",
+      "reason": "The quiz-creation form changes server state without any request authenticity token."
+    },
+    {
+      "file_path": "templates/quizzes/quiz_edit.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null,
+      "code": "{% extends \"base.html\" %}{% block content %}<h1>Edit Quiz</h1>{% if error %}<p>{{ error }}</p>{% endif %}<form method=\"post\" action=\"/courses/{{ course.course_id }}/quizzes/{{ quiz.quiz_id }}\"><p>Title: <input name=\"title\" value=\"{{ quiz.title }}\"></p><p>Description: <textarea name=\"description\">{{ quiz.description }}</textarea></p><p>Open At: <input name=\"open_at\" value=\"{{ quiz.open_at }}\"></p><p>Due At: <input name=\"due_at\" value=\"{{ quiz.due_at }}\"></p><button type=\"submit\">Save</button></form>{% endblock %}",
+      "reason": "The quiz-update form lacks any CSRF token."
+    },
+    {
+      "file_path": "templates/quizzes/quiz_questions.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null,
+      "code": "{% extends \"base.html\" %}{% block content %}<h1>Configure Quiz Questions</h1>{% if error %}<p>{{ error }}</p>{% endif %}<form method=\"post\" action=\"/courses/{{ course.course_id }}/quizzes/{{ quiz.quiz_id }}/questions\"><p>Question ID: <input name=\"question_id\"></p><p>Points: <input name=\"points\" value=\"1\"></p><p>Position: <input name=\"position\" value=\"1\"></p><button type=\"submit\">Add or Update</button></form>...{% endblock %}",
+      "reason": "The quiz-question mapping form performs a privileged state change without any anti-CSRF protection."
+    },
+    {
+      "file_path": "templates/quizzes/quiz_detail.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null,
+      "code": "{% extends \"base.html\" %}{% block content %}<h1>{{ quiz.title }}</h1>...<form method=\"post\" action=\"/courses/{{ course.course_id }}/quizzes/{{ quiz.quiz_id }}/delete\"><button type=\"submit\">Delete</button></form><form method=\"post\" action=\"/courses/{{ course.course_id }}/quizzes/{{ quiz.quiz_id }}/start\"><button type=\"submit\">Start Attempt</button></form>{% endblock %}",
+      "reason": "The delete-quiz and start-attempt forms are state-changing POSTs with no CSRF token."
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 105,
+      "line_end": 119,
+      "function_name": "create_question_submit",
+      "code": "@quiz_bp.route('/courses/<int:course_id>/questions', methods=['POST'])\n@login_required\n@require_course_staff\ndef create_question_submit(course_id):\n    ...\n    item = create_question(course_id, get_current_user()['user_id'], qtype, prompt, options_json, answer_json)",
+      "reason": "The question creation handler accepts cookie-authenticated browser POST requests without verifying any CSRF token."
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 190,
+      "line_end": 205,
+      "function_name": "update_question_submit",
+      "code": "@quiz_bp.route('/courses/<int:course_id>/questions/<int:question_id>', methods=['POST'])\n@login_required\n@require_course_staff\ndef update_question_submit(course_id, question_id):\n    ...\n    update_question(course_id, question_id, qtype, prompt, options_json, answer_json)",
+      "reason": "The question update handler performs state changes using only cookie-based authentication."
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 225,
+      "line_end": 232,
+      "function_name": "delete_question_submit",
+      "code": "@quiz_bp.route('/courses/<int:course_id>/questions/<int:question_id>/delete', methods=['POST'])\n@login_required\n@require_course_staff\ndef delete_question_submit(course_id, question_id):\n    delete_question(course_id, question_id)",
+      "reason": "The question deletion handler processes browser POST requests without request authenticity validation."
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 255,
+      "line_end": 269,
+      "function_name": "create_quiz_submit",
+      "code": "@quiz_bp.route('/courses/<int:course_id>/quizzes', methods=['POST'])\n@login_required\n@require_course_staff\ndef create_quiz_submit(course_id):\n    ...\n    item = create_quiz(course_id, get_current_user()['user_id'], title, description, open_at, due_at)",
+      "reason": "The quiz creation handler accepts authenticated browser POST requests without any anti-CSRF mechanism."
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 340,
+      "line_end": 355,
+      "function_name": "update_quiz_submit",
+      "code": "@quiz_bp.route('/courses/<int:course_id>/quizzes/<int:quiz_id>', methods=['POST'])\n@login_required\n@require_course_staff\ndef update_quiz_submit(course_id, quiz_id):\n    ...\n    update_quiz(course_id, quiz_id, title, description, open_at, due_at)",
+      "reason": "The quiz update handler accepts state-changing browser POST requests without validating request authenticity."
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 375,
+      "line_end": 382,
+      "function_name": "delete_quiz_submit",
+      "code": "@quiz_bp.route('/courses/<int:course_id>/quizzes/<int:quiz_id>/delete', methods=['POST'])\n@login_required\n@require_course_staff\ndef delete_quiz_submit(course_id, quiz_id):\n    delete_quiz(course_id, quiz_id)",
+      "reason": "The quiz deletion handler is a forgeable POST."
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 406,
+      "line_end": 422,
+      "function_name": "configure_quiz_questions_submit",
+      "code": "@quiz_bp.route('/courses/<int:course_id>/quizzes/<int:quiz_id>/questions', methods=['POST'])\n@login_required\n@require_course_staff\ndef configure_quiz_questions_submit(course_id, quiz_id):\n    ...\n    if add_quiz_question(course_id, quiz_id, question_id, points, position) is None:\n        ...",
+      "reason": "The quiz-question mapping handler performs a privileged change without CSRF validation."
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 454,
+      "line_end": 523,
+      "function_name": "start_attempt_submit / answer_question_submit / submit_attempt_submit",
+      "code": "@quiz_bp.route('/courses/<int:course_id>/quizzes/<int:quiz_id>/start', methods=['POST'])\n@login_required\n@require_course_member\ndef start_attempt_submit(course_id, quiz_id):\n    ...\n\n@quiz_bp.route('/courses/<int:course_id>/quizzes/<int:quiz_id>/attempts/<int:attempt_id>/answers', methods=['POST'])\n@login_required\n@require_course_member\ndef answer_question_submit(course_id, quiz_id, attempt_id):\n    ...\n    upsert_quiz_answer(attempt_id, question_id, answer_json)\n\n@quiz_bp.route('/courses/<int:course_id>/quizzes/<int:quiz_id>/attempts/<int:attempt_id>/submit', methods=['POST'])\n@login_required\n@require_course_member\ndef submit_attempt_submit(course_id, quiz_id, attempt_id):\n    ...\n    submit_quiz_attempt(course_id, quiz_id, attempt_id)",
+      "reason": "Student attempt lifecycle actions rely solely on the browser's authenticated cookies and do not verify a per-session anti-CSRF token."
+    }
+  ],
+  "root_cause_code": 9,
+  "root_cause": "Server-rendered quiz and question workflows rely on cookie-based authentication but do not require a request authenticity token or equivalent CSRF defense for state-changing form submissions.",
+  "patch_locations": [
+    {
+      "file_path": "templates/quizzes/question_new.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/quizzes/question_edit.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/quizzes/quiz_new.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/quizzes/quiz_edit.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/quizzes/quiz_questions.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/quizzes/quiz_detail.html",
+      "line_start": 1,
+      "line_end": 1,
+      "function_name": null
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 105,
+      "line_end": 119,
+      "function_name": "create_question_submit"
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 190,
+      "line_end": 205,
+      "function_name": "update_question_submit"
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 225,
+      "line_end": 232,
+      "function_name": "delete_question_submit"
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 255,
+      "line_end": 269,
+      "function_name": "create_quiz_submit"
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 340,
+      "line_end": 355,
+      "function_name": "update_quiz_submit"
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 375,
+      "line_end": 382,
+      "function_name": "delete_quiz_submit"
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 406,
+      "line_end": 422,
+      "function_name": "configure_quiz_questions_submit"
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 454,
+      "line_end": 523,
+      "function_name": "start_attempt_submit / answer_question_submit / submit_attempt_submit"
+    }
+  ],
+  "repair_plan": "Introduce server-side CSRF protection for all browser quiz workflows by generating a per-session token, embedding it in every state-changing question, quiz, mapping, and attempt form, and rejecting requests whose token is missing or invalid. Apply the same protection consistently to create, update, delete, start, answer, and submit actions.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

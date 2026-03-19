@@ -1,0 +1,808 @@
+[
+{
+"vulnerability_id": "VULN-001",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 9,
+"vulnerability_type": "Authentication Flaw",
+"cwe_id": "CWE-798",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.2,
+"severity_level": "high",
+"confidence_score": 85,
+"confidence_level": "high",
+"summary": "The hard-coded password was removed from the bootstrap logic, but the application still auto-provisions a remotely usable global administrator account with the fixed username 'admin' on every request. The current codebase also still advertises and relies on the reusable 'admin/admin123' credential pattern, so the original default-admin takeover risk remains only partially reduced rather than eliminated.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/bootstrap.php",
+"line_start": 210,
+"line_end": 229,
+"function_name": "seed_admin",
+"code": "$password = getenv('INITIAL_ADMIN_PASSWORD'); ... $username = 'admin'; ... INSERT INTO users(username, password_hash, display_name, created_at, is_global_admin) VALUES (?,?,?,?,1)",
+"reason": "The repair kept automatic provisioning of a privileged account with the fixed login name 'admin' and a password-based remote login path, instead of moving to a one-time or out-of-band bootstrap flow."
+},
+{
+"file_path": "views/auth/login.php",
+"line_start": 3,
+"line_end": 10,
+"function_name": null,
+"code": "<form method="post" action="/login"> ... </form> ... <p class="muted">Default seeded admin: admin / admin123</p>",
+"reason": "The shipped login view still documents a reusable seeded admin credential pattern, showing that the default-admin concept remains embedded in the current codebase."
+},
+{
+"file_path": "test/security_tests/test_vuln_001_default_admin_credentials.py",
+"line_start": 6,
+"line_end": 6,
+"function_name": "test_vuln_001_default_admin_credentials",
+"code": "r = login(session, base_url, "admin", "admin123")",
+"reason": "The bundled exploit test still treats admin/admin123 as the operative administrator credential, which is consistent with the remaining fixed-identity bootstrap design."
+}
+],
+"root_cause_code": 10,
+"root_cause": "The application still embeds an auto-provisioned, password-authenticated global administrator identity into normal runtime startup instead of requiring a one-time secure initialization flow that removes reusable default-bootstrap semantics.",
+"patch_locations": [
+{
+"file_path": "src/bootstrap.php",
+"line_start": 210,
+"line_end": 229,
+"function_name": "seed_admin"
+},
+{
+"file_path": "views/auth/login.php",
+"line_start": 3,
+"line_end": 10,
+"function_name": null
+}
+],
+"repair_plan": "Remove automatic per-request seeding of a reusable 'admin' account. Replace it with a one-time setup flow or operator-only initialization path, stop documenting a default credential in the UI, and require explicit durable privilege assignment that does not depend on a fixed bootstrap login identity.",
+"repair_failure_root_cause": "The previous repair externalized the password source but preserved the core insecure bootstrap model: a fixed, remotely login-capable administrator identity still exists and the codebase still codifies the seeded admin credential pattern.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 10,
+"vulnerability_type": "Session Weakness",
+"cwe_id": "CWE-384",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 5.9,
+"severity_level": "medium",
+"confidence_score": 61,
+"confidence_level": "medium",
+"summary": "The repair added session ID regeneration on the main login and registration helper path, but the application still accepts any caller-supplied PHP session identifier at bootstrap and does not harden session acceptance with strict-mode controls. The original fixation risk is reduced, but the session boundary remains only partially hardened in the current codebase.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/register"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/register"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/bootstrap.php",
+"line_start": 5,
+"line_end": 13,
+"function_name": null,
+"code": "if (session_status() === PHP_SESSION_NONE) { session_set_cookie_params([...]); session_start(); }",
+"reason": "The application still starts whatever session identifier the client presents before authentication, and the code does not enable a strict session acceptance policy at initialization time."
+},
+{
+"file_path": "src/helpers.php",
+"line_start": 73,
+"line_end": 76,
+"function_name": "session_login_user",
+"code": "function session_login_user(array $user): void { session_regenerate_id(true); $_SESSION['user'] = $user; }",
+"reason": "The attempted fix is limited to helper-based regeneration after successful authentication, which reduces but does not fully harden the pre-auth session acceptance boundary."
+}
+],
+"root_cause_code": 8,
+"root_cause": "Session handling is still only partially hardened because the server accepts attacker-supplied pre-auth session IDs at startup and relies on application-level regeneration later rather than enforcing a stricter session policy at the boundary.",
+"patch_locations": [
+{
+"file_path": "src/bootstrap.php",
+"line_start": 5,
+"line_end": 13,
+"function_name": null
+},
+{
+"file_path": "src/helpers.php",
+"line_start": 73,
+"line_end": 76,
+"function_name": "session_login_user"
+}
+],
+"repair_plan": "Keep post-authentication session_regenerate_id(true), but also harden session initialization so attacker-supplied unknown session IDs are not accepted pre-authentication. Apply strict session handling at bootstrap, clear any pre-auth residual state before binding the authenticated user, and verify the same policy for all auth transitions.",
+"repair_failure_root_cause": "The previous repair focused on rotating the ID after successful authentication but did not fully harden the session acceptance boundary itself, leaving the overall fixation mitigation incomplete.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-003",
+"current_status": "incorrectly_fixed",
+"vulnerability_type_code": 7,
+"vulnerability_type": "CSRF",
+"cwe_id": "CWE-352",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.1,
+"severity_level": "medium",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "The repair added centralized server-side CSRF enforcement for non-API POST requests, but the current server-rendered forms do not include any hidden CSRF token fields. The result is an incomplete and broken mitigation that does not correctly retrofit the original HTML workflows.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/delete"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "public/index.php",
+"line_start": 37,
+"line_end": 39,
+"function_name": null,
+"code": "if (method_override() === 'POST' && strncmp(request_path(), '/api/', 5) !== 0) { require_csrf(); }",
+"reason": "The new repair enforces CSRF validation globally for HTML POST requests."
+},
+{
+"file_path": "src/helpers.php",
+"line_start": 85,
+"line_end": 99,
+"function_name": "csrf_input/require_csrf",
+"code": "function csrf_input(): string { return '<input type="hidden" name="_csrf" value="' . h(csrf_token()) . '" />'; } ... function require_csrf(): void { $token = (string)($_POST['_csrf'] ?? ''); ... }",
+"reason": "The code defines token-generation and validation helpers, showing the intended mitigation model."
+},
+{
+"file_path": "views/courses/detail.php",
+"line_start": 6,
+"line_end": 8,
+"function_name": null,
+"code": "<form style="display:inline" method="post" action="/courses/<?= h($course['course_id']) ?>/delete"><button type="submit">Delete</button></form>",
+"reason": "A destructive HTML form still lacks the required hidden _csrf token field."
+},
+{
+"file_path": "views/posts/detail.php",
+"line_start": 15,
+"line_end": 18,
+"function_name": null,
+"code": "<form method="post" action="/courses/<?= h($course_id) ?>/posts/<?= h($post['post_id']) ?>/comments"> ... </form>",
+"reason": "The comment-creation form is also missing the hidden _csrf token even though the request path is now centrally enforced."
+},
+{
+"file_path": "views/memberships/list.php",
+"line_start": 12,
+"line_end": 24,
+"function_name": null,
+"code": "<form method="post" action="/courses/<?= h($course_id) ?>/members/<?= h($m['membership_id']) ?>"> ... </form> ... <form method="post" action="/courses/<?= h($course_id) ?>/members/<?= h($m['membership_id']) ?>/delete">",
+"reason": "Membership role-change and delete forms remain tokenless, so the mitigation was not propagated to the vulnerable HTML flows."
+}
+],
+"root_cause_code": 9,
+"root_cause": "The repair added token validation but did not retrofit token issuance into the existing server-rendered forms, leaving the CSRF defense incomplete and inconsistently deployed.",
+"patch_locations": [
+{
+"file_path": "views/courses/detail.php",
+"line_start": 6,
+"line_end": 8,
+"function_name": null
+},
+{
+"file_path": "views/posts/detail.php",
+"line_start": 15,
+"line_end": 30,
+"function_name": null
+},
+{
+"file_path": "views/memberships/list.php",
+"line_start": 12,
+"line_end": 24,
+"function_name": null
+},
+{
+"file_path": "views/auth/login.php",
+"line_start": 3,
+"line_end": 8,
+"function_name": null
+},
+{
+"file_path": "views/auth/register.php",
+"line_start": 3,
+"line_end": 10,
+"function_name": null
+}
+],
+"repair_plan": "Insert csrf_input() into every server-rendered POST form, keep centralized validation before state changes, and verify all HTML mutation routes use the same token field name and form lifecycle. Then rerun the HTML workflows to confirm that legitimate requests succeed and forged requests fail.",
+"repair_failure_root_cause": "The previous repair implemented the validation half of the CSRF fix but did not complete the issuance and embedding half across the vulnerable forms, so the mitigation was left in an incorrectly integrated state.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-004",
+"current_status": "still_present",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.8,
+"severity_level": "high",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "A teacher or admin authorized in one course can still update or delete a membership belonging to another course by supplying a foreign membership_id. The current controller still authorizes only against the route course_id, and the repository still performs the write by membership_id alone.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/members/:membership_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 40,
+"line_end": 48,
+"function_name": "updateRole",
+"code": "$courseId = (int)$p['course_id']; $membershipId = (int)$p['membership_id']; require_course_teacher_or_admin($this->pdo, $courseId, $u, false); ... $repo->updateRole($membershipId, $role);",
+"reason": "The controller still authorizes against the route course_id but mutates the target membership solely by membership_id."
+},
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 51,
+"line_end": 58,
+"function_name": "remove",
+"code": "$courseId = (int)$p['course_id']; $membershipId = (int)$p['membership_id']; require_course_teacher_or_admin($this->pdo, $courseId, $u, false); ... $repo->remove($membershipId);",
+"reason": "Delete follows the same cross-course trust-boundary mistake."
+},
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 88,
+"line_end": 106,
+"function_name": "apiUpdateRole/apiRemove",
+"code": "require_course_teacher_or_admin($this->pdo, $courseId, $u, true); ... $m = $repo->updateRole($membershipId, $role); ... $repo->remove($membershipId);",
+"reason": "The API endpoints remain scoped only by the standalone membership identifier after authorization on the route course."
+},
+{
+"file_path": "src/repos/MembershipRepo.php",
+"line_start": 39,
+"line_end": 47,
+"function_name": "updateRole/remove",
+"code": "UPDATE memberships SET role_in_course=? WHERE membership_id=? ... DELETE FROM memberships WHERE membership_id=?",
+"reason": "The repository write queries still ignore course_id, so a foreign membership row can be modified or deleted once its ID is known."
+}
+],
+"root_cause_code": 11,
+"root_cause": "The code still trusts a standalone membership identifier across the course boundary and never verifies that the targeted membership belongs to the course for which the caller is authorized.",
+"patch_locations": [
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 40,
+"line_end": 58,
+"function_name": "updateRole/remove"
+},
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 88,
+"line_end": 106,
+"function_name": "apiUpdateRole/apiRemove"
+},
+{
+"file_path": "src/repos/MembershipRepo.php",
+"line_start": 19,
+"line_end": 47,
+"function_name": "getById/updateRole/remove"
+}
+],
+"repair_plan": "Load the membership row first, verify that its course_id matches the route course_id, and scope repository update/delete operations by both membership_id and course_id. Reject any request where the target membership does not belong to the course under authorization.",
+"repair_failure_root_cause": "The previous repair described a course-bound membership check, but the current codebase does not contain that enforcement in either the controller or repository write path.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-005",
+"current_status": "still_present",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.4,
+"severity_level": "high",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "Any authenticated member of a course can still edit or delete another member's post in that same course by using the target post_id. The current code still checks only course membership and never binds the write path to the post author or a dedicated moderation privilege.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 59,
+"line_end": 68,
+"function_name": "update",
+"code": "$courseId = (int)$p['course_id']; $postId = (int)$p['post_id']; require_course_member($this->pdo, $courseId, $u, false); ... $repo->update($courseId, $postId, $title, $body);",
+"reason": "The HTML update path still allows any course member to mutate the targeted post_id without an ownership or moderator check."
+},
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 71,
+"line_end": 78,
+"function_name": "delete",
+"code": "$courseId = (int)$p['course_id']; $postId = (int)$p['post_id']; require_course_member($this->pdo, $courseId, $u, false); ... $repo->delete($courseId, $postId);",
+"reason": "Delete follows the same insufficient authorization pattern."
+},
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 113,
+"line_end": 132,
+"function_name": "apiUpdate/apiDelete",
+"code": "require_course_member($this->pdo, $courseId, $u, true); ... $post = $repo->update($courseId, $postId, $title, $body); ... $repo->delete($courseId, $postId);",
+"reason": "The JSON API endpoints remain writable for any member who knows the post_id."
+},
+{
+"file_path": "src/repos/PostRepo.php",
+"line_start": 26,
+"line_end": 34,
+"function_name": "update/delete",
+"code": "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=? ... DELETE FROM posts WHERE course_id=? AND post_id=?",
+"reason": "The repository write paths are still scoped only by course_id and post_id, not by author_id or a staff-only moderation rule."
+}
+],
+"root_cause_code": 7,
+"root_cause": "The implementation still treats course membership as sufficient to modify any post in the course and omits an ownership or elevated-role check before editing or deleting a post.",
+"patch_locations": [
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 48,
+"line_end": 78,
+"function_name": "showEdit/update/delete"
+},
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 102,
+"line_end": 132,
+"function_name": "apiGet/apiUpdate/apiDelete"
+},
+{
+"file_path": "src/repos/PostRepo.php",
+"line_start": 19,
+"line_end": 34,
+"function_name": "getById/update/delete"
+}
+],
+"repair_plan": "Load the target post before editing or deleting it, verify that the caller is either the post author or an explicitly authorized staff/global-admin moderator, and constrain non-staff repository writes by author_id in addition to course_id and post_id.",
+"repair_failure_root_cause": "The previous repair summary claimed ownership-aware post controls, but those checks are absent from the current controller and repository code paths.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-006",
+"current_status": "incorrectly_fixed",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.0,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "The comment-edit and delete paths were partially modified toward ownership checks, but the repair is incomplete and internally inconsistent. The controller now calls undefined authorization helpers and passes extra author-scoping arguments to repository methods that do not accept them, so the original comment-authorization flaw was not cleanly or reliably eliminated.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 27,
+"line_end": 36,
+"function_name": "update",
+"code": "$comment = $repo->getById($courseId, $postId, $commentId); ... if (!can_manage_comment($membership, $comment, $u)) { ... } $repo->update($courseId, $postId, $commentId, $body, ... (int)$u['user_id']);",
+"reason": "The controller attempts a new ownership-aware pattern, but it depends on can_manage_comment() and a five-argument repository update call."
+},
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 48,
+"line_end": 56,
+"function_name": "delete",
+"code": "$comment = $repo->getById($courseId, $postId, $commentId); ... if (!can_manage_comment($membership, $comment, $u)) { ... } $repo->delete($courseId, $postId, $commentId, ... (int)$u['user_id']);",
+"reason": "Delete uses the same partially integrated ownership-aware call pattern."
+},
+{
+"file_path": "src/repos/CommentRepo.php",
+"line_start": 26,
+"line_end": 34,
+"function_name": "update/delete",
+"code": "public function update(int $courseId, int $postId, int $commentId, string $body): ?array { ... } public function delete(int $courseId, int $postId, int $commentId): void { ... }",
+"reason": "The repository methods still expose only the old four-argument/three-argument signatures and do not implement author-bound writes."
+},
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 29,
+"line_end": 29,
+"function_name": "update",
+"code": "if (!can_manage_comment($membership, $comment, $u)) { http_response_code(403); echo 'Forbidden'; return; }",
+"reason": "The controller references can_manage_comment(), but no such function is defined anywhere in the current src tree."
+}
+],
+"root_cause_code": 7,
+"root_cause": "The attempted ownership-based authorization was only partially wired in: the controller was changed, but the supporting guard/helper and repository author-scoping logic were not completed consistently.",
+"patch_locations": [
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 18,
+"line_end": 56,
+"function_name": "update/delete"
+},
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 82,
+"line_end": 119,
+"function_name": "apiUpdate/apiDelete"
+},
+{
+"file_path": "src/repos/CommentRepo.php",
+"line_start": 19,
+"line_end": 34,
+"function_name": "getById/update/delete"
+},
+{
+"file_path": "src/controllers/_guards.php",
+"line_start": 1,
+"line_end": 59,
+"function_name": null
+}
+],
+"repair_plan": "Define a real comment-authorization helper, load the target comment before mutation, and implement repository update/delete methods that optionally scope non-staff writes by author_id. Then apply the same finished ownership rule consistently in both HTML and API handlers.",
+"repair_failure_root_cause": "The previous repair started to add ownership-aware comment checks, but the patch was left half-applied: the controller now expects helper functions and repository signatures that do not exist in the current codebase.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-007",
+"current_status": "still_present",
+"vulnerability_type_code": 11,
+"vulnerability_type": "Sensitive Data Exposure",
+"cwe_id": "CWE-200",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.0,
+"severity_level": "high",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "Students and other ordinary course members can still read the full question bank and retrieve answer_json values containing correct answers. The current question-bank list/detail handlers still authorize all course members, and the data/view layers still return and render answer_json directly.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions/:question_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions/:question_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 8,
+"line_end": 13,
+"function_name": "list",
+"code": "$courseId = (int)$p['course_id']; require_course_member($this->pdo, $courseId, $u, false); ... render('questions/list', ... $repo->listByCourse($courseId))",
+"reason": "The question-bank list is still available to any course member, not only staff."
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 38,
+"line_end": 46,
+"function_name": "detail",
+"code": "$courseId = (int)$p['course_id']; $questionId = (int)$p['question_id']; require_course_member($this->pdo, $courseId, $u, false); ... render('questions/detail', ...)",
+"reason": "The detail page remains reachable by any authenticated course member."
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 85,
+"line_end": 115,
+"function_name": "apiList/apiGet",
+"code": "require_course_member($this->pdo, $courseId, $u, true); ... json_response(['questions' => $repo->listByCourse($courseId)]); ... json_response(['question' => $q]);",
+"reason": "The JSON API still exposes the same data set to ordinary members."
+},
+{
+"file_path": "src/repos/QuestionRepo.php",
+"line_start": 13,
+"line_end": 23,
+"function_name": "listByCourse/getById",
+"code": "SELECT q.*, u.username AS creator_username FROM questions q ...",
+"reason": "The repository still returns all question columns, including answer_json, instead of a student-safe projection."
+},
+{
+"file_path": "views/questions/detail.php",
+"line_start": 6,
+"line_end": 7,
+"function_name": null,
+"code": "<p><b>Options JSON:</b> <pre><?= h($question['options_json'] ?? '') ?></pre></p>\n<p><b>Answer JSON:</b> <pre><?= h($question['answer_json'] ?? '') ?></pre></p>",
+"reason": "The HTML view still renders answer_json directly once the member-level access check passes."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Question-bank reads are still authorized for all course members, and the data/view layers still expose sensitive answer fields without a staff-only or student-safe projection boundary.",
+"patch_locations": [
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 8,
+"line_end": 13,
+"function_name": "list"
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 38,
+"line_end": 46,
+"function_name": "detail"
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 85,
+"line_end": 115,
+"function_name": "apiList/apiGet"
+},
+{
+"file_path": "src/repos/QuestionRepo.php",
+"line_start": 13,
+"line_end": 23,
+"function_name": "listByCourse/getById"
+},
+{
+"file_path": "views/questions/detail.php",
+"line_start": 6,
+"line_end": 7,
+"function_name": null
+}
+],
+"repair_plan": "Restrict question-bank list/detail routes to staff roles when answer_json is present, and create a separate student-safe representation that excludes answer_json and other solution material. Apply the same access rule in both HTML and API handlers.",
+"repair_failure_root_cause": "The previous repair summary claimed staff-only question-bank exposure, but the current code still uses member-level authorization and still returns and renders answer_json to those members.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-008",
+"current_status": "incorrectly_fixed",
+"vulnerability_type_code": 13,
+"vulnerability_type": "Business Logic",
+"cwe_id": "CWE-841",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.3,
+"severity_level": "high",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "The quiz-attempt answer and submit workflow still does not enforce quiz-question binding or the submitted state before accepting answer writes, and the attempted repair introduced schema and query inconsistencies into the same flow. A student-owned attempt can still reach answer upserts without a server-side check that the question belongs to the quiz or that the attempt is still open, so the original integrity failure remains unresolved.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 34,
+"line_end": 46,
+"function_name": "answer",
+"code": "$questionId = (int)($_POST['question_id'] ?? 0); ... $attempt = $repo->getAttemptById($attemptId); if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { ... } $repo->upsertAnswer($attemptId, $questionId, $answerJson);",
+"reason": "The answer path still checks only ownership of the attempt and never verifies that question_id belongs to the quiz or that submitted_at is still null."
+},
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 49,
+"line_end": 58,
+"function_name": "submit",
+"code": "$attempt = $repo->getAttemptById($attemptId); if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { ... } $repo->submitAttempt($attemptId);",
+"reason": "Submission still only stamps submitted_at, and no later answer path checks that state before allowing more writes."
+},
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 79,
+"line_end": 103,
+"function_name": "apiAnswer/apiSubmit",
+"code": "$questionId = (int)($data['question_id'] ?? 0); ... if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) ... $repo->upsertAnswer($attemptId, $questionId, $answerJson); ... $repo->submitAttempt($attemptId);",
+"reason": "The JSON API repeats the same missing quiz-question and submitted-state validation."
+},
+{
+"file_path": "src/repos/QuizRepo.php",
+"line_start": 66,
+"line_end": 74,
+"function_name": "upsertAnswer/submitAttempt",
+"code": "INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) VALUES (?,?,?,?) ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json ... UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?",
+"reason": "The repository still accepts arbitrary question_id values for an attempt and still overwrites answers without checking submitted_at or quiz membership."
+},
+{
+"file_path": "src/bootstrap.php",
+"line_start": 176,
+"line_end": 197,
+"function_name": "init_db",
+"code": "CREATE TABLE IF NOT EXISTS quiz_attempts ( attempt_id INTEGER PRIMARY KEY AUTOINCREMENT, quiz_id INTEGER NOT NULL, student_id INTEGER NOT NULL, started_at TEXT NOT NULL, submitted_at TEXT, score REAL, UNIQUE(quiz_id, student_id), ... )",
+"reason": "The schema defined in init_db does not contain course_id on quiz_attempts and does not define answer_id on quiz_answers."
+},
+{
+"file_path": "src/repos/QuizRepo.php",
+"line_start": 53,
+"line_end": 57,
+"function_name": "startAttempt",
+"code": "INSERT INTO quiz_attempts(quiz_id,course_id,student_id,started_at) VALUES (?,?,?,?)",
+"reason": "The attempted repair introduced a repository write against a non-existent course_id column, showing that the new quiz-integrity fix was not integrated correctly into the actual schema."
+}
+],
+"root_cause_code": 12,
+"root_cause": "The quiz workflow still does not enforce the intended attempt state machine or quiz-question binding before answer writes, and the attempted fix was left internally inconsistent with the database schema and repository behavior.",
+"patch_locations": [
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 34,
+"line_end": 58,
+"function_name": "answer/submit"
+},
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 79,
+"line_end": 103,
+"function_name": "apiAnswer/apiSubmit"
+},
+{
+"file_path": "src/repos/QuizRepo.php",
+"line_start": 47,
+"line_end": 84,
+"function_name": "listQuizQuestions/startAttempt/upsertAnswer/submitAttempt/listAnswers"
+},
+{
+"file_path": "src/bootstrap.php",
+"line_start": 176,
+"line_end": 197,
+"function_name": "init_db"
+}
+],
+"repair_plan": "Before any answer write, load the attempt and verify that it belongs to the supplied quiz and course, that submitted_at is still null, and that question_id is one of the quiz_questions for that quiz. Then align the repository and schema so quiz_attempts and quiz_answers use the same columns the controller logic expects, and reject duplicate submission or post-submission edits consistently in both HTML and API flows.",
+"repair_failure_root_cause": "The previous repair attempted to add quiz/course binding and post-submission checks, but the current code does not contain those validations and also introduces schema/repository mismatches in the same path, leaving the original integrity issue unresolved.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+}
+]

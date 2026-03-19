@@ -1,0 +1,94 @@
+{
+  "vulnerability_id": "VULN-004",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.6,
+  "severity_level": "high",
+  "confidence_score": 98,
+  "confidence_level": "high",
+  "summary": "Any authenticated user can edit or delete another user's course by supplying a different course_id. The application checks only that the caller is logged in and never verifies that the caller created the target course or otherwise has authority over it.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/edit"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/delete"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "DELETE",
+      "route": "/api/courses/:course_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 79,
+      "line_end": 85,
+      "function_name": "edit_course_page",
+      "code": "@course_bp.route('/courses/<int:course_id>/edit', methods=['GET'])\n@login_required\ndef edit_course_page(course_id):\n    course = get_course_by_id(course_id)\n    if course is None:\n        return render_template('404.html', current_user=get_current_user()), 404\n    return render_template('courses/edit.html', course=course, current_user=get_current_user())",
+      "reason": "Any logged-in user can open the edit page for an arbitrary course_id; there is no ownership or role verification."
+    },
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 88,
+      "line_end": 114,
+      "function_name": "update_course_submit / api_update_course",
+      "code": "@course_bp.route('/courses/<int:course_id>', methods=['POST'])\n@login_required\ndef update_course_submit(course_id):\n    course = get_course_by_id(course_id)\n    ...\n    update_course(course_id, title, description)\n\n@course_bp.route('/api/courses/<int:course_id>', methods=['PUT'])\n@login_required\ndef api_update_course(course_id):\n    course = get_course_by_id(course_id)\n    ...\n    updated = update_course(course_id, title, description)\n    return jsonify({'success': True, 'course': _course_to_dict(updated)})",
+      "reason": "Both update paths require only authentication, then write to the user-supplied course_id without verifying that the current user owns that course."
+    },
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 117,
+      "line_end": 134,
+      "function_name": "delete_course_submit / api_delete_course",
+      "code": "@course_bp.route('/courses/<int:course_id>/delete', methods=['POST'])\n@login_required\ndef delete_course_submit(course_id):\n    course = get_course_by_id(course_id)\n    if course is None:\n        return render_template('404.html', current_user=get_current_user()), 404\n    delete_course(course_id)\n    return redirect(url_for('courses.list_courses_page'))\n\n@course_bp.route('/api/courses/<int:course_id>', methods=['DELETE'])\n@login_required\ndef api_delete_course(course_id):\n    ...\n    delete_course(course_id)\n    return jsonify({'success': True, 'deleted_course_id': course_id})",
+      "reason": "Deletion is performed for any existing course_id once the caller is logged in; no creator or admin authorization is enforced."
+    },
+    {
+      "file_path": "models/course_repo.py",
+      "line_start": 31,
+      "line_end": 44,
+      "function_name": "update_course / delete_course",
+      "code": "def update_course(course_id, title, description):\n    db = get_db()\n    db.execute(\n        'UPDATE courses SET title = ?, description = ? WHERE course_id = ?',\n        (title, description, course_id),\n    )\n    db.commit()\n    return get_course_by_id(course_id)\n\n\ndef delete_course(course_id):\n    db = get_db()\n    db.execute('DELETE FROM courses WHERE course_id = ?', (course_id,))\n    db.commit()",
+      "reason": "The underlying write operations are scoped only by course_id and rely entirely on the controller for authorization, which is absent."
+    }
+  ],
+  "root_cause_code": 7,
+  "root_cause": "Course mutation endpoints trust a user-controlled course identifier and do not verify that the authenticated user owns the targeted course or has an explicitly authorized elevated role.",
+  "patch_locations": [
+    {
+      "file_path": "controllers/course_controller.py",
+      "line_start": 79,
+      "line_end": 134,
+      "function_name": "edit_course_page / update_course_submit / api_update_course / delete_course_submit / api_delete_course"
+    },
+    {
+      "file_path": "models/course_repo.py",
+      "line_start": 31,
+      "line_end": 44,
+      "function_name": "update_course / delete_course"
+    }
+  ],
+  "repair_plan": "Before serving the edit page or applying update and delete operations, load the target course and verify that the current user is the course creator or an explicitly authorized administrator. Enforce this authorization in the controller and, where practical, scope repository writes by both course_id and created_by so unauthorized cross-user mutations cannot succeed even if a controller check is missed.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

@@ -1,0 +1,480 @@
+[
+{
+"vulnerability_id": "VULN-001",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.1,
+"severity_level": "high",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "Any authenticated user can retrieve the full membership roster for an arbitrary course by supplying its course_id. This exposes user identities and role assignments for courses the attacker is not a member of.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/members"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/members"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/routes/web.js",
+"line_start": 38,
+"line_end": 42,
+"function_name": null,
+"code": "router.get('/courses/:course_id/members', requireAuthPage, membershipController.listMembers);\nrouter.get('/courses/:course_id/members/new', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.showAddMember);\nrouter.post('/courses/:course_id/members', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.addMember);\nrouter.post('/courses/:course_id/members/:membership_id', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.updateMemberRole);\nrouter.post('/courses/:course_id/members/:membership_id/delete', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.removeMember);",
+"reason": "The member-list page is protected only by authentication and does not load/require course membership, unlike the write endpoints."
+},
+{
+"file_path": "src/routes/api.js",
+"line_start": 28,
+"line_end": 31,
+"function_name": null,
+"code": "router.post('/courses/:course_id/members', requireAuthApi, loadCourseMembership, requireTeacherOrAdmin, membershipController.apiAddMember);\nrouter.get('/courses/:course_id/members', requireAuthApi, membershipController.apiListMembers);\nrouter.put('/courses/:course_id/members/:membership_id', requireAuthApi, loadCourseMembership, requireTeacherOrAdmin, membershipController.apiUpdateMemberRole);\nrouter.delete('/courses/:course_id/members/:membership_id', requireAuthApi, loadCourseMembership, requireTeacherOrAdmin, membershipController.apiRemoveMember);",
+"reason": "The API member-list endpoint requires only authentication and omits course membership enforcement."
+},
+{
+"file_path": "src/controllers/membershipController.js",
+"line_start": 101,
+"line_end": 119,
+"function_name": "listMembers / apiListMembers",
+"code": "function listMembers(req, res) {\n  const course = ensureCourse(req.params.course_id);\n  ...\n  const memberships = membershipRepository.listByCourse(req.params.course_id);\n  return res.render('course_members_list', { course, memberships, roles: membershipRepository.ALLOWED_ROLES });\n}\n\nfunction apiListMembers(req, res) {\n  const course = ensureCourse(req.params.course_id);\n  ...\n  const memberships = membershipRepository.listByCourse(req.params.course_id);\n  return res.json({ success: true, memberships });\n}",
+"reason": "The controllers return the full membership list for any course_id provided in the request and do not verify the caller is a member of that course."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Course-scoped membership listing endpoints are protected only by authentication and do not enforce a course-membership authorization boundary before returning roster data.",
+"patch_locations": [
+{
+"file_path": "src/routes/web.js",
+"line_start": 38,
+"line_end": 38,
+"function_name": null
+},
+{
+"file_path": "src/routes/api.js",
+"line_start": 29,
+"line_end": 29,
+"function_name": null
+},
+{
+"file_path": "src/controllers/membershipController.js",
+"line_start": 101,
+"line_end": 119,
+"function_name": "listMembers / apiListMembers"
+}
+],
+"repair_plan": "Require course membership (or an explicit staff/admin role) before returning a course roster. Apply loadCourseMembership + requireCourseMember (or requireCourseStaff) to both the web and API list-members routes, and keep the controller logic unchanged except for returning 403 when the caller is not authorized for the target course.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"vulnerability_type_code": 7,
+"vulnerability_type": "CSRF",
+"cwe_id": "CWE-352",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.5,
+"severity_level": "medium",
+"confidence_score": 93,
+"confidence_level": "high",
+"summary": "Membership management actions are implemented as server-rendered POST forms without CSRF protection. A malicious site can trick a logged-in teacher/admin into submitting forged requests that add members, change roles, or remove members.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/views/course_member_new.ejs",
+"line_start": 10,
+"line_end": 29,
+"function_name": null,
+"code": "<form method="post" action="/courses/<%= course.course_id %>/members">\n  ...\n  <button type="submit">Add member</button>\n</form>",
+"reason": "The add-member form performs a state-changing POST and includes no CSRF token field."
+},
+{
+"file_path": "src/views/course_members_list.ejs",
+"line_start": 23,
+"line_end": 35,
+"function_name": null,
+"code": "<form method="post" action="/courses/<%= course.course_id %>/members/<%= membership.membership_id %>">\n  <select name="role_in_course"> ... </select>\n  <button type="submit">Update</button>\n</form>\n...\n<form method="post" action="/courses/<%= course.course_id %>/members/<%= membership.membership_id %>/delete">\n  <button type="submit">Remove</button>\n</form>",
+"reason": "Role update and member removal are implemented as POST forms with no CSRF token."
+},
+{
+"file_path": "src/routes/web.js",
+"line_start": 39,
+"line_end": 42,
+"function_name": null,
+"code": "router.post('/courses/:course_id/members', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.addMember);\nrouter.post('/courses/:course_id/members/:membership_id', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.updateMemberRole);\nrouter.post('/courses/:course_id/members/:membership_id/delete', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.removeMember);",
+"reason": "The server accepts state-changing membership POST requests based on session authentication/authorization and does not perform CSRF token validation."
+}
+],
+"root_cause_code": 9,
+"root_cause": "The server-rendered membership management workflows do not generate or validate anti-CSRF tokens, so authenticated browser requests are trusted solely because the session cookie is present.",
+"patch_locations": [
+{
+"file_path": "app.js",
+"line_start": 13,
+"line_end": 41,
+"function_name": null
+},
+{
+"file_path": "src/routes/web.js",
+"line_start": 38,
+"line_end": 43,
+"function_name": null
+},
+{
+"file_path": "src/views/course_member_new.ejs",
+"line_start": 10,
+"line_end": 29,
+"function_name": null
+},
+{
+"file_path": "src/views/course_members_list.ejs",
+"line_start": 23,
+"line_end": 35,
+"function_name": null
+}
+],
+"repair_plan": "Add a centralized CSRF mechanism for all server-rendered POST endpoints (e.g., per-session token stored server-side and embedded as a hidden field in every form). Validate the token before executing add/update/remove membership actions, and apply the same CSRF check consistently across other state-changing HTML endpoints.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-003",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.6,
+"severity_level": "high",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "Any authenticated user can update or delete arbitrary courses by supplying a different course_id. This enables unauthorized modification or destruction of other users' course resources.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/routes/web.js",
+"line_start": 34,
+"line_end": 36,
+"function_name": null,
+"code": "router.get('/courses/:course_id/edit', requireAuthPage, courseController.showEditCourse);\nrouter.post('/courses/:course_id', requireAuthPage, courseController.updateCourse);\nrouter.post('/courses/:course_id/delete', requireAuthPage, courseController.deleteCourse);",
+"reason": "Course update/delete routes require only authentication and do not enforce course ownership or staff authorization."
+},
+{
+"file_path": "src/routes/api.js",
+"line_start": 24,
+"line_end": 26,
+"function_name": null,
+"code": "router.get('/courses/:course_id', requireAuthApi, courseController.apiGetCourse);\nrouter.put('/courses/:course_id', requireAuthApi, courseController.apiUpdateCourse);\nrouter.delete('/courses/:course_id', requireAuthApi, courseController.apiDeleteCourse);",
+"reason": "API course update/delete endpoints likewise require only authentication."
+},
+{
+"file_path": "src/controllers/courseController.js",
+"line_start": 86,
+"line_end": 107,
+"function_name": "updateCourse",
+"code": "function updateCourse(req, res) {\n  const { title, description } = req.body;\n  const existing = courseRepository.findById(req.params.course_id);\n  ...\n  courseRepository.updateCourse(req.params.course_id, { title, description: description || '' });\n  return res.redirect(`/courses/${req.params.course_id}`);\n}",
+"reason": "The controller updates the course identified by attacker-controlled course_id and does not verify the current user is the course owner/creator."
+},
+{
+"file_path": "src/controllers/courseController.js",
+"line_start": 129,
+"line_end": 147,
+"function_name": "deleteCourse / apiDeleteCourse",
+"code": "function deleteCourse(req, res) {\n  const existing = courseRepository.findById(req.params.course_id);\n  ...\n  courseRepository.deleteCourse(req.params.course_id);\n  return res.redirect('/courses');\n}\n\nfunction apiDeleteCourse(req, res) {\n  const existing = courseRepository.findById(req.params.course_id);\n  ...\n  courseRepository.deleteCourse(req.params.course_id);\n  return res.json({ success: true });\n}",
+"reason": "Delete paths also lack any ownership/staff authorization checks before performing the delete by course_id."
+},
+{
+"file_path": "src/repositories/courseRepository.js",
+"line_start": 44,
+"line_end": 56,
+"function_name": "updateCourse / deleteCourse",
+"code": "function updateCourse(courseId, { title, description }) {\n  db.prepare(`\n    UPDATE courses\n    SET title = ?, description = ?\n    WHERE course_id = ?\n  `).run(title, description || '', courseId);\n  return findById(courseId);\n}\n\nfunction deleteCourse(courseId) {\n  const stmt = db.prepare(`DELETE FROM courses WHERE course_id = ?`);\n  return stmt.run(courseId);\n}",
+"reason": "Repository writes are scoped only by course_id and rely on the caller to enforce authorization."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Course mutation endpoints trust a user-supplied course_id without enforcing an ownership or course-scoped privileged role check tied to the target course.",
+"patch_locations": [
+{
+"file_path": "src/routes/web.js",
+"line_start": 34,
+"line_end": 36,
+"function_name": null
+},
+{
+"file_path": "src/routes/api.js",
+"line_start": 24,
+"line_end": 26,
+"function_name": null
+},
+{
+"file_path": "src/controllers/courseController.js",
+"line_start": 86,
+"line_end": 147,
+"function_name": "updateCourse / apiUpdateCourse / deleteCourse / apiDeleteCourse"
+},
+{
+"file_path": "src/repositories/courseRepository.js",
+"line_start": 44,
+"line_end": 56,
+"function_name": "updateCourse / deleteCourse"
+}
+],
+"repair_plan": "Before updating or deleting a course, load the course and enforce that the authenticated user is authorized for that specific course (e.g., course.created_by matches req.currentUser.user_id, or the user holds a staff/admin membership in that course). Apply the same rule for both web and API handlers, and optionally add repository methods that scope updates/deletes by (course_id, created_by) for non-admin operations.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-004",
+"vulnerability_type_code": 9,
+"vulnerability_type": "Authentication Flaw",
+"cwe_id": "CWE-798",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 9.0,
+"severity_level": "critical",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "The application seeds a built-in administrator account with hard-coded credentials. Anyone who knows or guesses these shipped credentials can authenticate as the administrator and gain privileged access.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "scripts/initDb.js",
+"line_start": 36,
+"line_end": 44,
+"function_name": "seedAdmin",
+"code": "function seedAdmin() {\n  const existing = userRepository.findByUsername('admin');\n  if (!existing) {\n    userRepository.createUser({\n      username: 'admin',\n      password: 'adminpass',\n      display_name: 'Admin'\n    });\n  }\n}",
+"reason": "A privileged admin user is created with a fixed username and password."
+},
+{
+"file_path": "app.js",
+"line_start": 10,
+"line_end": 12,
+"function_name": null,
+"code": "initDb();\nseedAdmin();",
+"reason": "The hard-coded admin seeding routine runs automatically on application startup."
+},
+{
+"file_path": "src/middleware/auth.js",
+"line_start": 38,
+"line_end": 49,
+"function_name": "requireAdminPage / requireAdminApi",
+"code": "function requireAdminPage(req, res, next) {\n  if (!req.currentUser || req.currentUser.username !== 'admin') {\n    return res.status(403).send('Forbidden');\n  }\n  next();\n}\n\nfunction requireAdminApi(req, res, next) {\n  if (!req.currentUser || req.currentUser.username !== 'admin') {\n    return res.status(403).json({ success: false, error: 'Admin access required' });\n  }\n  next();\n}",
+"reason": "Admin privilege is inferred from the fixed username 'admin', so compromising that seeded account yields administrator authorization."
+}
+],
+"root_cause_code": 10,
+"root_cause": "The application embeds and auto-provisions a privileged default credential instead of requiring secure first-run provisioning or deployment-time secrets.",
+"patch_locations": [
+{
+"file_path": "scripts/initDb.js",
+"line_start": 36,
+"line_end": 45,
+"function_name": "seedAdmin"
+},
+{
+"file_path": "app.js",
+"line_start": 10,
+"line_end": 12,
+"function_name": null
+},
+{
+"file_path": "src/middleware/auth.js",
+"line_start": 38,
+"line_end": 49,
+"function_name": "requireAdminPage / requireAdminApi"
+}
+],
+"repair_plan": "Remove hard-coded administrator credentials and stop auto-seeding a reusable privileged account. Replace it with an explicit first-run initialization flow (one-time setup token or environment-provided initial admin password) and store admin privilege as role state (e.g., users.is_admin) rather than inferring it from the fixed username 'admin'.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-005",
+"vulnerability_type_code": 10,
+"vulnerability_type": "Session Weakness",
+"cwe_id": "CWE-384",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.8,
+"severity_level": "medium",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "The application does not rotate the session identifier after login or registration. An attacker who can set or learn a victim's pre-authentication session ID can reuse that session after the victim authenticates (session fixation).",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/register"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/register"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/authController.js",
+"line_start": 7,
+"line_end": 22,
+"function_name": "register",
+"code": "const user = userRepository.createUser({ username, password, display_name });\nreq.session.userId = user.user_id;\nreturn res.redirect('/me');",
+"reason": "Registration authenticates the user into the existing session without regenerating the session identifier."
+},
+{
+"file_path": "src/controllers/authController.js",
+"line_start": 45,
+"line_end": 55,
+"function_name": "login",
+"code": "if (!authUser || !userRepository.verifyPassword(authUser, password)) {\n  return res.status(401).render('login', { error: 'Invalid credentials.' });\n}\n\nreq.session.userId = authUser.user_id;\nreturn res.redirect('/me');",
+"reason": "Login binds authentication to the existing session without rotating the session ID."
+},
+{
+"file_path": "src/controllers/authController.js",
+"line_start": 24,
+"line_end": 39,
+"function_name": "apiRegister",
+"code": "const user = userRepository.createUser({ username, password, display_name });\nreq.session.userId = user.user_id;\nreturn res.status(201).json({ success: true, user });",
+"reason": "API registration also authenticates into the existing session without regenerating the session identifier."
+},
+{
+"file_path": "src/controllers/authController.js",
+"line_start": 57,
+"line_end": 68,
+"function_name": "apiLogin",
+"code": "req.session.userId = authUser.user_id;\nconst user = userRepository.findById(authUser.user_id);\nreturn res.json({ success: true, user });",
+"reason": "API login similarly does not rotate the session identifier."
+}
+],
+"root_cause_code": 8,
+"root_cause": "Authentication state is attached to whatever session ID already exists, and the code never regenerates the session identifier when privilege level changes from unauthenticated to authenticated.",
+"patch_locations": [
+{
+"file_path": "src/controllers/authController.js",
+"line_start": 7,
+"line_end": 68,
+"function_name": "register / apiRegister / login / apiLogin"
+}
+],
+"repair_plan": "Regenerate the session identifier immediately after every successful login and registration (e.g., req.session.regenerate(...) and then set req.session.userId). Ensure the regenerated session is used for the authenticated user and keep logout destroying the session server-side.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-006",
+"vulnerability_type_code": 10,
+"vulnerability_type": "Session Weakness",
+"cwe_id": "CWE-321",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.2,
+"severity_level": "medium",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "The application falls back to a hard-coded session secret when SESSION_SECRET is not provided. Deployments that keep this default weaken session integrity and can enable session cookie forgery if the secret is known.",
+"entry_points": [
+{
+"type": "other",
+"method": "N/A",
+"route": "process.env.SESSION_SECRET fallback"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.js",
+"line_start": 21,
+"line_end": 30,
+"function_name": null,
+"code": "session({\n  secret: process.env.SESSION_SECRET || 'educollab-dev-secret',\n  resave: false,\n  saveUninitialized: false,\n  cookie: {\n    httpOnly: true\n  }\n})",
+"reason": "A fixed fallback secret is embedded in code, so deployments without an environment-provided secret use a predictable session signing key."
+}
+],
+"root_cause_code": 10,
+"root_cause": "The session signing secret is hard-coded as a default value rather than being required as a deployment-time secret.",
+"patch_locations": [
+{
+"file_path": "app.js",
+"line_start": 21,
+"line_end": 30,
+"function_name": null
+}
+],
+"repair_plan": "Require SESSION_SECRET to be provided at deployment (fail fast if missing) and remove the hard-coded fallback. Use a high-entropy secret and set secure cookie attributes (Secure, SameSite) appropriate for the deployment environment.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}
+]

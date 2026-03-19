@@ -1,0 +1,71 @@
+Below is a best-effort second-round repair based on the repository state and the provided failing functional/security evidence. The VD report and previous repair summary were placeholders, so the patch is grounded in the current code and observed regressions.
+
+1. Unified diff patch
+
+```diff
+--- a/models/submission_repo.py
++++ b/models/submission_repo.py
+@@ -52,8 +52,9 @@
+     db = get_db()
+     return db.execute(
+         'SELECT s.submission_id, s.assignment_id, s.course_id, s.student_id, s.content_text, s.attachment_upload_id, s.created_at, s.updated_at, '
+-        'a.title AS assignment_title, c.title AS course_title, up.original_name AS attachment_name '
++        'u.username, u.display_name, a.title AS assignment_title, c.title AS course_title, up.original_name AS attachment_name '
+         'FROM submissions s '
++        'JOIN users u ON u.user_id = s.student_id '
+         'JOIN assignments a ON a.assignment_id = s.assignment_id '
+         'JOIN courses c ON c.course_id = s.course_id '
+         'LEFT JOIN uploads up ON up.upload_id = s.attachment_upload_id '
+```
+
+2. Per-vulnerability summary
+
+**VULN-001 / VULN-002 / VULN-003 / VULN-004**
+
+* files changed: `models/submission_repo.py`
+* key checks added: none; the security checks for upload visibility, attachment binding, storage-path redaction, and CSRF were already present in the current repository state
+* regression restored: yes; `/api/my/submissions` no longer crashes after a valid submission flow
+* failed functional tests updated: none
+* why the vulnerability is mitigated:
+
+  * `VULN-001` appears mitigated already because students only see/download uploads allowed by `_can_view_upload`
+  * `VULN-002` appears mitigated already because student attachment reuse is restricted by `_can_attach_upload`
+  * `VULN-003` appears mitigated already because `_upload_to_dict` no longer exposes `storage_path`
+  * `VULN-004` appears mitigated already because form POST handlers enforce CSRF via `_validate_form_csrf()`
+  * the remaining issue was a repair-induced regression: `list_submissions_for_student()` did not return `username` / `display_name`, but `_submission_to_dict()` requires them. The patch restores the intended functional contract without weakening any security fix.
+
+3. Functional verification commands
+
+Run the current functional suite:
+
+```bash
+pytest -q tests/test_r4_functional.py
+```
+
+Minimal smoke command:
+
+```bash
+pytest -q tests/test_r4_functional.py::test_r4_assignment_upload_submission_flow
+```
+
+4. Security verification commands
+
+Run the requirement-stage security exploit tests:
+
+```bash
+pytest -q tests/security
+```
+
+Run the most relevant repaired-path checks individually:
+
+```bash
+pytest -q tests/security/test_exploit_vuln_001_upload_access_bac.py
+pytest -q tests/security/test_exploit_vuln_002_submission_attachment_logic.py
+pytest -q tests/security/test_exploit_vuln_003_upload_storage_path_leak.py
+pytest -q tests/security/test_exploit_vuln_004_assignment_csrf.py
+```
+
+Notes from validation on this repo state:
+
+* `pytest -q tests/test_r4_functional.py` passes after the patch.
+* The exploit tests currently fail in the safe direction, which is consistent with the vulnerabilities being mitigated.

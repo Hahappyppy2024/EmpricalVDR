@@ -1,0 +1,77 @@
+{
+"vulnerability_id": "VULN-001",
+"vulnerability_type_code": 9,
+"vulnerability_type": "Authentication Flaw",
+"cwe_id": "CWE-798",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 9.1,
+"severity_level": "critical",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "The application automatically seeds a predictable administrator account with the hard-coded credentials admin/admin123. Any external user who knows or guesses these credentials can authenticate as the administrator and gain full control over privileged workflows.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 28,
+"line_end": 30,
+"function_name": "seed_admin",
+"code": "def seed_admin():\n    db = get_db()\n    UsersRepo(db).ensure_admin(username="admin", password="admin123", display_name="Admin")",
+"reason": "The bootstrap logic creates an administrator account with a fixed username and password."
+},
+{
+"file_path": "app.py",
+"line_start": 102,
+"line_end": 105,
+"function_name": "_bootstrap",
+"code": "@app.before_request\ndef *bootstrap():\n    init_db()\n    seed_admin()",
+"reason": "The seeding routine runs automatically before requests, ensuring the default administrator account exists in normal application execution."
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 17,
+"line_end": 21,
+"function_name": "ensure_admin",
+"code": "def ensure_admin(self, username="admin", password="admin123", display_name="Admin") -> int:\n    row = self.db.execute("SELECT user_id FROM users WHERE username=?", (username,)).fetchone()\n    if row:\n        return int(row["user_id"])\n    return self.create_user(username, password, display_name)",
+"reason": "If the admin account is absent, the repository creates it directly from the hard-coded credentials instead of requiring secure initialization."
+}
+],
+"root_cause_code": 10,
+"root_cause": "The application ships with a built-in privileged account and predictable credentials, then auto-creates that account during request bootstrap instead of requiring secure first-run provisioning.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 28,
+"line_end": 30,
+"function_name": "seed_admin"
+},
+{
+"file_path": "app.py",
+"line_start": 102,
+"line_end": 105,
+"function_name": "*bootstrap"
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 17,
+"line_end": 21,
+"function_name": "ensure_admin"
+}
+],
+"repair_plan": "Remove hard-coded administrator credentials from application code. Replace the automatic seeding path with an explicit one-time setup flow that requires a deployment-time secret or environment-provided initial password, and refuse startup or privileged login until that secure initialization has been completed.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

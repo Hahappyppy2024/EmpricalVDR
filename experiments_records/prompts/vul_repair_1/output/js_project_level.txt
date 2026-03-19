@@ -1,0 +1,1252 @@
+下面是**所有被修改过的文件的完整内容**（按路径分组）。你可以直接整段复制覆盖到项目里。
+
+---
+
+## `app.js`
+
+```js
+const path = require('path');
+const express = require('express');
+const session = require('express-session');
+const methodOverride = require('method-override');
+
+const { initDb, seedAdmin } = require('./src/db');
+const webRoutes = require('./src/routes/web');
+const apiRoutes = require('./src/routes/api');
+
+const app = express();
+
+// --- Bootstrapping (FR-A1/FR-A2)
+initDb();
+seedAdmin();
+
+// --- Middleware
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'src', 'views'));
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(methodOverride('_method'));
+
+app.use(
+  session({
+    secret: 'dev-secret-change-me',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { httpOnly: true }
+  })
+);
+
+app.use('/static', express.static(path.join(__dirname, 'src', 'public')));
+
+// expose session user to views
+app.use((req, res, next) => {
+  res.locals.me = req.session.user || null;
+  next();
+});
+
+// Routes
+app.get('/', (req, res) => res.render('index'));
+app.use('/', webRoutes);
+app.use('/api', apiRoutes);
+
+// 404
+app.use((req, res) => {
+  if (req.path.startsWith('/api')) return res.status(404).json({ error: 'Not found' });
+  res.status(404).render('404');
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`EduCollab JS MVC v0 running on http://localhost:${PORT}`);
+});
+```
+
+---
+
+## `src/controllers/membershipController.js`
+
+```js
+const membershipRepo = require('../repos/membershipRepo');
+const userRepo = require('../repos/userRepo');
+
+function newMemberForm(req, res) {
+  const course_id = Number(req.params.course_id);
+  const users = userRepo.listUsers();
+  res.render('members/new', { course_id, users, roles: ['admin', 'teacher', 'student', 'assistant', 'senior-assistant'] });
+}
+
+function addMember(req, res) {
+  const course_id = Number(req.params.course_id);
+  const { user_id, role_in_course } = req.body;
+  try {
+    const member = membershipRepo.addMember({ course_id, user_id: Number(user_id), role_in_course });
+    if (req.path.startsWith('/api')) return res.status(201).json({ membership: member });
+    return res.redirect(`/courses/${course_id}/members`);
+  } catch (e) {
+    if (req.path.startsWith('/api')) return res.status(400).json({ error: 'failed to add member (maybe already added)' });
+    return res.status(400).render('members/new', {
+      course_id,
+      users: userRepo.listUsers(),
+      roles: ['admin', 'teacher', 'student', 'assistant', 'senior-assistant'],
+      error: 'Failed to add (maybe already a member)'
+    });
+  }
+}
+
+function listMembers(req, res) {
+  const course_id = Number(req.params.course_id);
+  const members = membershipRepo.listMembers(course_id);
+  if (req.path.startsWith('/api')) return res.json({ members });
+  res.render('members/list', { course_id, members, roles: ['admin', 'teacher', 'student', 'assistant', 'senior-assistant'] });
+}
+
+function updateMemberRole(req, res) {
+  const course_id = Number(req.params.course_id);
+  const membership_id = Number(req.params.membership_id);
+  const { role_in_course } = req.body;
+
+  const target = membershipRepo.getById(membership_id);
+  if (!target || Number(target.course_id) !== course_id) {
+    if (req.path.startsWith('/api')) return res.status(404).json({ error: 'membership not found' });
+    return res.status(404).render('404');
+  }
+
+  const updated = membershipRepo.updateRoleInCourse(course_id, membership_id, role_in_course);
+  if (!updated) {
+    if (req.path.startsWith('/api')) return res.status(404).json({ error: 'membership not found' });
+    return res.status(404).render('404');
+  }
+
+  if (req.path.startsWith('/api')) return res.json({ membership: updated });
+  res.redirect(`/courses/${course_id}/members`);
+}
+
+function removeMember(req, res) {
+  const course_id = Number(req.params.course_id);
+  const membership_id = Number(req.params.membership_id);
+
+  const target = membershipRepo.getById(membership_id);
+  if (!target || Number(target.course_id) !== course_id) {
+    if (req.path.startsWith('/api')) return res.status(404).json({ error: 'membership not found' });
+    return res.status(404).render('404');
+  }
+
+  membershipRepo.removeMemberInCourse(course_id, membership_id);
+
+  if (req.path.startsWith('/api')) return res.json({ ok: true });
+  res.redirect(`/courses/${course_id}/members`);
+}
+
+function myMemberships(req, res) {
+  const me = req.session.user;
+  const memberships = membershipRepo.myMemberships(me.user_id);
+  if (req.path.startsWith('/api')) return res.json({ memberships });
+  res.render('members/my', { memberships });
+}
+
+module.exports = { newMemberForm, addMember, listMembers, updateMemberRole, removeMember, myMemberships };
+```
+
+---
+
+## `src/controllers/postController.js`
+
+```js
+const postRepo = require('../repos/postRepo');
+const commentRepo = require('../repos/commentRepo');
+
+const staffRoles = new Set(['teacher', 'assistant', 'senior-assistant', 'admin']);
+
+function isCourseStaff(req) {
+  const me = req.session.user;
+  if (me && me.username === 'admin') return true;
+  const role = (req.courseMembership && req.courseMembership.role_in_course) || '';
+  return staffRoles.has(role);
+}
+
+function deny(req, res, status, apiMsg) {
+  if (req.path.startsWith('/api')) return res.status(status).json({ error: apiMsg });
+  if (status === 404) return res.status(404).render('404');
+  return res.status(status).render('403');
+}
+
+function newPostForm(req, res) {
+  res.render('posts/new', { course_id: Number(req.params.course_id) });
+}
+
+function createPost(req, res) {
+  const course_id = Number(req.params.course_id);
+  const { title, body } = req.body;
+  const me = req.session.user;
+  const post = postRepo.createPost({ course_id, author_id: me.user_id, title, body });
+  if (req.path.startsWith('/api')) return res.status(201).json({ post });
+  res.redirect(`/courses/${course_id}/posts/${post.post_id}`);
+}
+
+function listPosts(req, res) {
+  const course_id = Number(req.params.course_id);
+  const posts = postRepo.listPosts(course_id);
+  if (req.path.startsWith('/api')) return res.json({ posts });
+  res.render('posts/list', { course_id, posts });
+}
+
+function getPost(req, res) {
+  const course_id = Number(req.params.course_id);
+  const post_id = Number(req.params.post_id);
+  const post = postRepo.getById(course_id, post_id);
+  if (!post) {
+    if (req.path.startsWith('/api')) return res.status(404).json({ error: 'post not found' });
+    return res.status(404).render('404');
+  }
+  const comments = commentRepo.listComments(course_id, post_id);
+  if (req.path.startsWith('/api')) return res.json({ post, comments });
+  res.render('posts/detail', { course_id, post, comments });
+}
+
+function editPostForm(req, res) {
+  const course_id = Number(req.params.course_id);
+  const post_id = Number(req.params.post_id);
+  const post = postRepo.getById(course_id, post_id);
+  if (!post) return res.status(404).render('404');
+  res.render('posts/edit', { course_id, post });
+}
+
+function updatePost(req, res) {
+  const course_id = Number(req.params.course_id);
+  const post_id = Number(req.params.post_id);
+  const { title, body } = req.body;
+
+  const me = req.session.user;
+  const existing = postRepo.getById(course_id, post_id);
+  if (!existing) return deny(req, res, 404, 'post not found');
+
+  const staff = isCourseStaff(req);
+  if (!staff && Number(existing.author_id) !== Number(me.user_id)) {
+    return deny(req, res, 403, 'Forbidden');
+  }
+
+  const post = staff
+    ? postRepo.updatePost(course_id, post_id, { title, body })
+    : postRepo.updatePostAsAuthor(course_id, post_id, me.user_id, { title, body });
+
+  if (!post) return deny(req, res, 404, 'post not found');
+
+  if (req.path.startsWith('/api')) return res.json({ post });
+  res.redirect(`/courses/${course_id}/posts/${post_id}`);
+}
+
+function deletePost(req, res) {
+  const course_id = Number(req.params.course_id);
+  const post_id = Number(req.params.post_id);
+
+  const me = req.session.user;
+  const existing = postRepo.getById(course_id, post_id);
+  if (!existing) return deny(req, res, 404, 'post not found');
+
+  const staff = isCourseStaff(req);
+  if (!staff && Number(existing.author_id) !== Number(me.user_id)) {
+    return deny(req, res, 403, 'Forbidden');
+  }
+
+  if (staff) postRepo.deletePost(course_id, post_id);
+  else postRepo.deletePostAsAuthor(course_id, post_id, me.user_id);
+
+  if (req.path.startsWith('/api')) return res.json({ ok: true });
+  res.redirect(`/courses/${course_id}/posts`);
+}
+
+module.exports = { newPostForm, createPost, listPosts, getPost, editPostForm, updatePost, deletePost };
+```
+
+---
+
+## `src/controllers/commentController.js`
+
+```js
+const commentRepo = require('../repos/commentRepo');
+
+const staffRoles = new Set(['teacher', 'assistant', 'senior-assistant', 'admin']);
+
+function isCourseStaff(req) {
+  const me = req.session.user;
+  if (me && me.username === 'admin') return true;
+  const role = (req.courseMembership && req.courseMembership.role_in_course) || '';
+  return staffRoles.has(role);
+}
+
+function deny(req, res, status, apiMsg) {
+  if (req.path.startsWith('/api')) return res.status(status).json({ error: apiMsg });
+  if (status === 404) return res.status(404).render('404');
+  return res.status(status).render('403');
+}
+
+function createComment(req, res) {
+  const course_id = Number(req.params.course_id);
+  const post_id = Number(req.params.post_id);
+  const { body } = req.body;
+  const me = req.session.user;
+  const comment = commentRepo.createComment({ course_id, post_id, author_id: me.user_id, body });
+  if (req.path.startsWith('/api')) return res.status(201).json({ comment });
+  res.redirect(`/courses/${course_id}/posts/${post_id}`);
+}
+
+function listComments(req, res) {
+  const course_id = Number(req.params.course_id);
+  const post_id = Number(req.params.post_id);
+  const comments = commentRepo.listComments(course_id, post_id);
+  return res.json({ comments });
+}
+
+function updateComment(req, res) {
+  const course_id = Number(req.params.course_id);
+  const post_id = Number(req.params.post_id);
+  const comment_id = Number(req.params.comment_id);
+  const { body } = req.body;
+
+  const me = req.session.user;
+  const existing = commentRepo.getById(course_id, post_id, comment_id);
+  if (!existing) return deny(req, res, 404, 'comment not found');
+
+  const staff = isCourseStaff(req);
+  if (!staff && Number(existing.author_id) !== Number(me.user_id)) {
+    return deny(req, res, 403, 'Forbidden');
+  }
+
+  const comment = staff
+    ? commentRepo.updateComment(course_id, post_id, comment_id, body)
+    : commentRepo.updateCommentAsAuthor(course_id, post_id, comment_id, me.user_id, body);
+
+  if (!comment) return deny(req, res, 404, 'comment not found');
+
+  if (req.path.startsWith('/api')) return res.json({ comment });
+  res.redirect(`/courses/${course_id}/posts/${post_id}`);
+}
+
+function deleteComment(req, res) {
+  const course_id = Number(req.params.course_id);
+  const post_id = Number(req.params.post_id);
+  const comment_id = Number(req.params.comment_id);
+
+  const me = req.session.user;
+  const existing = commentRepo.getById(course_id, post_id, comment_id);
+  if (!existing) return deny(req, res, 404, 'comment not found');
+
+  const staff = isCourseStaff(req);
+  if (!staff && Number(existing.author_id) !== Number(me.user_id)) {
+    return deny(req, res, 403, 'Forbidden');
+  }
+
+  if (staff) commentRepo.deleteComment(course_id, post_id, comment_id);
+  else commentRepo.deleteCommentAsAuthor(course_id, post_id, comment_id, me.user_id);
+
+  if (req.path.startsWith('/api')) return res.json({ ok: true });
+  res.redirect(`/courses/${course_id}/posts/${post_id}`);
+}
+
+module.exports = { createComment, listComments, updateComment, deleteComment };
+```
+
+---
+
+## `src/controllers/submissionController.js`
+
+```js
+const submissionRepo = require('../repos/submissionRepo');
+
+function submitForm(req, res) {
+  const course_id = Number(req.params.course_id);
+  const assignment_id = Number(req.params.assignment_id);
+  const me = req.session.user;
+  const existing = submissionRepo.getMySubmission(course_id, assignment_id, me.user_id);
+  res.render('submissions/submit', { course_id, assignment_id, existing });
+}
+
+function createSubmission(req, res) {
+  const course_id = Number(req.params.course_id);
+  const assignment_id = Number(req.params.assignment_id);
+  const me = req.session.user;
+  const { content_text, attachment_upload_id } = req.body;
+
+  const existing = submissionRepo.getMySubmission(course_id, assignment_id, me.user_id);
+  if (existing) {
+    // if already exists, update it
+    const updated = submissionRepo.updateSubmissionForStudent(
+      course_id,
+      assignment_id,
+      existing.submission_id,
+      me.user_id,
+      { content_text, attachment_upload_id }
+    );
+    if (req.path.startsWith('/api')) return res.json({ submission: updated });
+    return res.redirect(`/courses/${course_id}/assignments/${assignment_id}`);
+  }
+
+  const s = submissionRepo.createSubmission({
+    assignment_id,
+    course_id,
+    student_id: me.user_id,
+    content_text: content_text || '',
+    attachment_upload_id
+  });
+  if (req.path.startsWith('/api')) return res.status(201).json({ submission: s });
+  res.redirect(`/courses/${course_id}/assignments/${assignment_id}`);
+}
+
+function updateMySubmission(req, res) {
+  const course_id = Number(req.params.course_id);
+  const assignment_id = Number(req.params.assignment_id);
+  const submission_id = Number(req.params.submission_id);
+  const { content_text, attachment_upload_id } = req.body;
+
+  const me = req.session.user;
+  const mine = submissionRepo.getMySubmission(course_id, assignment_id, me.user_id);
+  if (!mine || Number(mine.submission_id) !== submission_id) {
+    if (req.path.startsWith('/api')) return res.status(404).json({ error: 'submission not found' });
+    return res.status(404).render('404');
+  }
+
+  const submission = submissionRepo.updateSubmissionForStudent(
+    course_id,
+    assignment_id,
+    submission_id,
+    me.user_id,
+    { content_text, attachment_upload_id }
+  );
+
+  if (!submission) {
+    if (req.path.startsWith('/api')) return res.status(404).json({ error: 'submission not found' });
+    return res.status(404).render('404');
+  }
+
+  if (req.path.startsWith('/api')) return res.json({ submission });
+  res.redirect(`/courses/${course_id}/assignments/${assignment_id}`);
+}
+
+function listMySubmissions(req, res) {
+  const me = req.session.user;
+  const submissions = submissionRepo.listMySubmissions(me.user_id);
+  if (req.path.startsWith('/api')) return res.json({ submissions });
+  res.render('submissions/my', { submissions });
+}
+
+function listForAssignment(req, res) {
+  const course_id = Number(req.params.course_id);
+  const assignment_id = Number(req.params.assignment_id);
+  const submissions = submissionRepo.listForAssignment(course_id, assignment_id);
+  if (req.path.startsWith('/api')) return res.json({ submissions });
+  res.render('submissions/list', { course_id, assignment_id, submissions });
+}
+
+module.exports = {
+  submitForm,
+  createSubmission,
+  updateMySubmission,
+  listMySubmissions,
+  listForAssignment
+};
+```
+
+---
+
+## `src/controllers/takeQuizController.js`
+
+```js
+const quizRepo = require('../repos/quizRepo');
+const quizAttemptRepo = require('../repos/quizAttemptRepo');
+const questionRepo = require('../repos/questionRepo');
+
+function deny(req, res, status, apiMsg) {
+  if (req.path.startsWith('/api')) return res.status(status).json({ error: apiMsg });
+  if (status === 404) return res.status(404).render('404');
+  return res.status(status).render('403');
+}
+
+function withinQuizWindow(quiz) {
+  if (!quiz) return false;
+  const now = Date.now();
+  const openAt = quiz.open_at ? Date.parse(quiz.open_at) : null;
+  const dueAt = quiz.due_at ? Date.parse(quiz.due_at) : null;
+  if (openAt && Number.isFinite(openAt) && now < openAt) return false;
+  if (dueAt && Number.isFinite(dueAt) && now > dueAt) return false;
+  return true;
+}
+
+function startAttempt(req, res) {
+  const course_id = Number(req.params.course_id);
+  const quiz_id = Number(req.params.quiz_id);
+  const me = req.session.user;
+
+  const quiz = quizRepo.getById(course_id, quiz_id);
+  if (!quiz) return deny(req, res, 404, 'quiz not found');
+  if (!withinQuizWindow(quiz)) return deny(req, res, 403, 'quiz is not open');
+
+  const attempt = quizAttemptRepo.startAttempt({ quiz_id, course_id, student_id: me.user_id });
+  if (req.path.startsWith('/api')) return res.status(201).json({ attempt });
+  res.redirect(`/courses/${course_id}/quizzes/${quiz_id}/attempts/${attempt.attempt_id}`);
+}
+
+function attemptPage(req, res) {
+  const course_id = Number(req.params.course_id);
+  const quiz_id = Number(req.params.quiz_id);
+  const attempt_id = Number(req.params.attempt_id);
+  const me = req.session.user;
+
+  const quiz = quizRepo.getById(course_id, quiz_id);
+  if (!quiz) return deny(req, res, 404, 'quiz not found');
+
+  const attempt = quizAttemptRepo.getAttemptForStudent(attempt_id, course_id, quiz_id, me.user_id);
+  if (!attempt) return deny(req, res, 404, 'attempt not found');
+
+  const quizQuestions = quizRepo.getQuizQuestions(quiz_id);
+  const answers = quizAttemptRepo.listAnswers(attempt_id);
+  const answerMap = new Map(answers.map(a => [a.question_id, a.answer_json]));
+
+  // load question detail for options display (simple)
+  const questions = quizQuestions.map(qq => {
+    const q = questionRepo.getById(course_id, qq.question_id);
+    return { ...qq, ...q, existing_answer: answerMap.get(qq.question_id) || '' };
+  });
+
+  res.render('quizzes/attempt', { course_id, quiz_id, quiz, attempt, questions });
+}
+
+function answerQuestion(req, res) {
+  const course_id = Number(req.params.course_id);
+  const quiz_id = Number(req.params.quiz_id);
+  const attempt_id = Number(req.params.attempt_id);
+  const { question_id, answer_json } = req.body;
+
+  const me = req.session.user;
+  const quiz = quizRepo.getById(course_id, quiz_id);
+  if (!quiz) return deny(req, res, 404, 'quiz not found');
+  if (!withinQuizWindow(quiz)) return deny(req, res, 403, 'quiz is not open');
+
+  const qid = Number(question_id);
+  if (!qid || !quizRepo.quizHasQuestion(quiz_id, qid)) {
+    return deny(req, res, 404, 'question not found');
+  }
+
+  const attempt = quizAttemptRepo.getAttemptForStudent(attempt_id, course_id, quiz_id, me.user_id);
+  if (!attempt) return deny(req, res, 404, 'attempt not found');
+  if (attempt.submitted_at) return deny(req, res, 400, 'attempt already submitted');
+
+  const ans = quizAttemptRepo.upsertAnswerForStudent({
+    attempt_id,
+    course_id,
+    quiz_id,
+    student_id: me.user_id,
+    question_id: qid,
+    answer_json: answer_json || ''
+  });
+
+  if (!ans) return deny(req, res, 400, 'cannot record answer');
+
+  if (req.path.startsWith('/api')) return res.status(201).json({ answer: ans });
+  res.redirect(`/courses/${course_id}/quizzes/${quiz_id}/attempts/${attempt_id}`);
+}
+
+function submitAttempt(req, res) {
+  const course_id = Number(req.params.course_id);
+  const quiz_id = Number(req.params.quiz_id);
+  const attempt_id = Number(req.params.attempt_id);
+  const me = req.session.user;
+
+  const quiz = quizRepo.getById(course_id, quiz_id);
+  if (!quiz) return deny(req, res, 404, 'quiz not found');
+  if (!withinQuizWindow(quiz)) return deny(req, res, 403, 'quiz is not open');
+
+  const attempt = quizAttemptRepo.submitAttemptForStudent(attempt_id, course_id, quiz_id, me.user_id);
+  if (!attempt) return deny(req, res, 404, 'attempt not found');
+
+  if (req.path.startsWith('/api')) return res.json({ attempt });
+  res.redirect(`/courses/${course_id}/quizzes/${quiz_id}`);
+}
+
+function viewMyAttempts(req, res) {
+  const me = req.session.user;
+  const attempts = quizAttemptRepo.listMyAttempts(me.user_id);
+  if (req.path.startsWith('/api')) return res.json({ attempts });
+  res.render('quizzes/my_attempts', { attempts });
+}
+
+module.exports = { startAttempt, attemptPage, answerQuestion, submitAttempt, viewMyAttempts };
+```
+
+---
+
+## `src/controllers/uploadController.js`
+
+```js
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+const uploadRepo = require('../repos/uploadRepo');
+
+const storageDir = path.join(__dirname, '..', '..', 'data', 'uploads');
+fs.mkdirSync(storageDir, { recursive: true });
+
+const allowedExt = new Set(['.txt', '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.zip', '.csv', '.md']);
+
+function safeBasename(name) {
+  const base = path.basename(String(name || ''));
+  return base.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 200) || 'file';
+}
+
+function isWithin(child, parent) {
+  const rel = path.relative(parent, child);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, storageDir),
+  filename: (req, file, cb) => {
+    const original = safeBasename(file.originalname);
+    const safe = `${Date.now()}-${Math.random().toString(16).slice(2)}-${original}`;
+    cb(null, safe);
+  }
+});
+
+const uploader = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    const original = safeBasename(file.originalname);
+    const ext = path.extname(original).toLowerCase();
+    if (!allowedExt.has(ext)) return cb(null, false);
+    return cb(null, true);
+  }
+});
+
+function newUploadForm(req, res) {
+  res.render('uploads/new', { course_id: Number(req.params.course_id) });
+}
+
+function uploadFile(req, res) {
+  const course_id = Number(req.params.course_id);
+  const me = req.session.user;
+  if (!req.file) {
+    if (req.path.startsWith('/api')) {
+      return res.status(400).json({ error: 'file required or type not allowed' });
+    }
+    return res.status(400).render('uploads/new', { course_id, error: 'File required (or type not allowed)' });
+  }
+  const rec = uploadRepo.createUpload({
+    course_id,
+    uploaded_by: me.user_id,
+    original_name: safeBasename(req.file.originalname),
+    storage_path: req.file.filename
+  });
+  if (req.path.startsWith('/api')) return res.status(201).json({ upload: rec });
+  res.redirect(`/courses/${course_id}/uploads`);
+}
+
+function listUploads(req, res) {
+  const course_id = Number(req.params.course_id);
+  const uploads = uploadRepo.listUploads(course_id);
+  if (req.path.startsWith('/api')) return res.json({ uploads });
+  res.render('uploads/list', { course_id, uploads });
+}
+
+function downloadUpload(req, res) {
+  const course_id = Number(req.params.course_id);
+  const upload_id = Number(req.params.upload_id);
+  const up = uploadRepo.getById(course_id, upload_id);
+  if (!up) {
+    if (req.path.startsWith('/api')) return res.status(404).json({ error: 'upload not found' });
+    return res.status(404).render('404');
+  }
+
+  const abs = path.resolve(storageDir, up.storage_path);
+  if (!isWithin(abs, storageDir)) {
+    if (req.path.startsWith('/api')) return res.status(404).json({ error: 'upload not found' });
+    return res.status(404).render('404');
+  }
+
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Type', 'application/octet-stream');
+  return res.download(abs, up.original_name);
+}
+
+function deleteUpload(req, res) {
+  const course_id = Number(req.params.course_id);
+  const upload_id = Number(req.params.upload_id);
+  const up = uploadRepo.getById(course_id, upload_id);
+  if (up) {
+    const abs = path.resolve(storageDir, up.storage_path);
+    if (isWithin(abs, storageDir)) {
+      try {
+        fs.unlinkSync(abs);
+      } catch (e) {}
+    }
+    uploadRepo.deleteUpload(course_id, upload_id);
+  }
+  if (req.path.startsWith('/api')) return res.json({ ok: true });
+  res.redirect(`/courses/${course_id}/uploads`);
+}
+
+module.exports = { uploader, newUploadForm, uploadFile, listUploads, downloadUpload, deleteUpload };
+```
+
+---
+
+## `src/repos/membershipRepo.js`
+
+```js
+const { db, nowIso } = require('../db');
+
+function addMember({ course_id, user_id, role_in_course }) {
+  const info = db
+    .prepare('INSERT INTO memberships (course_id, user_id, role_in_course, created_at) VALUES (?,?,?,?)')
+    .run(course_id, user_id, role_in_course, nowIso());
+  return getById(info.lastInsertRowid);
+}
+
+function getById(membership_id) {
+  return db.prepare('SELECT * FROM memberships WHERE membership_id=?').get(membership_id);
+}
+
+function getByCourseAndUser(course_id, user_id) {
+  return db.prepare('SELECT * FROM memberships WHERE course_id=? AND user_id=?').get(course_id, user_id);
+}
+
+function listMembers(course_id) {
+  return db
+    .prepare(
+      `
+    SELECT m.*, u.username, u.display_name
+    FROM memberships m
+    JOIN users u ON u.user_id = m.user_id
+    WHERE m.course_id=?
+    ORDER BY m.membership_id ASC
+  `
+    )
+    .all(course_id);
+}
+
+function updateRole(membership_id, role_in_course) {
+  db.prepare('UPDATE memberships SET role_in_course=? WHERE membership_id=?').run(role_in_course, membership_id);
+  return getById(membership_id);
+}
+
+function updateRoleInCourse(course_id, membership_id, role_in_course) {
+  const info = db
+    .prepare('UPDATE memberships SET role_in_course=? WHERE course_id=? AND membership_id=?')
+    .run(role_in_course, course_id, membership_id);
+  if (!info || info.changes === 0) return null;
+  return getById(membership_id);
+}
+
+function removeMember(membership_id) {
+  db.prepare('DELETE FROM memberships WHERE membership_id=?').run(membership_id);
+}
+
+function removeMemberInCourse(course_id, membership_id) {
+  const info = db
+    .prepare('DELETE FROM memberships WHERE course_id=? AND membership_id=?')
+    .run(course_id, membership_id);
+  return !!(info && info.changes > 0);
+}
+
+function myMemberships(user_id) {
+  return db
+    .prepare(
+      `
+    SELECT m.*, c.title as course_title
+    FROM memberships m
+    JOIN courses c ON c.course_id = m.course_id
+    WHERE m.user_id=?
+    ORDER BY m.membership_id DESC
+  `
+    )
+    .all(user_id);
+}
+
+module.exports = {
+  addMember,
+  getById,
+  getByCourseAndUser,
+  listMembers,
+  updateRole,
+  updateRoleInCourse,
+  removeMember,
+  removeMemberInCourse,
+  myMemberships
+};
+```
+
+---
+
+## `src/repos/postRepo.js`
+
+```js
+const { db, nowIso } = require('../db');
+
+function createPost({ course_id, author_id, title, body }) {
+  const ts = nowIso();
+  const info = db
+    .prepare('INSERT INTO posts (course_id, author_id, title, body, created_at, updated_at) VALUES (?,?,?,?,?,?)')
+    .run(course_id, author_id, title, body, ts, ts);
+  return getById(course_id, info.lastInsertRowid);
+}
+
+function listPosts(course_id) {
+  return db
+    .prepare(
+      `
+    SELECT p.*, u.username as author_username
+    FROM posts p
+    JOIN users u ON u.user_id = p.author_id
+    WHERE p.course_id=?
+    ORDER BY p.post_id DESC
+  `
+    )
+    .all(course_id);
+}
+
+function getById(course_id, post_id) {
+  return db
+    .prepare(
+      `
+    SELECT p.*, u.username as author_username
+    FROM posts p
+    JOIN users u ON u.user_id = p.author_id
+    WHERE p.course_id=? AND p.post_id=?
+  `
+    )
+    .get(course_id, post_id);
+}
+
+function updatePost(course_id, post_id, { title, body }) {
+  db.prepare('UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?').run(
+    title,
+    body,
+    nowIso(),
+    course_id,
+    post_id
+  );
+  return getById(course_id, post_id);
+}
+
+function updatePostAsAuthor(course_id, post_id, author_id, { title, body }) {
+  const info = db
+    .prepare('UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=? AND author_id=?')
+    .run(title, body, nowIso(), course_id, post_id, author_id);
+  if (!info || info.changes === 0) return null;
+  return getById(course_id, post_id);
+}
+
+function deletePost(course_id, post_id) {
+  db.prepare('DELETE FROM posts WHERE course_id=? AND post_id=?').run(course_id, post_id);
+}
+
+function deletePostAsAuthor(course_id, post_id, author_id) {
+  const info = db
+    .prepare('DELETE FROM posts WHERE course_id=? AND post_id=? AND author_id=?')
+    .run(course_id, post_id, author_id);
+  return !!(info && info.changes > 0);
+}
+
+function searchPosts(course_id, keyword) {
+  const k = `%${keyword}%`;
+  return db
+    .prepare(
+      `
+    SELECT p.*, u.username as author_username
+    FROM posts p
+    JOIN users u ON u.user_id = p.author_id
+    WHERE p.course_id=? AND (p.title LIKE ? OR p.body LIKE ?)
+    ORDER BY p.post_id DESC
+  `
+    )
+    .all(course_id, k, k);
+}
+
+module.exports = {
+  createPost,
+  listPosts,
+  getById,
+  updatePost,
+  updatePostAsAuthor,
+  deletePost,
+  deletePostAsAuthor,
+  searchPosts
+};
+```
+
+---
+
+## `src/repos/commentRepo.js`
+
+```js
+const { db, nowIso } = require('../db');
+
+function createComment({ course_id, post_id, author_id, body }) {
+  const ts = nowIso();
+  const info = db
+    .prepare('INSERT INTO comments (post_id, course_id, author_id, body, created_at, updated_at) VALUES (?,?,?,?,?,?)')
+    .run(post_id, course_id, author_id, body, ts, ts);
+  return getById(course_id, post_id, info.lastInsertRowid);
+}
+
+function listComments(course_id, post_id) {
+  return db
+    .prepare(
+      `
+    SELECT c.*, u.username as author_username
+    FROM comments c
+    JOIN users u ON u.user_id = c.author_id
+    WHERE c.course_id=? AND c.post_id=?
+    ORDER BY c.comment_id ASC
+  `
+    )
+    .all(course_id, post_id);
+}
+
+function getById(course_id, post_id, comment_id) {
+  return db
+    .prepare(
+      `
+    SELECT c.*, u.username as author_username
+    FROM comments c
+    JOIN users u ON u.user_id = c.author_id
+    WHERE c.course_id=? AND c.post_id=? AND c.comment_id=?
+  `
+    )
+    .get(course_id, post_id, comment_id);
+}
+
+function updateComment(course_id, post_id, comment_id, body) {
+  db.prepare('UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?').run(
+    body,
+    nowIso(),
+    course_id,
+    post_id,
+    comment_id
+  );
+  return getById(course_id, post_id, comment_id);
+}
+
+function updateCommentAsAuthor(course_id, post_id, comment_id, author_id, body) {
+  const info = db
+    .prepare('UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=? AND author_id=?')
+    .run(body, nowIso(), course_id, post_id, comment_id, author_id);
+  if (!info || info.changes === 0) return null;
+  return getById(course_id, post_id, comment_id);
+}
+
+function deleteComment(course_id, post_id, comment_id) {
+  db.prepare('DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?').run(course_id, post_id, comment_id);
+}
+
+function deleteCommentAsAuthor(course_id, post_id, comment_id, author_id) {
+  const info = db
+    .prepare('DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=? AND author_id=?')
+    .run(course_id, post_id, comment_id, author_id);
+  return !!(info && info.changes > 0);
+}
+
+function searchComments(course_id, keyword) {
+  const k = `%${keyword}%`;
+  return db
+    .prepare(
+      `
+    SELECT c.*, u.username as author_username
+    FROM comments c
+    JOIN users u ON u.user_id = c.author_id
+    WHERE c.course_id=? AND c.body LIKE ?
+    ORDER BY c.comment_id DESC
+  `
+    )
+    .all(course_id, k);
+}
+
+module.exports = {
+  createComment,
+  listComments,
+  getById,
+  updateComment,
+  updateCommentAsAuthor,
+  deleteComment,
+  deleteCommentAsAuthor,
+  searchComments
+};
+```
+
+---
+
+## `src/repos/submissionRepo.js`
+
+```js
+const { db, nowIso } = require('../db');
+
+function createSubmission({ assignment_id, course_id, student_id, content_text, attachment_upload_id }) {
+  const ts = nowIso();
+  const info = db
+    .prepare(
+      'INSERT INTO submissions (assignment_id, course_id, student_id, content_text, attachment_upload_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?)'
+    )
+    .run(assignment_id, course_id, student_id, content_text, attachment_upload_id || null, ts, ts);
+  return getById(course_id, assignment_id, info.lastInsertRowid);
+}
+
+function getById(course_id, assignment_id, submission_id) {
+  return db
+    .prepare(
+      `
+    SELECT s.*, u.username as student_username
+    FROM submissions s
+    JOIN users u ON u.user_id = s.student_id
+    WHERE s.course_id=? AND s.assignment_id=? AND s.submission_id=?
+  `
+    )
+    .get(course_id, assignment_id, submission_id);
+}
+
+function getMySubmission(course_id, assignment_id, student_id) {
+  return db
+    .prepare(
+      `
+    SELECT s.*
+    FROM submissions s
+    WHERE s.course_id=? AND s.assignment_id=? AND s.student_id=?
+  `
+    )
+    .get(course_id, assignment_id, student_id);
+}
+
+function updateSubmission(course_id, assignment_id, submission_id, { content_text, attachment_upload_id }) {
+  db.prepare(
+    'UPDATE submissions SET content_text=?, attachment_upload_id=?, updated_at=? WHERE course_id=? AND assignment_id=? AND submission_id=?'
+  ).run(content_text, attachment_upload_id || null, nowIso(), course_id, assignment_id, submission_id);
+  return getById(course_id, assignment_id, submission_id);
+}
+
+function updateSubmissionForStudent(course_id, assignment_id, submission_id, student_id, { content_text, attachment_upload_id }) {
+  const info = db.prepare(
+    'UPDATE submissions SET content_text=?, attachment_upload_id=?, updated_at=? WHERE course_id=? AND assignment_id=? AND submission_id=? AND student_id=?'
+  ).run(content_text, attachment_upload_id || null, nowIso(), course_id, assignment_id, submission_id, student_id);
+  if (!info || info.changes === 0) return null;
+  return getById(course_id, assignment_id, submission_id);
+}
+
+function listMySubmissions(student_id) {
+  return db
+    .prepare(
+      `
+    SELECT s.*, a.title as assignment_title, c.title as course_title
+    FROM submissions s
+    JOIN assignments a ON a.assignment_id = s.assignment_id
+    JOIN courses c ON c.course_id = s.course_id
+    WHERE s.student_id=?
+    ORDER BY s.updated_at DESC
+  `
+    )
+    .all(student_id);
+}
+
+function listForAssignment(course_id, assignment_id) {
+  return db
+    .prepare(
+      `
+    SELECT s.*, u.username as student_username
+    FROM submissions s
+    JOIN users u ON u.user_id = s.student_id
+    WHERE s.course_id=? AND s.assignment_id=?
+    ORDER BY s.updated_at DESC
+  `
+    )
+    .all(course_id, assignment_id);
+}
+
+module.exports = {
+  createSubmission,
+  getById,
+  getMySubmission,
+  updateSubmission,
+  updateSubmissionForStudent,
+  listMySubmissions,
+  listForAssignment
+};
+```
+
+---
+
+## `src/repos/quizRepo.js`
+
+```js
+const { db, nowIso } = require('../db');
+
+function createQuiz({ course_id, created_by, title, description, open_at, due_at }) {
+  const ts = nowIso();
+  const info = db
+    .prepare(
+      'INSERT INTO quizzes (course_id, created_by, title, description, open_at, due_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)'
+    )
+    .run(course_id, created_by, title, description, open_at, due_at, ts, ts);
+  return getById(course_id, info.lastInsertRowid);
+}
+
+function listQuizzes(course_id) {
+  return db
+    .prepare(
+      `
+    SELECT qz.*, u.username as created_by_username
+    FROM quizzes qz
+    JOIN users u ON u.user_id = qz.created_by
+    WHERE qz.course_id=?
+    ORDER BY qz.quiz_id DESC
+  `
+    )
+    .all(course_id);
+}
+
+function getById(course_id, quiz_id) {
+  return db.prepare('SELECT * FROM quizzes WHERE course_id=? AND quiz_id=?').get(course_id, quiz_id);
+}
+
+function updateQuiz(course_id, quiz_id, { title, description, open_at, due_at }) {
+  db.prepare('UPDATE quizzes SET title=?, description=?, open_at=?, due_at=?, updated_at=? WHERE course_id=? AND quiz_id=?')
+    .run(title, description, open_at, due_at, nowIso(), course_id, quiz_id);
+  return getById(course_id, quiz_id);
+}
+
+function deleteQuiz(course_id, quiz_id) {
+  db.prepare('DELETE FROM quizzes WHERE course_id=? AND quiz_id=?').run(course_id, quiz_id);
+}
+
+function addQuizQuestion({ quiz_id, question_id, points, position }) {
+  db.prepare('INSERT OR REPLACE INTO quiz_questions (quiz_id, question_id, points, position) VALUES (?,?,?,?)').run(
+    quiz_id,
+    question_id,
+    points,
+    position
+  );
+  return getQuizQuestions(quiz_id);
+}
+
+function removeQuizQuestion(quiz_id, question_id) {
+  db.prepare('DELETE FROM quiz_questions WHERE quiz_id=? AND question_id=?').run(quiz_id, question_id);
+}
+
+function getQuizQuestions(quiz_id) {
+  return db
+    .prepare(
+      `
+    SELECT qq.*, q.prompt, q.qtype
+    FROM quiz_questions qq
+    JOIN questions q ON q.question_id = qq.question_id
+    WHERE qq.quiz_id=?
+    ORDER BY qq.position ASC
+  `
+    )
+    .all(quiz_id);
+}
+
+function quizHasQuestion(quiz_id, question_id) {
+  const row = db.prepare('SELECT 1 as ok FROM quiz_questions WHERE quiz_id=? AND question_id=?').get(quiz_id, question_id);
+  return !!row;
+}
+
+module.exports = {
+  createQuiz,
+  listQuizzes,
+  getById,
+  updateQuiz,
+  deleteQuiz,
+  addQuizQuestion,
+  removeQuizQuestion,
+  getQuizQuestions,
+  quizHasQuestion
+};
+```
+
+---
+
+## `src/repos/quizAttemptRepo.js`
+
+```js
+const { db, nowIso } = require('../db');
+
+function startAttempt({ quiz_id, course_id, student_id }) {
+  const info = db
+    .prepare(
+      'INSERT INTO quiz_attempts (quiz_id, course_id, student_id, started_at, submitted_at) VALUES (?,?,?,?,NULL)'
+    )
+    .run(quiz_id, course_id, student_id, nowIso());
+  return getAttempt(info.lastInsertRowid);
+}
+
+function getAttempt(attempt_id) {
+  return db.prepare('SELECT * FROM quiz_attempts WHERE attempt_id=?').get(attempt_id);
+}
+
+function getAttemptForStudent(attempt_id, course_id, quiz_id, student_id) {
+  return db
+    .prepare('SELECT * FROM quiz_attempts WHERE attempt_id=? AND course_id=? AND quiz_id=? AND student_id=?')
+    .get(attempt_id, course_id, quiz_id, student_id);
+}
+
+function listMyAttempts(student_id) {
+  return db
+    .prepare(
+      `
+    SELECT a.*, qz.title as quiz_title, c.title as course_title
+    FROM quiz_attempts a
+    JOIN quizzes qz ON qz.quiz_id = a.quiz_id
+    JOIN courses c ON c.course_id = a.course_id
+    WHERE a.student_id=?
+    ORDER BY a.attempt_id DESC
+  `
+    )
+    .all(student_id);
+}
+
+function upsertAnswer({ attempt_id, question_id, answer_json }) {
+  db.prepare(
+    'INSERT INTO quiz_answers (attempt_id, question_id, answer_json, created_at) VALUES (?,?,?,?)\n     ON CONFLICT(attempt_id, question_id) DO UPDATE SET answer_json=excluded.answer_json'
+  ).run(attempt_id, question_id, answer_json, nowIso());
+
+  return db.prepare('SELECT * FROM quiz_answers WHERE attempt_id=? AND question_id=?').get(attempt_id, question_id);
+}
+
+function upsertAnswerForStudent({ attempt_id, course_id, quiz_id, student_id, question_id, answer_json }) {
+  const attempt = getAttemptForStudent(attempt_id, course_id, quiz_id, student_id);
+  if (!attempt) return null;
+  if (attempt.submitted_at) return null;
+  return upsertAnswer({ attempt_id, question_id, answer_json });
+}
+
+function submitAttempt(attempt_id) {
+  db.prepare('UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?').run(nowIso(), attempt_id);
+  return getAttempt(attempt_id);
+}
+
+function submitAttemptForStudent(attempt_id, course_id, quiz_id, student_id) {
+  const attempt = getAttemptForStudent(attempt_id, course_id, quiz_id, student_id);
+  if (!attempt) return null;
+  if (attempt.submitted_at) return attempt;
+
+  db.prepare('UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?').run(nowIso(), attempt_id);
+  return getAttempt(attempt_id);
+}
+
+function listAnswers(attempt_id) {
+  return db.prepare('SELECT * FROM quiz_answers WHERE attempt_id=?').all(attempt_id);
+}
+
+module.exports = {
+  startAttempt,
+  getAttempt,
+  getAttemptForStudent,
+  listMyAttempts,
+  upsertAnswer,
+  upsertAnswerForStudent,
+  submitAttempt,
+  submitAttemptForStudent,
+  listAnswers
+};
+```
+
+---
+
+如果你还想要我把这些**改过的文件打包成一个 zip**（方便一次性替换），你把你现在的目标目录结构确认一下（项目根路径名），我可以直接给你生成一个可下载的 zip。

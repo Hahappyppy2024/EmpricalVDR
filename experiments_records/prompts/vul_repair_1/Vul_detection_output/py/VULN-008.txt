@@ -1,0 +1,63 @@
+{
+"vulnerability_id": "VULN-008",
+"vulnerability_type_code": 4,
+"vulnerability_type": "Path Traversal",
+"cwe_id": "CWE-22",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.4,
+"severity_level": "high",
+"confidence_score": 89,
+"confidence_level": "high",
+"summary": "The upload handlers build storage paths directly from the untrusted original filename. A staff user can supply path separators such as ../ in the filename to write files outside the intended course upload directory.",
+"entry_points": [
+{
+"type": "file upload handler",
+"method": "POST",
+"route": "/api/courses/:course_id/uploads"
+},
+{
+"type": "file upload handler",
+"method": "POST",
+"route": "/courses/:course_id/uploads"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 903,
+"line_end": 912,
+"function_name": "upload_create",
+"code": "def upload_create(course_id):\n    ...\n    folder = ensure_upload_dir(course_id)\n    token = uuid.uuid4().hex\n    storage_path = os.path.join(folder, f"{token}*{f.filename}")\n    f.save(storage_path)\n    UploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)",
+"reason": "The server concatenates the client-controlled filename into a filesystem path and saves the file there without sanitizing separators or enforcing containment under UPLOAD_ROOT."
+},
+{
+"file_path": "app.py",
+"line_start": 918,
+"line_end": 927,
+"function_name": "api_upload_create",
+"code": "def api_upload_create(course_id):\n    ...\n    folder = ensure_upload_dir(course_id)\n    token = uuid.uuid4().hex\n    storage_path = os.path.join(folder, f"{token}*{f.filename}")\n    f.save(storage_path)\n    upload_id = UploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)",
+"reason": "The JSON API upload path repeats the same unsafe filename-to-path construction."
+}
+],
+"root_cause_code": 6,
+"root_cause": "Untrusted filenames are used directly in filesystem path construction, and the code does not normalize, sanitize, or verify that the final path remains inside the intended upload directory.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 903,
+"line_end": 912,
+"function_name": "upload_create"
+},
+{
+"file_path": "app.py",
+"line_start": 918,
+"line_end": 927,
+"function_name": "api_upload_create"
+}
+],
+"repair_plan": "Derive a safe server-side filename independently of the client-supplied name, such as a generated UUID plus a validated extension. Strip path separators from user input, normalize the target path, and verify that the resolved path is still under the expected course upload directory before saving. Store the original filename only as metadata for download presentation.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

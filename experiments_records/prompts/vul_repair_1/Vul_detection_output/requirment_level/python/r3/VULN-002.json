@@ -1,0 +1,87 @@
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.6,
+  "severity_level": "high",
+  "confidence_score": 98,
+  "confidence_level": "high",
+  "summary": "Any member of a course can edit or delete another member's comment by supplying that comment_id. The application verifies only course membership and never checks that the caller owns the target comment or has an explicitly authorized moderation role.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "DELETE",
+      "route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "controllers/post_controller.py",
+      "line_start": 284,
+      "line_end": 333,
+      "function_name": "update_comment_submit / api_update_comment / delete_comment_submit / api_delete_comment",
+      "code": "@post_bp.route('/courses/<int:course_id>/posts/<int:post_id>/comments/<int:comment_id>', methods=['POST'])\n@login_required\n@require_course_member\ndef update_comment_submit(course_id, post_id, comment_id):\n    ...\n    if body:\n        update_comment(course_id, post_id, comment_id, body)\n\n@post_bp.route('/api/courses/<int:course_id>/posts/<int:post_id>/comments/<int:comment_id>', methods=['PUT'])\n@login_required\n@require_course_member\ndef api_update_comment(course_id, post_id, comment_id):\n    ...\n    updated = update_comment(course_id, post_id, comment_id, body)\n\n@post_bp.route('/courses/<int:course_id>/posts/<int:post_id>/comments/<int:comment_id>/delete', methods=['POST'])\n@login_required\n@require_course_member\ndef delete_comment_submit(course_id, post_id, comment_id):\n    ...\n    delete_comment(course_id, post_id, comment_id)\n\n@post_bp.route('/api/courses/<int:course_id>/posts/<int:post_id>/comments/<int:comment_id>', methods=['DELETE'])\n@login_required\n@require_course_member\ndef api_delete_comment(course_id, post_id, comment_id):\n    ...\n    delete_comment(course_id, post_id, comment_id)",
+      "reason": "All comment mutation paths require only course membership, then directly update or delete the user-supplied comment_id without any ownership or moderation authorization check."
+    },
+    {
+      "file_path": "models/comment_repo.py",
+      "line_start": 39,
+      "line_end": 57,
+      "function_name": "update_comment / delete_comment",
+      "code": "def update_comment(course_id, post_id, comment_id, body):\n    db = get_db()\n    db.execute(\n        'UPDATE comments SET body = ?, updated_at = CURRENT_TIMESTAMP '\n        'WHERE course_id = ? AND post_id = ? AND comment_id = ?',\n        (body, course_id, post_id, comment_id),\n    )\n    db.commit()\n    return get_comment_by_id(course_id, post_id, comment_id)\n\n\ndef delete_comment(course_id, post_id, comment_id):\n    db = get_db()\n    db.execute(\n        'DELETE FROM comments WHERE course_id = ? AND post_id = ? AND comment_id = ?',\n        (course_id, post_id, comment_id),\n    )",
+      "reason": "The write operations are scoped only by course_id, post_id, and comment_id, with no author_id or equivalent ownership constraint."
+    },
+    {
+      "file_path": "templates/posts/detail.html",
+      "line_start": 25,
+      "line_end": 37,
+      "function_name": null,
+      "code": "<h2>Comments</h2>\n{% for comment in comments %}\n<div class=\"card\">\n  <p>{{ comment['body'] }}</p>\n  <p>By {{ comment['display_name'] }} at {{ comment['created_at'] }}</p>\n  <form method=\"post\" action=\"{{ url_for('posts.update_comment_submit', course_id=course['course_id'], post_id=post['post_id'], comment_id=comment['comment_id']) }}\">\n    <label for=\"comment-{{ comment['comment_id'] }}\">Edit comment</label>\n    <textarea id=\"comment-{{ comment['comment_id'] }}\" name=\"body\" rows=\"3\">{{ comment['body'] }}</textarea>\n    <button type=\"submit\">Update Comment</button>\n  </form>\n  <form method=\"post\" action=\"{{ url_for('posts.delete_comment_submit', course_id=course['course_id'], post_id=post['post_id'], comment_id=comment['comment_id']) }}\">\n    <button type=\"submit\">Delete Comment</button>\n  </form>",
+      "reason": "The UI exposes edit and delete actions for every displayed comment to any course member viewing the post, consistent with the missing ownership check in the route handlers."
+    }
+  ],
+  "root_cause_code": 7,
+  "root_cause": "Comment mutation endpoints treat course membership as sufficient authorization and omit an ownership or moderator check for the specific comment being edited or deleted.",
+  "patch_locations": [
+    {
+      "file_path": "controllers/post_controller.py",
+      "line_start": 284,
+      "line_end": 333,
+      "function_name": "update_comment_submit / api_update_comment / delete_comment_submit / api_delete_comment"
+    },
+    {
+      "file_path": "models/comment_repo.py",
+      "line_start": 39,
+      "line_end": 57,
+      "function_name": "update_comment / delete_comment"
+    },
+    {
+      "file_path": "templates/posts/detail.html",
+      "line_start": 25,
+      "line_end": 37,
+      "function_name": null
+    }
+  ],
+  "repair_plan": "Load the target comment before mutation, verify that the current user is the comment author or holds an explicitly authorized moderation role in the course, and reject unauthorized requests. Repository update and delete operations should be scoped to the authorized owner unless a separately verified staff path is used, and the UI should only render edit and delete controls for authorized users.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

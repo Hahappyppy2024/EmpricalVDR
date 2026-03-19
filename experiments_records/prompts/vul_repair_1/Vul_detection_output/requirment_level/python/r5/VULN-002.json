@@ -1,0 +1,89 @@
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 13,
+  "vulnerability_type": "Business Logic",
+  "cwe_id": "CWE-841",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.8,
+  "severity_level": "high",
+  "confidence_score": 98,
+  "confidence_level": "high",
+  "summary": "A student can continue changing quiz answers after an attempt has already been submitted, and can also submit answers for arbitrary question_id values without proving that the question belongs to the quiz. This allows post-submission tampering and invalid answer injection within an otherwise owned attempt.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 476,
+      "line_end": 510,
+      "function_name": "answer_question_submit / api_answer_question",
+      "code": "def answer_question_submit(course_id, quiz_id, attempt_id):\n    attempt = get_attempt_by_id(course_id, quiz_id, attempt_id)\n    if attempt is None:\n        ...\n    if attempt['student_id'] != get_current_user()['user_id'] or not _student_only(course_id):\n        ...\n    question_id = int(request.form.get('question_id', '').strip())\n    answer_json = request.form.get('answer_json', '').strip()\n    upsert_quiz_answer(attempt_id, question_id, answer_json)\n\ndef api_answer_question(course_id, quiz_id, attempt_id):\n    ...\n    question_id = int(data.get('question_id'))\n    answer_json = _json_text(data.get('answer_json', ''))\n    item = upsert_quiz_answer(attempt_id, question_id, answer_json)",
+      "reason": "The answer endpoints verify only attempt ownership and student role. They never reject updates when submitted_at is already set, and they never verify that question_id belongs to the quiz tied to the attempt."
+    },
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 513,
+      "line_end": 536,
+      "function_name": "submit_attempt_submit / api_submit_attempt",
+      "code": "def submit_attempt_submit(course_id, quiz_id, attempt_id):\n    attempt = get_attempt_by_id(course_id, quiz_id, attempt_id)\n    ...\n    submit_quiz_attempt(course_id, quiz_id, attempt_id)\n\ndef api_submit_attempt(course_id, quiz_id, attempt_id):\n    ...\n    item = submit_quiz_attempt(course_id, quiz_id, attempt_id)",
+      "reason": "Submission only timestamps the attempt; no later write path is blocked once submitted_at has been set."
+    },
+    {
+      "file_path": "models/quiz_repo.py",
+      "line_start": 105,
+      "line_end": 120,
+      "function_name": "upsert_quiz_answer / submit_quiz_attempt",
+      "code": "def upsert_quiz_answer(attempt_id, question_id, answer_json):\n    db.execute(\n        'INSERT INTO quiz_answers (attempt_id, question_id, answer_json) VALUES (?, ?, ?) '\n        'ON CONFLICT(attempt_id, question_id) DO UPDATE SET answer_json = excluded.answer_json, created_at = CURRENT_TIMESTAMP',\n        (attempt_id, question_id, answer_json),\n    )\n    ...\n\ndef submit_quiz_attempt(course_id, quiz_id, attempt_id):\n    db.execute('UPDATE quiz_attempts SET submitted_at = CURRENT_TIMESTAMP WHERE course_id = ? AND quiz_id = ? AND attempt_id = ?', (course_id, quiz_id, attempt_id))",
+      "reason": "The repository blindly upserts answers for any attempt_id/question_id pair and does not enforce immutability after submission or bind the question to quiz_questions."
+    },
+    {
+      "file_path": "models/quiz_repo.py",
+      "line_start": 54,
+      "line_end": 79,
+      "function_name": "list_quiz_questions / add_quiz_question",
+      "code": "def list_quiz_questions(course_id, quiz_id):\n    ...\n\ndef add_quiz_question(course_id, quiz_id, question_id, points, position):\n    exists = db.execute('SELECT 1 FROM questions WHERE course_id = ? AND question_id = ?', (course_id, question_id)).fetchone()\n    ...\n    db.execute('INSERT INTO quiz_questions (quiz_id, question_id, points, position) VALUES (?, ?, ?, ?)', (quiz_id, question_id, points, position))",
+      "reason": "The application has an explicit quiz_questions mapping for valid quiz membership, but the answer write path never checks against that mapping."
+    }
+  ],
+  "root_cause_code": 12,
+  "root_cause": "The answer write path does not enforce quiz attempt state or quiz-question membership rules, so an owned attempt can still be mutated after submission and can accept answers for questions outside the configured quiz.",
+  "patch_locations": [
+    {
+      "file_path": "controllers/quiz_controller.py",
+      "line_start": 476,
+      "line_end": 536,
+      "function_name": "answer_question_submit / api_answer_question / submit_attempt_submit / api_submit_attempt"
+    },
+    {
+      "file_path": "models/quiz_repo.py",
+      "line_start": 95,
+      "line_end": 120,
+      "function_name": "get_attempt_by_id / upsert_quiz_answer / submit_quiz_attempt"
+    }
+  ],
+  "repair_plan": "Before accepting any answer, load the attempt and reject writes if submitted_at is already set. Also validate that the supplied question_id belongs to the quiz associated with that attempt, ideally by checking quiz_questions using the attempt's quiz_id. Once an attempt is submitted, treat it as immutable unless a separate, explicitly authorized reopen workflow exists.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

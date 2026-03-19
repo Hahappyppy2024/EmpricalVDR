@@ -1,0 +1,2473 @@
+You are a senior application security engineer analyzing a complete web application project after a previous vulnerability repair attempt.
+
+Inputs provided to you:
+1. Previous vulnerability detection report
+2. Previous vulnerability repair report / patch / summary
+3. Failed functional test results
+4. Failed security exploit test results
+5. The current project codebase
+
+Your task is to produce a strict repair-failure re-analysis report anchored to the first vulnerability detection report.
+
+This is NOT a fresh vulnerability discovery task.
+This is NOT a reclassification task.
+This is NOT a new vulnerability taxonomy pass.
+
+The first vulnerability detection report is the authoritative baseline for vulnerability identity in this iteration.
+
+--------------------------------------------------
+Mandatory Task Assumption
+--------------------------------------------------
+
+For this task, all vulnerabilities from the first vulnerability detection report must be treated as not successfully repaired.
+
+This assumption is mandatory and must not be re-evaluated.
+
+Therefore:
+- do not classify any original vulnerability as fully mitigated,
+- do not omit any original vulnerability from the output,
+- return exactly one output object for every vulnerability_id in the first vulnerability detection report,
+- and analyze how the previous repair attempt failed for each original vulnerability in the current codebase.
+
+Allowed current_status values in this task are exactly:
+- "still_present"
+- "partially_fixed"
+- "incorrectly_fixed"
+- "bypassable"
+
+Do not use "fully_mitigated" in this task.
+
+--------------------------------------------------
+Analysis Objective
+--------------------------------------------------
+
+Analyze the entire project as a whole system, not as isolated files.
+
+For every vulnerability in the first vulnerability detection report:
+- preserve the same vulnerability_id,
+- preserve the same vulnerability identity,
+- do not rename, split, merge, replace, or reinterpret it as a different vulnerability unless the previous classification is clearly impossible to maintain,
+- determine how that same vulnerability remains unresolved after the repair attempt,
+- explain why the previous repair did not fully succeed,
+- identify the remaining repair root cause,
+- and provide the next repair plan.
+
+Focus only on vulnerabilities supported by concrete current-code evidence.
+
+Do NOT perform a broad new vulnerability discovery pass.
+Only mention a newly introduced regression if it is directly caused by the previous repair attempt, is closely related to a previous vulnerability, and is clearly supported by current code evidence.
+
+Use the failed functional test results and failed security exploit test results only as supporting signals.
+Final conclusions must still be grounded in the current codebase.
+
+--------------------------------------------------
+Core Reporting Rules
+--------------------------------------------------
+
+1. Use the first vulnerability detection report as the required baseline.
+
+2. Re-analyze every vulnerability from that report against the current codebase.
+
+3. Every original vulnerability_id must appear exactly once in the output.
+
+4. No original vulnerability_id may be omitted.
+
+5. No new vulnerability_id may be introduced.
+
+6. Do not redefine, rename, split, merge, replace, or reinterpret previously reported vulnerabilities unless clearly required by the current code evidence.
+
+7. For each vulnerability, classify the unresolved state as exactly one of:
+   - still_present
+   - partially_fixed
+   - incorrectly_fixed
+   - bypassable
+
+8. Do not merely restate the original vulnerability.
+   The focus is the repair-failure analysis layer for that same vulnerability.
+
+9. For every vulnerability, explicitly explain:
+   - what was changed by the previous repair attempt,
+   - why that change did not fully eliminate the original risk,
+   - what implementation mistake still remains,
+   - and what concrete repair action should happen next.
+
+10. Only report conclusions supported by direct code evidence.
+
+11. Use the narrowest possible file and line ranges.
+
+12. If exact line numbers are uncertain, provide the smallest reasonable range and lower confidence accordingly.
+
+--------------------------------------------------
+Output Requirements
+--------------------------------------------------
+
+Return ONLY valid JSON.
+
+Do not include markdown.
+Do not include explanations outside the JSON.
+Do not include any prose before or after the JSON.
+
+The output must be a JSON array.
+
+The number of output objects must exactly equal the number of vulnerabilities in the first vulnerability detection report.
+
+Each element must represent exactly one vulnerability_id from the first vulnerability detection report.
+
+--------------------------------------------------
+JSON Schema
+--------------------------------------------------
+
+[
+  {
+    "vulnerability_id": "VULN-001",
+    "current_status": "partially_fixed",
+
+    "vulnerability_type_code": 8,
+    "vulnerability_type": "IDOR",
+    "cwe_id": "CWE-639",
+
+    "cvss_version": "CVSS v4.0 (2023)",
+    "cvss_score": 8.6,
+    "severity_level": "high",
+
+    "confidence_score": 92,
+    "confidence_level": "high",
+
+    "summary": "The application still allows an authenticated user to modify another user's resource by supplying a different resource identifier without fully verifying ownership.",
+
+    "entry_points": [
+      {
+        "type": "JSON API endpoint",
+        "method": "PUT",
+        "route": "/api/posts/:postId"
+      }
+    ],
+
+    "evidence_snippets": [
+      {
+        "file_path": "src/controllers/postController.js",
+        "line_start": 48,
+        "line_end": 58,
+        "function_name": "updatePost",
+        "code": "const postId = req.params.postId; await postRepo.updatePostById(postId, req.body);",
+        "reason": "The controller still uses the user-supplied postId on a mutation path without fully enforcing ownership."
+      }
+    ],
+
+    "root_cause_code": 7,
+    "root_cause": "The original ownership and authorization boundary is still not fully enforced before updating a user-controlled resource identifier.",
+
+    "patch_locations": [
+      {
+        "file_path": "src/controllers/postController.js",
+        "line_start": 42,
+        "line_end": 67,
+        "function_name": "updatePost"
+      }
+    ],
+
+    "repair_plan": "Load the target post before modification, verify that the authenticated user owns it or holds an explicitly authorized elevated role, and ensure the write path is consistently scoped to the authorized resource.",
+
+    "repair_failure_root_cause": "The previous repair did not fully bind the attacker-controlled resource identifier to the authorized owner context across the complete mutation path.",
+
+    "detection_report_complete": 1,
+    "has_root_cause": 1,
+    "has_patch_location": 1,
+    "has_repair_plan": 1,
+    "has_repair_failure_root_cause": 1
+  }
+]
+
+--------------------------------------------------
+Field Requirements
+--------------------------------------------------
+
+For every vulnerability object:
+
+1. vulnerability_id
+- Reuse the exact vulnerability_id from the previous vulnerability detection report.
+- Do not create a new ID.
+- Every original vulnerability_id must appear exactly once.
+
+2. current_status
+- Must be exactly one of:
+  - "still_present"
+  - "partially_fixed"
+  - "incorrectly_fixed"
+  - "bypassable"
+
+3. vulnerability_type_code
+- Must remain consistent with the previous vulnerability detection report unless clearly impossible to maintain.
+
+4. vulnerability_type
+- Must remain semantically consistent with the previous vulnerability detection report unless clearly impossible to maintain.
+
+5. cwe_id
+- Prefer preserving the prior CWE when still semantically correct.
+
+6. cvss_version
+- Must be exactly: "CVSS v4.0 (2023)"
+
+7. cvss_score
+- Numeric value from 0.0 to 10.0
+- Use one decimal place at most.
+
+8. severity_level
+- Must match cvss_score:
+  - 0.0 = none
+  - 0.1 to 3.9 = low
+  - 4.0 to 6.9 = medium
+  - 7.0 to 8.9 = high
+  - 9.0 to 10.0 = critical
+
+9. confidence_score
+- Integer from 0 to 100.
+
+10. confidence_level
+- Must match confidence_score:
+  - 0 to 39 = low
+  - 40 to 74 = medium
+  - 75 to 100 = high
+
+11. summary
+- 1 to 3 sentences
+- Describe what still remains, who can exploit it, and the consequence.
+
+12. entry_points
+- Include:
+  - type
+  - method
+  - route
+
+13. evidence_snippets
+- Each snippet must include:
+  - file_path
+  - line_start
+  - line_end
+  - function_name when available
+  - code
+  - reason
+
+14. root_cause_code
+- Must use the enumeration below.
+
+15. root_cause
+- Explain the current implementation mistake that still leaves this same vulnerability unresolved.
+
+16. patch_locations
+- List the most likely edit locations for the next repair attempt.
+
+17. repair_plan
+- Give concrete next-step repair guidance.
+
+18. repair_failure_root_cause
+- Explain specifically why the previous repair did not successfully fix this same vulnerability.
+
+19. detection_report_complete
+- Use 1 if the object contains all core required elements, else 0.
+
+20. has_root_cause
+- Use 1 if root_cause is present, else 0.
+
+21. has_patch_location
+- Use 1 if patch_locations is present, else 0.
+
+22. has_repair_plan
+- Use 1 if repair_plan is present, else 0.
+
+23. has_repair_failure_root_cause
+- Use 1 if repair_failure_root_cause is present, else 0.
+
+--------------------------------------------------
+Enumerations
+--------------------------------------------------
+
+vulnerability_type_code
+1 = SQL Injection
+2 = Command Injection
+3 = Broken Access Control
+4 = Path Traversal
+5 = Insecure File Upload
+6 = XSS
+7 = CSRF
+8 = IDOR
+9 = Authentication Flaw
+10 = Session Weakness
+11 = Sensitive Data Exposure
+12 = Open Redirect
+13 = Business Logic
+99 = Other
+
+root_cause_code
+1 = missing input validation
+2 = missing authorization check
+3 = missing authentication check
+4 = unsafe query construction
+5 = unsafe output encoding
+6 = unsafe file path handling
+7 = missing ownership check
+8 = unsafe session handling
+9 = missing CSRF protection
+10 = insecure configuration
+11 = trust boundary violation
+12 = business rule enforcement failure
+99 = other
+
+--------------------------------------------------
+Inputs
+--------------------------------------------------
+
+
+
+- Previous vulnerability detection report:
+[
+{
+"vulnerability_id": "VULN-001",
+"vulnerability_type_code": 9,
+"vulnerability_type": "Authentication Flaw",
+"cwe_id": "CWE-798",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 9.1,
+"severity_level": "critical",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "The application automatically seeds a predictable administrator account with the hard-coded credentials admin/admin123. Any external user who knows or guesses these credentials can authenticate as the administrator and gain full control over privileged workflows.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 28,
+"line_end": 30,
+"function_name": "seed_admin",
+"code": "def seed_admin():\n    db = get_db()\n    UsersRepo(db).ensure_admin(username="admin", password="admin123", display_name="Admin")",
+"reason": "The bootstrap logic creates an administrator account with a fixed username and password."
+},
+{
+"file_path": "app.py",
+"line_start": 102,
+"line_end": 105,
+"function_name": "_bootstrap",
+"code": "@app.before_request\ndef *bootstrap():\n    init_db()\n    seed_admin()",
+"reason": "The seeding routine runs automatically before requests, ensuring the default administrator account exists in normal application execution."
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 17,
+"line_end": 21,
+"function_name": "ensure_admin",
+"code": "def ensure_admin(self, username="admin", password="admin123", display_name="Admin") -> int:\n    row = self.db.execute("SELECT user_id FROM users WHERE username=?", (username,)).fetchone()\n    if row:\n        return int(row["user_id"])\n    return self.create_user(username, password, display_name)",
+"reason": "If the admin account is absent, the repository creates it directly from the hard-coded credentials instead of requiring secure initialization."
+}
+],
+"root_cause_code": 10,
+"root_cause": "The application ships with a built-in privileged account and predictable credentials, then auto-creates that account during request bootstrap instead of requiring secure first-run provisioning.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 28,
+"line_end": 30,
+"function_name": "seed_admin"
+},
+{
+"file_path": "app.py",
+"line_start": 102,
+"line_end": 105,
+"function_name": "*bootstrap"
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 17,
+"line_end": 21,
+"function_name": "ensure_admin"
+}
+],
+"repair_plan": "Remove hard-coded administrator credentials from application code. Replace the automatic seeding path with an explicit one-time setup flow that requires a deployment-time secret or environment-provided initial password, and refuse startup or privileged login until that secure initialization has been completed.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.8,
+"severity_level": "medium",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "Any authenticated user can enumerate all registered users through endpoints that appear administrative. This exposes account inventory and profile metadata without requiring an administrator role.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/users"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/admin/users"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 215,
+"line_end": 225,
+"function_name": "users_list / api_users_list",
+"code": "@app.get("/admin/users")\n@require_login\ndef users_list():\n    db = get_db()\n    return render_template("users_list.html", users=UsersRepo(db).list_users())\n\[n@app.get](mailto:n@app.get)("/api/users")\n@require_login\ndef api_users_list():\n    db = get_db()\n    return jsonify({"users": UsersRepo(db).list_users()})",
+"reason": "Both endpoints require only authentication and do not enforce an administrator or staff authorization check before returning all users."
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 39,
+"line_end": 40,
+"function_name": "list_users",
+"code": "rows = self.db.execute("SELECT user_id,username,display_name,created_at FROM users ORDER BY user_id").fetchall()",
+"reason": "The repository returns the full user listing to callers, so the missing role check in the route directly exposes all accounts."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Administrative listing endpoints are protected only by authentication and do not enforce a role-based authorization boundary before exposing user data.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 215,
+"line_end": 225,
+"function_name": "users_list / api_users_list"
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 39,
+"line_end": 40,
+"function_name": "list_users"
+}
+],
+"repair_plan": "Restrict these endpoints to explicitly authorized administrators. Add a server-side admin-role check before invoking list_users, and return 403 for non-admin users. If non-admin account discovery is needed, expose only a minimal, scoped directory view rather than the full user table.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-003",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.8,
+"severity_level": "high",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "Any authenticated user can edit or delete any course by calling the course management endpoints directly. This allows unauthorized modification or destruction of course data across tenants without membership or staff privileges.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 293,
+"line_end": 339,
+"function_name": "course_edit_form / course_update / api_course_update / course_delete / api_course_delete",
+"code": "@app.get("/courses/[int:course_id](int:course_id)/edit")\n@require_login\ndef course_edit_form(course_id):\n    ...\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)")\n@require_login\ndef course_update(course_id):\n    ...\n    CoursesRepo(db).update_course(course_id, title, description)\n\[n@app.put](mailto:n@app.put)("/api/courses/[int:course_id](int:course_id)")\n@require_login\ndef api_course_update(course_id):\n    ...\n    CoursesRepo(db).update_course(course_id, title, description)\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)/delete")\n@require_login\ndef course_delete(course_id):\n    CoursesRepo(db).delete_course(course_id)\n\[n@app.delete](mailto:n@app.delete)("/api/courses/[int:course_id](int:course_id)")\n@require_login\ndef api_course_delete(course_id):\n    CoursesRepo(db).delete_course(course_id)",
+"reason": "Course modification and deletion routes require only login and never verify that the caller owns the course or holds a staff role in that course."
+},
+{
+"file_path": "repos/courses_repo.py",
+"line_start": 28,
+"line_end": 33,
+"function_name": "update_course / delete_course",
+"code": "def update_course(self, course_id, title, description):\n    self.db.execute("UPDATE courses SET title=?, description=? WHERE course_id=?", (title, description, course_id))\n    self.db.commit()\n\ndef delete_course(self, course_id):\n    self.db.execute("DELETE FROM courses WHERE course_id=?", (course_id,))\n    self.db.commit()",
+"reason": "The repository write operations are scoped only by course_id and rely entirely on the caller for authorization."
+}
+],
+"root_cause_code": 2,
+"root_cause": "The application fails to enforce course-level authorization on edit and delete operations, allowing any logged-in user to act on arbitrary course identifiers.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 293,
+"line_end": 339,
+"function_name": "course_edit_form / course_update / api_course_update / course_delete / api_course_delete"
+},
+{
+"file_path": "repos/courses_repo.py",
+"line_start": 28,
+"line_end": 33,
+"function_name": "update_course / delete_course"
+}
+],
+"repair_plan": "Require an explicit course-specific staff or owner check before serving edit pages or performing updates and deletes. Load the course, verify the current user is the creator or has an allowed elevated membership role in that course, and reject unauthorized requests before calling the repository write methods.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-004",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.6,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "A teacher or admin in one course can change or remove memberships belonging to a different course by supplying a foreign membership_id. The route checks privileges only against the course_id in the URL, while the database write uses membership_id alone.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 392,
+"line_end": 429,
+"function_name": "member_update / api_member_update / member_remove / api_member_remove",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)")\n@require_login\n@require_teacher_or_admin\ndef member_update(course_id, membership_id):\n    ...\n    MembershipsRepo(db).update_role(membership_id, role)\n\[n@app.put](mailto:n@app.put)("/api/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)")\n@require_login\n@require_teacher_or_admin\ndef api_member_update(course_id, membership_id):\n    ...\n    MembershipsRepo(db).update_role(membership_id, role)\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)/delete")\n@require_login\n@require_teacher_or_admin\ndef member_remove(course_id, membership_id):\n    MembershipsRepo(db).remove_member(membership_id)\n\[n@app.delete](mailto:n@app.delete)("/api/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)")\n@require_login\n@require_teacher_or_admin\ndef api_member_remove(course_id, membership_id):\n    MembershipsRepo(db).remove_member(membership_id)",
+"reason": "Authorization is evaluated against the URL course_id, but the target membership record is never verified to belong to that course before update or delete."
+},
+{
+"file_path": "repos/memberships_repo.py",
+"line_start": 29,
+"line_end": 34,
+"function_name": "update_role / remove_member",
+"code": "def update_role(self, membership_id, role_in_course):\n    self.db.execute("UPDATE memberships SET role_in_course=? WHERE membership_id=?", (role_in_course, membership_id))\n    self.db.commit()\n\ndef remove_member(self, membership_id):\n    self.db.execute("DELETE FROM memberships WHERE membership_id=?", (membership_id,))\n    self.db.commit()",
+"reason": "The write queries are keyed only by membership_id, so a membership from another course can be modified or removed once its identifier is known."
+}
+],
+"root_cause_code": 11,
+"root_cause": "The code trusts a user-supplied membership identifier across a course trust boundary and fails to bind that identifier to the authorized course context before performing the write.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 392,
+"line_end": 429,
+"function_name": "member_update / api_member_update / member_remove / api_member_remove"
+},
+{
+"file_path": "repos/memberships_repo.py",
+"line_start": 29,
+"line_end": 34,
+"function_name": "update_role / remove_member"
+}
+],
+"repair_plan": "Load the target membership record first, verify that its course_id matches the route course_id, and then enforce that the current user has permission to manage that specific course membership. Repository updates and deletes should be scoped by both membership_id and course_id, or use a fetched membership object that has already passed authorization.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-005",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.8,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "Any member of a course can edit or delete another member's post by referencing that post_id. The application verifies only course membership and never checks that the caller owns the targeted post or has a higher moderation role.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 529,
+"line_end": 562,
+"function_name": "post_update / api_post_update / post_delete / api_post_delete",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)")\n@require_login\n@require_course_member\ndef post_update(course_id, post_id):\n    ...\n    PostsRepo(db).update_post(course_id, post_id, title, body)\n\[n@app.put](mailto:n@app.put)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)")\n@require_login\n@require_course_member\ndef api_post_update(course_id, post_id):\n    ...\n    PostsRepo(db).update_post(course_id, post_id, ...)\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/delete")\n@require_login\n@require_course_member\ndef post_delete(course_id, post_id):\n    PostsRepo(db).delete_post(course_id, post_id)\n\[n@app.delete](mailto:n@app.delete)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)")\n@require_login\n@require_course_member\ndef api_post_delete(course_id, post_id):\n    PostsRepo(db).delete_post(course_id, post_id)",
+"reason": "The routes require only membership in the course and perform no owner or moderator authorization check on the targeted post."
+},
+{
+"file_path": "repos/posts_repo.py",
+"line_start": 30,
+"line_end": 38,
+"function_name": "update_post / delete_post",
+"code": "def update_post(self, course_id, post_id, title, body):\n    self.db.execute(\n        "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?",\n        (title, body, now_iso(), course_id, post_id),\n    )\n    self.db.commit()\n\ndef delete_post(self, course_id, post_id):\n    self.db.execute("DELETE FROM posts WHERE course_id=? AND post_id=?", (course_id, post_id))",
+"reason": "The repository constrains the write only by course_id and post_id and does not require author_id or another ownership predicate."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Post mutation endpoints treat course membership as sufficient authorization and omit an ownership or moderator check for the specific post being edited or deleted.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 529,
+"line_end": 562,
+"function_name": "post_update / api_post_update / post_delete / api_post_delete"
+},
+{
+"file_path": "repos/posts_repo.py",
+"line_start": 30,
+"line_end": 38,
+"function_name": "update_post / delete_post"
+}
+],
+"repair_plan": "Load the target post before modification or deletion, verify that the caller is the post author or has an explicitly authorized moderation role in that course, and scope write queries by both post_id and the authorized principal. Reject requests that target posts owned by other users without elevated privilege.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-006",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.6,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "Any course member can edit or delete another member's comment by specifying that comment_id. The application never verifies comment ownership or moderator permission before applying the write.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 598,
+"line_end": 633,
+"function_name": "comment_update / api_comment_update / comment_delete / api_comment_delete",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)")\n@require_login\n@require_course_member\ndef comment_update(course_id, post_id, comment_id):\n    ...\n    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body)\n\[n@app.put](mailto:n@app.put)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)")\n@require_login\n@require_course_member\ndef api_comment_update(course_id, post_id, comment_id):\n    ...\n    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body)\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)/delete")\n@require_login\n@require_course_member\ndef comment_delete(course_id, post_id, comment_id):\n    CommentsRepo(db).delete_comment(course_id, post_id, comment_id)\n\[n@app.delete](mailto:n@app.delete)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/comments/[int:comment_id](int:comment_id)")\n@require_login\n@require_course_member\ndef api_comment_delete(course_id, post_id, comment_id):\n    CommentsRepo(db).delete_comment(course_id, post_id, comment_id)",
+"reason": "Only course membership is checked. The code does not verify that the current user authored the comment or has a moderator/staff role."
+},
+{
+"file_path": "repos/comments_repo.py",
+"line_start": 23,
+"line_end": 31,
+"function_name": "update_comment / delete_comment",
+"code": "def update_comment(self, course_id, post_id, comment_id, body):\n    self.db.execute(\n        "UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?",\n        (body, now_iso(), course_id, post_id, comment_id),\n    )\n    self.db.commit()\n\ndef delete_comment(self, course_id, post_id, comment_id):\n    self.db.execute("DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?", (course_id, post_id, comment_id))",
+"reason": "The repository uses only the comment identifier and parent resource identifiers, without any author_id constraint."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Comment mutation logic omits ownership enforcement and assumes any member of the course may modify or delete any comment within that course.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 598,
+"line_end": 633,
+"function_name": "comment_update / api_comment_update / comment_delete / api_comment_delete"
+},
+{
+"file_path": "repos/comments_repo.py",
+"line_start": 23,
+"line_end": 31,
+"function_name": "update_comment / delete_comment"
+}
+],
+"repair_plan": "Fetch the target comment before mutating it, verify that the caller is the comment author or holds an explicitly allowed staff role for the course, and scope update and delete queries to the authorized owner or moderator context. Deny same-course peer-to-peer modification by default.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-007",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.0,
+"severity_level": "high",
+"confidence_score": 94,
+"confidence_level": "high",
+"summary": "Students and other ordinary course members can retrieve question bank records that include answer_json, exposing correct answers for quizzes. This allows unauthorized disclosure of assessment answers and undermines quiz integrity.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions/:question_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions/:question_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 975,
+"line_end": 989,
+"function_name": "questions_list / api_questions_list",
+"code": "@app.get("/courses/[int:course_id](int:course_id)/questions")\n@require_login\n@require_course_member\ndef questions_list(course_id):\n    db = get_db()\n    items = QuestionsRepo(db).list_questions(course_id)\n    ...\n\[n@app.get](mailto:n@app.get)("/api/courses/[int:course_id](int:course_id)/questions")\n@require_login\n@require_course_member\ndef api_questions_list(course_id):\n    db = get_db()\n    return jsonify({"questions": QuestionsRepo(db).list_questions(course_id)})",
+"reason": "Question bank listings are available to any course member, including students."
+},
+{
+"file_path": "app.py",
+"line_start": 1022,
+"line_end": 1041,
+"function_name": "question_detail / api_question_detail",
+"code": "@app.get("/courses/[int:course_id](int:course_id)/questions/[int:question_id](int:question_id)")\n@require_login\n@require_course_member\ndef question_detail(course_id, question_id):\n    db = get_db()\n    q = QuestionsRepo(db).get_question(course_id, question_id)\n    ...\n\[n@app.get](mailto:n@app.get)("/api/courses/[int:course_id](int:course_id)/questions/[int:question_id](int:question_id)")\n@require_login\n@require_course_member\ndef api_question_detail(course_id, question_id):\n    db = get_db()\n    q = QuestionsRepo(db).get_question(course_id, question_id)\n    ...\n    return jsonify({"question": q})",
+"reason": "The detail endpoints likewise expose complete question records to any course member, with no role restriction for answer content."
+},
+{
+"file_path": "repos/questions_repo.py",
+"line_start": 16,
+"line_end": 27,
+"function_name": "list_questions / get_question",
+"code": "def list_questions(self, course_id):\n    rows = self.db.execute(\n        "SELECT q.*, u.username as creator_username FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? ORDER BY q.question_id DESC",\n        (course_id,),\n    ).fetchall()\n\ndef get_question(self, course_id, question_id):\n    r = self.db.execute(\n        "SELECT q.*, u.username as creator_username FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? AND q.question_id=?",\n        (course_id, question_id),\n    ).fetchone()",
+"reason": "The repository returns q.* for question records, which includes answer_json from the questions table."
+},
+{
+"file_path": "repos/schema.py",
+"line_start": 94,
+"line_end": 103,
+"function_name": null,
+"code": "CREATE TABLE IF NOT EXISTS questions (\n  question_id INTEGER PRIMARY KEY AUTOINCREMENT,\n  course_id INTEGER NOT NULL,\n  created_by INTEGER NOT NULL,\n  qtype TEXT NOT NULL,\n  prompt TEXT NOT NULL,\n  options_json TEXT,\n  answer_json TEXT,\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL,",
+"reason": "The table schema confirms that answer_json is stored on the same question objects being returned to all course members."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Question bank read endpoints apply only a generic course-membership check and do not separate staff-only answer data from student-visible question content.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 975,
+"line_end": 989,
+"function_name": "questions_list / api_questions_list"
+},
+{
+"file_path": "app.py",
+"line_start": 1022,
+"line_end": 1041,
+"function_name": "question_detail / api_question_detail"
+},
+{
+"file_path": "repos/questions_repo.py",
+"line_start": 16,
+"line_end": 27,
+"function_name": "list_questions / get_question"
+}
+],
+"repair_plan": "Restrict question bank management views and any answer-bearing fields to staff roles only. For student-facing quiz delivery, return a separate sanitized representation that excludes answer_json and any other grading metadata. Enforce this role separation in the route layer and, where practical, through dedicated repository methods for safe student views.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-008",
+"vulnerability_type_code": 4,
+"vulnerability_type": "Path Traversal",
+"cwe_id": "CWE-22",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.4,
+"severity_level": "high",
+"confidence_score": 89,
+"confidence_level": "high",
+"summary": "The upload handlers build storage paths directly from the untrusted original filename. A staff user can supply path separators such as ../ in the filename to write files outside the intended course upload directory.",
+"entry_points": [
+{
+"type": "file upload handler",
+"method": "POST",
+"route": "/api/courses/:course_id/uploads"
+},
+{
+"type": "file upload handler",
+"method": "POST",
+"route": "/courses/:course_id/uploads"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 903,
+"line_end": 912,
+"function_name": "upload_create",
+"code": "def upload_create(course_id):\n    ...\n    folder = ensure_upload_dir(course_id)\n    token = uuid.uuid4().hex\n    storage_path = os.path.join(folder, f"{token}*{f.filename}")\n    f.save(storage_path)\n    UploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)",
+"reason": "The server concatenates the client-controlled filename into a filesystem path and saves the file there without sanitizing separators or enforcing containment under UPLOAD_ROOT."
+},
+{
+"file_path": "app.py",
+"line_start": 918,
+"line_end": 927,
+"function_name": "api_upload_create",
+"code": "def api_upload_create(course_id):\n    ...\n    folder = ensure_upload_dir(course_id)\n    token = uuid.uuid4().hex\n    storage_path = os.path.join(folder, f"{token}*{f.filename}")\n    f.save(storage_path)\n    upload_id = UploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)",
+"reason": "The JSON API upload path repeats the same unsafe filename-to-path construction."
+}
+],
+"root_cause_code": 6,
+"root_cause": "Untrusted filenames are used directly in filesystem path construction, and the code does not normalize, sanitize, or verify that the final path remains inside the intended upload directory.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 903,
+"line_end": 912,
+"function_name": "upload_create"
+},
+{
+"file_path": "app.py",
+"line_start": 918,
+"line_end": 927,
+"function_name": "api_upload_create"
+}
+],
+"repair_plan": "Derive a safe server-side filename independently of the client-supplied name, such as a generated UUID plus a validated extension. Strip path separators from user input, normalize the target path, and verify that the resolved path is still under the expected course upload directory before saving. Store the original filename only as metadata for download presentation.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-009",
+"vulnerability_type_code": 13,
+"vulnerability_type": "Business Logic",
+"cwe_id": "CWE-840",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.4,
+"severity_level": "high",
+"confidence_score": 90,
+"confidence_level": "high",
+"summary": "The quiz answer endpoints allow a student to submit or overwrite answers after the attempt has been marked submitted, and they also accept arbitrary question_id values without verifying that the question belongs to the quiz. This permits score manipulation and invalid answer injection within a valid student session.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 1291,
+"line_end": 1314,
+"function_name": "answer_question / api_answer_question",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/quizzes/[int:quiz_id](int:quiz_id)/attempts/[int:attempt_id](int:attempt_id)/answers")\n@require_login\n@require_student\ndef answer_question(course_id, quiz_id, attempt_id):\n    db = get_db()\n    attempt = QuizzesRepo(db).get_attempt(attempt_id)\n    if not attempt or attempt["student_id"] != int(session["user_id"]):\n        return "Not found", 404\n    question_id = int(request.form.get("question_id") or 0)\n    answer_raw = (request.form.get("answer_json") or "").strip() or "{}"\n    QuizzesRepo(db).upsert_answer(attempt_id, question_id, answer_raw)\n\[n@app.post](mailto:n@app.post)("/api/courses/[int:course_id](int:course_id)/quizzes/[int:quiz_id](int:quiz_id)/attempts/[int:attempt_id](int:attempt_id)/answers")\n@require_login\n@require_student\ndef api_answer_question(course_id, quiz_id, attempt_id):\n    ...\n    QuizzesRepo(db).upsert_answer(attempt_id, int(data.get("question_id") or 0), json_dumps(data.get("answer_json")) or "{}")",
+"reason": "The answer routes verify only attempt ownership. They never check whether the attempt is already submitted, nor whether the supplied question_id is configured for the specified quiz."
+},
+{
+"file_path": "app.py",
+"line_start": 1316,
+"line_end": 1335,
+"function_name": "submit_attempt / api_submit_attempt",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/quizzes/[int:quiz_id](int:quiz_id)/attempts/[int:attempt_id](int:attempt_id)/submit")\n@require_login\n@require_student\ndef submit_attempt(course_id, quiz_id, attempt_id):\n    db = get_db()\n    attempt = QuizzesRepo(db).get_attempt(attempt_id)\n    if not attempt or attempt["student_id"] != int(session["user_id"]):\n        return "Not found", 404\n    QuizzesRepo(db).submit_attempt(attempt_id)",
+"reason": "Submission only timestamps the attempt; no later write path is blocked after submitted_at has been set."
+},
+{
+"file_path": "repos/quizzes_repo.py",
+"line_start": 67,
+"line_end": 80,
+"function_name": "get_attempt / submit_attempt / upsert_answer",
+"code": "def get_attempt(self, attempt_id):\n    r = self.db.execute("SELECT * FROM quiz_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()\n    return dict(r) if r else None\n\ndef submit_attempt(self, attempt_id):\n    self.db.execute("UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?", (now_iso(), attempt_id))\n    self.db.commit()\n\ndef upsert_answer(self, attempt_id, question_id, answer_json_text):\n    self.db.execute(\n        "INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) VALUES (?,?,?,?) ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json, created_at=excluded.created_at",\n        (attempt_id, question_id, answer_json_text, now_iso()),\n    )",
+"reason": "The repository blindly updates answers for any question_id tied to the attempt_id and has no rule preventing writes after submission."
+}
+],
+"root_cause_code": 12,
+"root_cause": "Quiz attempt state and quiz-question membership rules are not enforced on the answer write path, so the application accepts logically invalid mutations that should be rejected after submission or when the question is not part of the quiz.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 1291,
+"line_end": 1314,
+"function_name": "answer_question / api_answer_question"
+},
+{
+"file_path": "app.py",
+"line_start": 1316,
+"line_end": 1335,
+"function_name": "submit_attempt / api_submit_attempt"
+},
+{
+"file_path": "repos/quizzes_repo.py",
+"line_start": 67,
+"line_end": 80,
+"function_name": "get_attempt / submit_attempt / upsert_answer"
+}
+],
+"repair_plan": "Before accepting an answer, load the attempt and reject writes if submitted_at is already set. Also verify that the supplied question_id belongs to the quiz associated with that attempt, ideally with a server-side existence check against quiz_questions scoped by quiz_id. Once submitted, make the attempt immutable except through an explicitly authorized re-open workflow.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}
+]
+
+- Previous vulnerability repair report / patch / summary:
+1. Unified diff patch
+
+```diff
+diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -2,6 +2,7 @@
+ import uuid
+ from functools import wraps
+ from flask import Flask, request, session, redirect, url_for, jsonify, render_template, send_file
++from werkzeug.utils import secure_filename
+ 
+ from db import get_db, close_db
+ from repos.schema import SCHEMA_SQL
+@@ -90,6 +91,29 @@
+         return fn(course_id, *args, **kwargs)
+     return wrapper
+ 
++def is_site_admin():
++    return session.get("username") == "admin"
++
++def require_site_admin(fn):
++    @wraps(fn)
++    def wrapper(*args, **kwargs):
++        if not is_site_admin():
++            if wants_json():
++                return jsonify({"error":"admin_required"}), 403
++            return redirect(url_for("courses_list"))
++        return fn(*args, **kwargs)
++    return wrapper
++
++def can_manage_course(course, user_id):
++    if not course:
++        return False
++    if int(course["created_by"]) == int(user_id):
++        return True
++    return MembershipsRepo(get_db()).get_user_role(int(course["course_id"]), int(user_id)) in STAFF_ROLES
++
++def can_moderate_course(course_id, user_id):
++    return MembershipsRepo(get_db()).get_user_role(int(course_id), int(user_id)) in STAFF_ROLES
++
+ def ensure_upload_dir(course_id:int)->str:
+     p = os.path.join(UPLOAD_ROOT, str(course_id))
+     os.makedirs(p, exist_ok=True)
+@@ -214,12 +238,14 @@
+ # FR-U5 list_users()
+ @app.get("/admin/users")
+ @require_login
++@require_site_admin
+ def users_list():
+     db = get_db()
+     return render_template("users_list.html", users=UsersRepo(db).list_users())
+ 
+ @app.get("/api/users")
+ @require_login
++@require_site_admin
+ def api_users_list():
+     db = get_db()
+     return jsonify({"users": UsersRepo(db).list_users()})
+@@ -297,16 +323,22 @@
+     c = CoursesRepo(db).get_course(course_id)
+     if not c:
+         return "Not found", 404
++    if not can_manage_course(c, int(session["user_id"])):
++        return redirect(url_for("course_detail", course_id=course_id))
+     return render_template("course_edit.html", course=c)
+ 
+ @app.post("/courses/<int:course_id>")
+ @require_login
+ def course_update(course_id):
+     db = get_db()
++    c = CoursesRepo(db).get_course(course_id)
++    if not c:
++        return "Not found", 404
++    if not can_manage_course(c, int(session["user_id"])):
++        return redirect(url_for("course_detail", course_id=course_id))
+     title = (request.form.get("title") or "").strip()
+     description = (request.form.get("description") or "").strip()
+     if not title:
+-        c = CoursesRepo(db).get_course(course_id)
+         return render_template("course_edit.html", course=c, error="Title required")
+     CoursesRepo(db).update_course(course_id, title, description)
+     return redirect(url_for("course_detail", course_id=course_id))
+@@ -315,6 +347,11 @@
+ @require_login
+ def api_course_update(course_id):
+     db = get_db()
++    c = CoursesRepo(db).get_course(course_id)
++    if not c:
++        return jsonify({"error":"not_found"}), 404
++    if not can_manage_course(c, int(session["user_id"])):
++        return jsonify({"error":"forbidden"}), 403
+     data = request.get_json(force=True, silent=True) or {}
+     title = (data.get("title") or "").strip()
+     description = (data.get("description") or "").strip()
+@@ -328,6 +365,11 @@
+ @require_login
+ def course_delete(course_id):
+     db = get_db()
++    c = CoursesRepo(db).get_course(course_id)
++    if not c:
++        return "Not found", 404
++    if not can_manage_course(c, int(session["user_id"])):
++        return redirect(url_for("course_detail", course_id=course_id))
+     CoursesRepo(db).delete_course(course_id)
+     return redirect(url_for("courses_list"))
+ 
+@@ -335,6 +377,11 @@
+ @require_login
+ def api_course_delete(course_id):
+     db = get_db()
++    c = CoursesRepo(db).get_course(course_id)
++    if not c:
++        return jsonify({"error":"not_found"}), 404
++    if not can_manage_course(c, int(session["user_id"])):
++        return jsonify({"error":"forbidden"}), 403
+     CoursesRepo(db).delete_course(course_id)
+     return jsonify({"ok": True})
+@@ -394,10 +441,13 @@
+ @require_teacher_or_admin
+ def member_update(course_id, membership_id):
+     db = get_db()
++    membership = MembershipsRepo(db).get_membership(membership_id)
++    if not membership or int(membership["course_id"]) != int(course_id):
++        return "Not found", 404
+     role = request.form.get("role_in_course") or "student"
+     if role not in ROLE_SET:
+         role = "student"
+-    MembershipsRepo(db).update_role(membership_id, role)
++    MembershipsRepo(db).update_role(course_id, membership_id, role)
+     return redirect(url_for("members_list", course_id=course_id))
+ 
+ @app.put("/api/courses/<int:course_id>/members/<int:membership_id>")
+@@ -405,11 +455,14 @@
+ @require_teacher_or_admin
+ def api_member_update(course_id, membership_id):
+     db = get_db()
++    membership = MembershipsRepo(db).get_membership(membership_id)
++    if not membership or int(membership["course_id"]) != int(course_id):
++        return jsonify({"error":"not_found"}), 404
+     data = request.get_json(force=True, silent=True) or {}
+     role = data.get("role_in_course") or "student"
+     if role not in ROLE_SET:
+         return jsonify({"error":"invalid_role"}), 400
+-    MembershipsRepo(db).update_role(membership_id, role)
++    MembershipsRepo(db).update_role(course_id, membership_id, role)
+     return jsonify({"ok": True})
+@@ -418,7 +471,10 @@
+ @require_teacher_or_admin
+ def member_remove(course_id, membership_id):
+     db = get_db()
+-    MembershipsRepo(db).remove_member(membership_id)
++    membership = MembershipsRepo(db).get_membership(membership_id)
++    if not membership or int(membership["course_id"]) != int(course_id):
++        return "Not found", 404
++    MembershipsRepo(db).remove_member(course_id, membership_id)
+     return redirect(url_for("members_list", course_id=course_id))
+ 
+ @app.delete("/api/courses/<int:course_id>/members/<int:membership_id>")
+@@ -426,7 +482,10 @@
+ @require_teacher_or_admin
+ def api_member_remove(course_id, membership_id):
+     db = get_db()
+-    MembershipsRepo(db).remove_member(membership_id)
++    membership = MembershipsRepo(db).get_membership(membership_id)
++    if not membership or int(membership["course_id"]) != int(course_id):
++        return jsonify({"error":"not_found"}), 404
++    MembershipsRepo(db).remove_member(course_id, membership_id)
+     return jsonify({"ok": True})
+@@ -524,6 +583,9 @@
+     p = PostsRepo(db).get_post(course_id, post_id)
+     if not p:
+         return "Not found", 404
++    user_id = int(session["user_id"])
++    if int(p["author_id"]) != user_id and not can_moderate_course(course_id, user_id):
++        return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+     return render_template("post_edit.html", course_id=course_id, post=p)
+ 
+ @app.post("/courses/<int:course_id>/posts/<int:post_id>")
+@@ -531,9 +593,16 @@
+ @require_course_member
+ def post_update(course_id, post_id):
+     db = get_db()
++    p = PostsRepo(db).get_post(course_id, post_id)
++    if not p:
++        return "Not found", 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(p["author_id"]) != user_id and not is_staff:
++        return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+     title = (request.form.get("title") or "").strip()
+     body = (request.form.get("body") or "").strip()
+-    PostsRepo(db).update_post(course_id, post_id, title, body)
++    PostsRepo(db).update_post(course_id, post_id, title, body, None if is_staff else user_id)
+     return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+ 
+ @app.put("/api/courses/<int:course_id>/posts/<int:post_id>")
+@@ -541,8 +610,15 @@
+ @require_course_member
+ def api_post_update(course_id, post_id):
+     db = get_db()
++    p = PostsRepo(db).get_post(course_id, post_id)
++    if not p:
++        return jsonify({"error":"not_found"}), 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(p["author_id"]) != user_id and not is_staff:
++        return jsonify({"error":"forbidden"}), 403
+     data = request.get_json(force=True, silent=True) or {}
+-    PostsRepo(db).update_post(course_id, post_id, (data.get("title") or "").strip(), (data.get("body") or "").strip())
++    PostsRepo(db).update_post(course_id, post_id, (data.get("title") or "").strip(), (data.get("body") or "").strip(), None if is_staff else user_id)
+     return jsonify({"ok": True})
+@@ -551,7 +627,14 @@
+ @require_course_member
+ def post_delete(course_id, post_id):
+     db = get_db()
+-    PostsRepo(db).delete_post(course_id, post_id)
++    p = PostsRepo(db).get_post(course_id, post_id)
++    if not p:
++        return "Not found", 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(p["author_id"]) != user_id and not is_staff:
++        return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
++    PostsRepo(db).delete_post(course_id, post_id, None if is_staff else user_id)
+     return redirect(url_for("posts_list", course_id=course_id))
+ 
+ @app.delete("/api/courses/<int:course_id>/posts/<int:post_id>")
+@@ -559,7 +642,14 @@
+ @require_course_member
+ def api_post_delete(course_id, post_id):
+     db = get_db()
+-    PostsRepo(db).delete_post(course_id, post_id)
++    p = PostsRepo(db).get_post(course_id, post_id)
++    if not p:
++        return jsonify({"error":"not_found"}), 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(p["author_id"]) != user_id and not is_staff:
++        return jsonify({"error":"forbidden"}), 403
++    PostsRepo(db).delete_post(course_id, post_id, None if is_staff else user_id)
+     return jsonify({"ok": True})
+@@ -599,7 +689,14 @@
+ @require_course_member
+ def comment_update(course_id, post_id, comment_id):
+     db = get_db()
++    comment = CommentsRepo(db).get_comment(course_id, post_id, comment_id)
++    if not comment:
++        return "Not found", 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(comment["author_id"]) != user_id and not is_staff:
++        return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+     body = (request.form.get("body") or "").strip()
+-    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body)
++    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body, None if is_staff else user_id)
+     return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+ 
+ @app.put("/api/courses/<int:course_id>/posts/<int:post_id>/comments/<int:comment_id>")
+@@ -609,11 +706,18 @@
+ def api_comment_update(course_id, post_id, comment_id):
+     db = get_db()
++    comment = CommentsRepo(db).get_comment(course_id, post_id, comment_id)
++    if not comment:
++        return jsonify({"error":"not_found"}), 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(comment["author_id"]) != user_id and not is_staff:
++        return jsonify({"error":"forbidden"}), 403
+     data = request.get_json(force=True, silent=True) or {}
+     body = (data.get("body") or "").strip()
+     if not body:
+         return jsonify({"error":"body_required"}), 400
+-    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body)
++    CommentsRepo(db).update_comment(course_id, post_id, comment_id, body, None if is_staff else user_id)
+     return jsonify({"ok": True})
+@@ -622,7 +726,14 @@
+ @require_course_member
+ def comment_delete(course_id, post_id, comment_id):
+     db = get_db()
+-    CommentsRepo(db).delete_comment(course_id, post_id, comment_id)
++    comment = CommentsRepo(db).get_comment(course_id, post_id, comment_id)
++    if not comment:
++        return "Not found", 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(comment["author_id"]) != user_id and not is_staff:
++        return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
++    CommentsRepo(db).delete_comment(course_id, post_id, comment_id, None if is_staff else user_id)
+     return redirect(url_for("post_detail", course_id=course_id, post_id=post_id))
+ 
+ @app.delete("/api/courses/<int:course_id>/posts/<int:post_id>/comments/<int:comment_id>")
+@@ -630,7 +741,14 @@
+ @require_course_member
+ def api_comment_delete(course_id, post_id, comment_id):
+     db = get_db()
+-    CommentsRepo(db).delete_comment(course_id, post_id, comment_id)
++    comment = CommentsRepo(db).get_comment(course_id, post_id, comment_id)
++    if not comment:
++        return jsonify({"error":"not_found"}), 404
++    user_id = int(session["user_id"])
++    is_staff = can_moderate_course(course_id, user_id)
++    if int(comment["author_id"]) != user_id and not is_staff:
++        return jsonify({"error":"forbidden"}), 403
++    CommentsRepo(db).delete_comment(course_id, post_id, comment_id, None if is_staff else user_id)
+     return jsonify({"ok": True})
+@@ -907,7 +1025,10 @@
+         return render_template("upload_new.html", course_id=course_id, error="file required")
+     folder = ensure_upload_dir(course_id)
+     token = uuid.uuid4().hex
+-    storage_path = os.path.join(folder, f"{token}_{f.filename}")
++    safe_name = secure_filename(f.filename or "") or "upload.bin"
++    storage_path = os.path.abspath(os.path.join(folder, f"{token}_{safe_name}"))
++    if os.path.commonpath([os.path.abspath(folder), storage_path]) != os.path.abspath(folder):
++        return render_template("upload_new.html", course_id=course_id, error="invalid_filename")
+     f.save(storage_path)
+     UploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)
+     return redirect(url_for("uploads_list", course_id=course_id))
+@@ -922,7 +1043,10 @@
+         return jsonify({"error":"file_required"}), 400
+     folder = ensure_upload_dir(course_id)
+     token = uuid.uuid4().hex
+-    storage_path = os.path.join(folder, f"{token}_{f.filename}")
++    safe_name = secure_filename(f.filename or "") or "upload.bin"
++    storage_path = os.path.abspath(os.path.join(folder, f"{token}_{safe_name}"))
++    if os.path.commonpath([os.path.abspath(folder), storage_path]) != os.path.abspath(folder):
++        return jsonify({"error":"invalid_filename"}), 400
+     f.save(storage_path)
+     upload_id = UploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)
+     return jsonify({"upload_id": upload_id})
+@@ -974,19 +1098,19 @@
+ # ========= K) Question bank =========
+ @app.get("/courses/<int:course_id>/questions")
+ @require_login
+-@require_course_member
++@require_course_staff
+ def questions_list(course_id):
+     db = get_db()
+-    items = QuestionsRepo(db).list_questions(course_id)
++    items = QuestionsRepo(db).list_questions(course_id, include_answer=True)
+     role = MembershipsRepo(db).get_user_role(course_id, int(session["user_id"]))
+     return render_template("questions_list.html", course_id=course_id, questions=items, my_role=role)
+ 
+ @app.get("/api/courses/<int:course_id>/questions")
+ @require_login
+-@require_course_member
++@require_course_staff
+ def api_questions_list(course_id):
+     db = get_db()
+-    return jsonify({"questions": QuestionsRepo(db).list_questions(course_id)})
++    return jsonify({"questions": QuestionsRepo(db).list_questions(course_id, include_answer=True)})
+@@ -1021,10 +1145,10 @@
+ 
+ @app.get("/courses/<int:course_id>/questions/<int:question_id>")
+ @require_login
+-@require_course_member
++@require_course_staff
+ def question_detail(course_id, question_id):
+     db = get_db()
+-    q = QuestionsRepo(db).get_question(course_id, question_id)
++    q = QuestionsRepo(db).get_question(course_id, question_id, include_answer=True)
+     if not q:
+         return "Not found", 404
+     role = MembershipsRepo(db).get_user_role(course_id, int(session["user_id"]))
+@@ -1032,10 +1156,10 @@
+ 
+ @app.get("/api/courses/<int:course_id>/questions/<int:question_id>")
+ @require_login
+-@require_course_member
++@require_course_staff
+ def api_question_detail(course_id, question_id):
+     db = get_db()
+-    q = QuestionsRepo(db).get_question(course_id, question_id)
++    q = QuestionsRepo(db).get_question(course_id, question_id, include_answer=True)
+     if not q:
+         return jsonify({"error":"not_found"}), 404
+     return jsonify({"question": q})
+@@ -1045,7 +1169,7 @@
+ @require_course_staff
+ def question_edit_form(course_id, question_id):
+     db = get_db()
+-    q = QuestionsRepo(db).get_question(course_id, question_id)
++    q = QuestionsRepo(db).get_question(course_id, question_id, include_answer=True)
+     if not q:
+         return "Not found", 404
+     return render_template("question_edit.html", course_id=course_id, q=q)
+@@ -1213,7 +1337,7 @@
+ def quiz_config_form(course_id, quiz_id):
+     db = get_db()
+     quiz = QuizzesRepo(db).get_quiz(course_id, quiz_id)
+-    questions = QuestionsRepo(db).list_questions(course_id)
++    questions = QuestionsRepo(db).list_questions(course_id, include_answer=True)
+     quiz_questions = QuizzesRepo(db).list_quiz_questions(quiz_id)
+     return render_template("quiz_config.html", course_id=course_id, quiz=quiz, questions=questions, quiz_questions=quiz_questions)
+@@ -1294,11 +1418,15 @@
+ def answer_question(course_id, quiz_id, attempt_id):
+     db = get_db()
+     attempt = QuizzesRepo(db).get_attempt(attempt_id)
+-    if not attempt or attempt["student_id"] != int(session["user_id"]):
++    if not attempt or attempt["student_id"] != int(session["user_id"]) or int(attempt["quiz_id"]) != int(quiz_id) or int(attempt["course_id"]) != int(course_id):
++        return "Not found", 404
++    if attempt.get("submitted_at"):
+         return "Not found", 404
+     question_id = int(request.form.get("question_id") or 0)
++    if not QuizzesRepo(db).quiz_has_question(quiz_id, question_id):
++        return "Not found", 404
+     answer_raw = (request.form.get("answer_json") or "").strip() or "{}"
+-    QuizzesRepo(db).upsert_answer(attempt_id, question_id, answer_raw)
++    QuizzesRepo(db).upsert_answer(attempt_id, quiz_id, question_id, answer_raw)
+     return redirect(url_for("take_quiz", course_id=course_id, quiz_id=quiz_id, attempt_id=attempt_id))
+ 
+ @app.post("/api/courses/<int:course_id>/quizzes/<int:quiz_id>/attempts/<int:attempt_id>/answers")
+@@ -1307,10 +1435,15 @@
+ def api_answer_question(course_id, quiz_id, attempt_id):
+     db = get_db()
+     attempt = QuizzesRepo(db).get_attempt(attempt_id)
+-    if not attempt or attempt["student_id"] != int(session["user_id"]):
++    if not attempt or attempt["student_id"] != int(session["user_id"]) or int(attempt["quiz_id"]) != int(quiz_id) or int(attempt["course_id"]) != int(course_id):
++        return jsonify({"error":"not_found"}), 404
++    if attempt.get("submitted_at"):
+         return jsonify({"error":"not_found"}), 404
+     data = request.get_json(force=True, silent=True) or {}
+-    QuizzesRepo(db).upsert_answer(attempt_id, int(data.get("question_id") or 0), json_dumps(data.get("answer_json")) or "{}")
++    question_id = int(data.get("question_id") or 0)
++    if not QuizzesRepo(db).quiz_has_question(quiz_id, question_id):
++        return jsonify({"error":"not_found"}), 404
++    QuizzesRepo(db).upsert_answer(attempt_id, quiz_id, question_id, json_dumps(data.get("answer_json")) or "{}")
+     return jsonify({"ok": True})
+@@ -1319,7 +1452,9 @@
+ def submit_attempt(course_id, quiz_id, attempt_id):
+     db = get_db()
+     attempt = QuizzesRepo(db).get_attempt(attempt_id)
+-    if not attempt or attempt["student_id"] != int(session["user_id"]):
++    if not attempt or attempt["student_id"] != int(session["user_id"]) or int(attempt["quiz_id"]) != int(quiz_id) or int(attempt["course_id"]) != int(course_id):
++        return "Not found", 404
++    if attempt.get("submitted_at"):
+         return "Not found", 404
+     QuizzesRepo(db).submit_attempt(attempt_id)
+     return redirect(url_for("quizzes_list", course_id=course_id))
+@@ -1330,7 +1465,9 @@
+ def api_submit_attempt(course_id, quiz_id, attempt_id):
+     db = get_db()
+     attempt = QuizzesRepo(db).get_attempt(attempt_id)
+-    if not attempt or attempt["student_id"] != int(session["user_id"]):
++    if not attempt or attempt["student_id"] != int(session["user_id"]) or int(attempt["quiz_id"]) != int(quiz_id) or int(attempt["course_id"]) != int(course_id):
++        return jsonify({"error":"not_found"}), 404
++    if attempt.get("submitted_at"):
+         return jsonify({"error":"not_found"}), 404
+     QuizzesRepo(db).submit_attempt(attempt_id)
+     return jsonify({"ok": True})
+diff --git a/repos/memberships_repo.py b/repos/memberships_repo.py
+--- a/repos/memberships_repo.py
++++ b/repos/memberships_repo.py
+@@ -26,12 +26,22 @@
+         r = self.db.execute("SELECT role_in_course FROM memberships WHERE course_id=? AND user_id=?", (course_id, user_id)).fetchone()
+         return r["role_in_course"] if r else None
+ 
+-    def update_role(self, membership_id, role_in_course):
+-        self.db.execute("UPDATE memberships SET role_in_course=? WHERE membership_id=?", (role_in_course, membership_id))
++    def get_membership(self, membership_id):
++        r = self.db.execute(
++            "SELECT m.*, u.username, u.display_name FROM memberships m JOIN users u ON u.user_id=m.user_id WHERE m.membership_id=?",
++            (membership_id,),
++        ).fetchone()
++        return dict(r) if r else None
++
++    def update_role(self, course_id, membership_id, role_in_course):
++        self.db.execute(
++            "UPDATE memberships SET role_in_course=? WHERE membership_id=? AND course_id=?",
++            (role_in_course, membership_id, course_id),
++        )
+         self.db.commit()
+ 
+-    def remove_member(self, membership_id):
+-        self.db.execute("DELETE FROM memberships WHERE membership_id=?", (membership_id,))
++    def remove_member(self, course_id, membership_id):
++        self.db.execute("DELETE FROM memberships WHERE membership_id=? AND course_id=?", (membership_id, course_id))
+         self.db.commit()
+ 
+     def my_memberships(self, user_id):
+diff --git a/repos/posts_repo.py b/repos/posts_repo.py
+--- a/repos/posts_repo.py
++++ b/repos/posts_repo.py
+@@ -27,15 +27,24 @@
+         ).fetchone()
+         return dict(r) if r else None
+ 
+-    def update_post(self, course_id, post_id, title, body):
+-        self.db.execute(
+-            "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?",
+-            (title, body, now_iso(), course_id, post_id),
+-        )
++    def update_post(self, course_id, post_id, title, body, author_id=None):
++        if author_id is None:
++            self.db.execute(
++                "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?",
++                (title, body, now_iso(), course_id, post_id),
++            )
++        else:
++            self.db.execute(
++                "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=? AND author_id=?",
++                (title, body, now_iso(), course_id, post_id, author_id),
++            )
+         self.db.commit()
+ 
+-    def delete_post(self, course_id, post_id):
+-        self.db.execute("DELETE FROM posts WHERE course_id=? AND post_id=?", (course_id, post_id))
++    def delete_post(self, course_id, post_id, author_id=None):
++        if author_id is None:
++            self.db.execute("DELETE FROM posts WHERE course_id=? AND post_id=?", (course_id, post_id))
++        else:
++            self.db.execute("DELETE FROM posts WHERE course_id=? AND post_id=? AND author_id=?", (course_id, post_id, author_id))
+         self.db.commit()
+ 
+     def search_posts(self, course_id, keyword):
+diff --git a/repos/comments_repo.py b/repos/comments_repo.py
+--- a/repos/comments_repo.py
++++ b/repos/comments_repo.py
+@@ -20,15 +20,34 @@
+         ).fetchall()
+         return [dict(r) for r in rows]
+ 
+-    def update_comment(self, course_id, post_id, comment_id, body):
+-        self.db.execute(
+-            "UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?",
+-            (body, now_iso(), course_id, post_id, comment_id),
+-        )
++    def get_comment(self, course_id, post_id, comment_id):
++        r = self.db.execute(
++            "SELECT c.*, u.username as author_username FROM comments c JOIN users u ON u.user_id=c.author_id WHERE c.course_id=? AND c.post_id=? AND c.comment_id=?",
++            (course_id, post_id, comment_id),
++        ).fetchone()
++        return dict(r) if r else None
++
++    def update_comment(self, course_id, post_id, comment_id, body, author_id=None):
++        if author_id is None:
++            self.db.execute(
++                "UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?",
++                (body, now_iso(), course_id, post_id, comment_id),
++            )
++        else:
++            self.db.execute(
++                "UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=? AND author_id=?",
++                (body, now_iso(), course_id, post_id, comment_id, author_id),
++            )
+         self.db.commit()
+ 
+-    def delete_comment(self, course_id, post_id, comment_id):
+-        self.db.execute("DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?", (course_id, post_id, comment_id))
++    def delete_comment(self, course_id, post_id, comment_id, author_id=None):
++        if author_id is None:
++            self.db.execute("DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?", (course_id, post_id, comment_id))
++        else:
++            self.db.execute(
++                "DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=? AND author_id=?",
++                (course_id, post_id, comment_id, author_id),
++            )
+         self.db.commit()
+ 
+     def search_comments(self, course_id, keyword):
+diff --git a/repos/questions_repo.py b/repos/questions_repo.py
+--- a/repos/questions_repo.py
++++ b/repos/questions_repo.py
+@@ -13,16 +13,18 @@
+         self.db.commit()
+         return int(cur.lastrowid)
+ 
+-    def list_questions(self, course_id):
++    def list_questions(self, course_id, include_answer=False):
++        select_fields = "q.*, u.username as creator_username" if include_answer else "q.question_id, q.course_id, q.created_by, q.qtype, q.prompt, q.options_json, q.created_at, q.updated_at, u.username as creator_username"
+         rows = self.db.execute(
+-            "SELECT q.*, u.username as creator_username FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? ORDER BY q.question_id DESC",
++            f"SELECT {select_fields} FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? ORDER BY q.question_id DESC",
+             (course_id,),
+         ).fetchall()
+         return [dict(r) for r in rows]
+ 
+-    def get_question(self, course_id, question_id):
++    def get_question(self, course_id, question_id, include_answer=False):
++        select_fields = "q.*, u.username as creator_username" if include_answer else "q.question_id, q.course_id, q.created_by, q.qtype, q.prompt, q.options_json, q.created_at, q.updated_at, u.username as creator_username"
+         r = self.db.execute(
+-            "SELECT q.*, u.username as creator_username FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? AND q.question_id=?",
++            f"SELECT {select_fields} FROM questions q JOIN users u ON u.user_id=q.created_by WHERE q.course_id=? AND q.question_id=?",
+             (course_id, question_id),
+         ).fetchone()
+         return dict(r) if r else None
+diff --git a/repos/quizzes_repo.py b/repos/quizzes_repo.py
+--- a/repos/quizzes_repo.py
++++ b/repos/quizzes_repo.py
+@@ -68,15 +68,27 @@
+         r = self.db.execute("SELECT * FROM quiz_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
+         return dict(r) if r else None
+ 
++    def quiz_has_question(self, quiz_id, question_id):
++        r = self.db.execute(
++            "SELECT 1 FROM quiz_questions WHERE quiz_id=? AND question_id=?",
++            (quiz_id, question_id),
++        ).fetchone()
++        return bool(r)
++
+     def submit_attempt(self, attempt_id):
+-        self.db.execute("UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?", (now_iso(), attempt_id))
++        self.db.execute(
++            "UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=? AND submitted_at IS NULL",
++            (now_iso(), attempt_id),
++        )
+         self.db.commit()
+ 
+-    def upsert_answer(self, attempt_id, question_id, answer_json_text):
++    def upsert_answer(self, attempt_id, quiz_id, question_id, answer_json_text):
+         self.db.execute(
+-            "INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) VALUES (?,?,?,?) "
++            "INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) "
++            "SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM quiz_attempts WHERE attempt_id=? AND submitted_at IS NULL) "
++            "AND EXISTS (SELECT 1 FROM quiz_questions WHERE quiz_id=? AND question_id=?) "
+             "ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json, created_at=excluded.created_at",
+-            (attempt_id, question_id, answer_json_text, now_iso()),
++            (attempt_id, question_id, answer_json_text, now_iso(), attempt_id, quiz_id, question_id),
+         )
+         self.db.commit()
+```
+
+2. Per-vulnerability summary
+
+**VULN-002**
+
+* files changed: `app.py`
+* key checks added: `@require_site_admin` on `/admin/users` and `/api/users`
+* why mitigated: authenticated non-admin users can no longer enumerate all accounts; both endpoints now enforce an explicit server-side admin boundary.
+
+**VULN-003**
+
+* files changed: `app.py`
+* key checks added: `can_manage_course()` check before course edit form, update, and delete for both HTML and API routes
+* why mitigated: only the course creator or course staff can mutate a course; arbitrary logged-in users can no longer modify/delete foreign courses.
+
+**VULN-004**
+
+* files changed: `app.py`, `repos/memberships_repo.py`
+* key checks added: membership lookup before update/delete, `course_id` match validation, repository writes scoped by `course_id + membership_id`
+* why mitigated: foreign membership IDs from another course no longer pass; writes are bound to the authorized course context.
+
+**VULN-005**
+
+* files changed: `app.py`, `repos/posts_repo.py`
+* key checks added: load target post first, allow only author or course staff, repository write/delete can be scoped by `author_id`
+* why mitigated: same-course peers can no longer edit/delete another member’s post unless they have staff moderation privileges.
+
+**VULN-006**
+
+* files changed: `app.py`, `repos/comments_repo.py`
+* key checks added: load target comment first, allow only author or course staff, repository write/delete can be scoped by `author_id`
+* why mitigated: same-course peers can no longer edit/delete another member’s comment unless they have staff moderation privileges.
+
+**VULN-007**
+
+* files changed: `app.py`, `repos/questions_repo.py`
+* key checks added: question bank list/detail routes changed from course-member to course-staff only; repo supports safe retrieval without `answer_json` by default
+* why mitigated: students and ordinary members can no longer access answer-bearing question bank endpoints, and quiz delivery can use sanitized question reads.
+
+**VULN-008**
+
+* files changed: `app.py`
+* key checks added: `secure_filename`, absolute-path construction, containment check with `os.path.commonpath`
+* why mitigated: untrusted filenames can no longer escape the intended course upload directory through `../` or separator tricks.
+
+**VULN-009**
+
+* files changed: `app.py`, `repos/quizzes_repo.py`
+* key checks added: verify attempt belongs to `course_id + quiz_id + student_id`, reject if `submitted_at` already set, verify `question_id` belongs to the quiz, repository upsert guarded by quiz membership and unsubmitted state
+* why mitigated: post-submission answer overwrites are blocked, and arbitrary non-quiz question IDs can no longer be injected into a valid attempt.
+
+3. Functional verification commands
+
+The ZIP does not contain a `tests/` directory, so I could not confirm the exact in-repo functional suite path. The patch does compile, and a small Flask test-client smoke check passed for login, user-list authorization, and course update authorization.
+
+Use these copy-paste commands from the project root:
+
+```bash
+pip install -r requirements.txt
+python -m py_compile app.py repos/*.py
+```
+
+If your functional suite is mounted alongside this repo in the usual project layout, run:
+
+```bash
+pytest tests/functional_tests -v
+```
+
+Minimal smoke command:
+
+```bash
+python app.py
+```
+
+- Failed Functional test results:
+(venv) PS D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\py\educolla_py_repair> pytest -q tests/functional_tests
+.FFFF                                                                                                                                                                                             [100%]
+=============================================================================================== FAILURES ===============================================================================================
+___________________________________________________________________________ test_requirement_02_membership_role_enforcement ____________________________________________________________________________
+
+client = <FlaskClient <Flask 'app'>>, app_instance = <Flask 'app'>
+
+    def test_requirement_02_membership_role_enforcement(client, app_instance):
+        conn = open_db()
+        try:
+            ok(login(client, "admin", "admin123"))
+
+            ok(register(client, "req2_teacher", "pass123", "Req2 Teacher"))
+            ok(register(client, "req2_student", "pass123", "Req2 Student"))
+
+            teacher_id = get_user_id(conn, "req2_teacher")
+            student_id = get_user_id(conn, "req2_student")
+            assert teacher_id is not None
+            assert student_id is not None
+
+            # IMPORTANT: re-login admin because register may change session
+            ok(login(client, "admin", "admin123"))
+
+            ok(create_course(client, "Req2 Course", "Membership requirement course"))
+            course_id = get_course_id(conn, "Req2 Course")
+            assert course_id is not None
+
+            # admin adds teacher
+            r = add_member(client, course_id, teacher_id, "teacher")
+>           ok(r)
+
+..\..\..\..\1_project-level\py\educolla_py\tests\functional_tests\test_requirement_02_membership_role_enforcement.py:36:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _  
+
+resp = <WrapperTestResponse 27 bytes [404 NOT FOUND]>
+
+    def ok(resp):
+>       assert resp.status_code in (200, 201, 302), resp.get_data(as_text=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: {"error":"user_not_found"}
+
+tests\functional_tests\helpers.py:15: AssertionError
+_______________________________________________________________________________ test_requirement_03_post_comment_search ________________________________________________________________________________ 
+
+client = <FlaskClient <Flask 'app'>>, app_instance = <Flask 'app'>
+
+    def test_requirement_03_post_comment_search(client, app_instance):
+        conn = open_db()
+        try:
+            ok(login(client, "admin", "admin123"))
+
+            ok(register(client, "req3_member", "pass123", "Req3 Member"))
+            member_id = get_user_id(conn, "req3_member")
+            assert member_id is not None
+
+            ok(create_course(client, "Req3 Course", "Post comment search course"))
+            course_id = get_course_id(conn, "Req3 Course")
+            assert course_id is not None
+
+>           ok(add_member(client, course_id, member_id, "student"))
+
+..\..\..\..\1_project-level\py\educolla_py\tests\functional_tests\test_requirement_03_post_comment_search.py:27:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _  
+
+resp = <WrapperTestResponse 27 bytes [404 NOT FOUND]>
+
+    def ok(resp):
+>       assert resp.status_code in (200, 201, 302), resp.get_data(as_text=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: {"error":"user_not_found"}
+
+tests\functional_tests\helpers.py:15: AssertionError
+___________________________________________________________________________ test_requirement_04_assignment_submission_upload ___________________________________________________________________________ 
+
+client = <FlaskClient <Flask 'app'>>, app_instance = <Flask 'app'>
+
+    def test_requirement_04_assignment_submission_upload(client, app_instance):
+        conn = open_db()
+        try:
+            ok(login(client, "admin", "admin123"))
+
+            ok(register(client, "req4_teacher", "pass123", "Req4 Teacher"))
+            ok(register(client, "req4_student", "pass123", "Req4 Student"))
+
+            teacher_id = get_user_id(conn, "req4_teacher")
+            student_id = get_user_id(conn, "req4_student")
+            assert teacher_id is not None
+            assert student_id is not None
+
+            ok(create_course(client, "Req4 Course", "Assignment submission upload course"))
+            course_id = get_course_id(conn, "Req4 Course")
+            assert course_id is not None
+
+>           ok(add_member(client, course_id, teacher_id, "teacher"))
+
+..\..\..\..\1_project-level\py\educolla_py\tests\functional_tests\test_requirement_04_assignment_submission_upload.py:32:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _  
+
+resp = <WrapperTestResponse 27 bytes [404 NOT FOUND]>
+
+    def ok(resp):
+>       assert resp.status_code in (200, 201, 302), resp.get_data(as_text=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: {"error":"user_not_found"}
+
+tests\functional_tests\helpers.py:15: AssertionError
+___________________________________________________________________________ test_requirement_05_question_bank_quiz_attempts ____________________________________________________________________________ 
+
+client = <FlaskClient <Flask 'app'>>, app_instance = <Flask 'app'>
+
+    def test_requirement_05_question_bank_quiz_attempts(client, app_instance):
+        conn = open_db()
+        try:
+            ok(login(client, "admin", "admin123"))
+
+            ok(register(client, "req5_teacher", "pass123", "Req5 Teacher"))
+            ok(register(client, "req5_student", "pass123", "Req5 Student"))
+
+            teacher_id = get_user_id(conn, "req5_teacher")
+            student_id = get_user_id(conn, "req5_student")
+            assert teacher_id is not None
+            assert student_id is not None
+
+            ok(create_course(client, "Req5 Course", "Question quiz attempt course"))
+            course_id = get_course_id(conn, "Req5 Course")
+            assert course_id is not None
+
+>           ok(add_member(client, course_id, teacher_id, "teacher"))
+
+..\..\..\..\1_project-level\py\educolla_py\tests\functional_tests\test_requirement_05_question_bank_quiz_attempts.py:31:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _  
+
+resp = <WrapperTestResponse 27 bytes [404 NOT FOUND]>
+
+    def ok(resp):
+>       assert resp.status_code in (200, 201, 302), resp.get_data(as_text=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: {"error":"user_not_found"}
+
+tests\functional_tests\helpers.py:15: AssertionError
+======================================================================================= short test summary info ======================================================================================== 
+FAILED tests/functional_tests/test_requirement_02_membership_role_enforcement.py::test_requirement_02_membership_role_enforcement - AssertionError: {"error":"user_not_found"}
+FAILED tests/functional_tests/test_requirement_03_post_comment_search.py::test_requirement_03_post_comment_search - AssertionError: {"error":"user_not_found"}
+FAILED tests/functional_tests/test_requirement_04_assignment_submission_upload.py::test_requirement_04_assignment_submission_upload - AssertionError: {"error":"user_not_found"}
+FAILED tests/functional_tests/test_requirement_05_question_bank_quiz_attempts.py::test_requirement_05_question_bank_quiz_attempts - AssertionError: {"error":"user_not_found"}
+4 failed, 1 passed in 1.85s
+(venv) PS D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\py\educolla_py_repair>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+- Security exploit test results:
+(venv) PS D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\py\educolla_py_repair> pytest -q tests\security_tests\
+EEEEEEEEE                                                                                                                                                                                         [100%]
+================================================================================================ ERRORS ================================================================================================
+____________________________________________________________________ ERROR at setup of test_exploit_default_admin_credentials_work _____________________________________________________________________
+
+tmp_path = WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-602/test_exploit_default_admin_cre0')
+source_app_dir = WindowsPath('D:/000_phd_graudaiton/new_DRV/code/unkown/1_project-level/py/educolla_py_repair')
+
+    @pytest.fixture()
+    def app_instance(tmp_path, source_app_dir):
+        app_dir = tmp_path / "educollab_flask_mvc_v0"
+        shutil.copytree(source_app_dir, app_dir)
+    
+        # reset DB/uploads for each test
+        db_path = app_dir / "data" / "app.db"
+        if db_path.exists():
+            db_path.unlink()
+    
+        uploads_dir = app_dir / "data" / "uploads"
+        if uploads_dir.exists():
+            shutil.rmtree(uploads_dir)
+
+        host = "127.0.0.1"
+        sock = socket.socket()
+        sock.bind((host, 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        base_url = f"http://{host}:{port}"
+
+        env = os.environ.copy()
+        # IMPORTANT: keep session cookies stable & decodable
+        env["SECRET_KEY"] = "test-secret-key"
+        env["FLASK_SECRET_KEY"] = "test-secret-key"
+
+        # Ensure imports resolve from the copied app dir
+        env["PYTHONPATH"] = str(app_dir)
+
+        # Start server ON THE CHOSEN PORT (single start)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from app import app; "
+                    f"app.run(host='{host}', port={port}, debug=False, use_reloader=False)"
+                ),
+            ],
+            cwd=str(app_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+
+        # wait for readiness
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            try:
+                r = requests.get(base_url + "/login", timeout=0.5)
+                if r.status_code in (200, 302):
+                    break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+>           raise RuntimeError("Flask server did not start")
+E           RuntimeError: Flask server did not start
+
+tests\security_tests\conftest.py:92: RuntimeError
+_______________________________________________________________ ERROR at setup of test_exploit_any_authenticated_user_can_list_all_users _______________________________________________________________ 
+
+tmp_path = WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-602/test_exploit_any_authenticated0')
+source_app_dir = WindowsPath('D:/000_phd_graudaiton/new_DRV/code/unkown/1_project-level/py/educolla_py_repair')
+
+    @pytest.fixture()
+    def app_instance(tmp_path, source_app_dir):
+        app_dir = tmp_path / "educollab_flask_mvc_v0"
+        shutil.copytree(source_app_dir, app_dir)
+
+        # reset DB/uploads for each test
+        db_path = app_dir / "data" / "app.db"
+        if db_path.exists():
+            db_path.unlink()
+
+        uploads_dir = app_dir / "data" / "uploads"
+        if uploads_dir.exists():
+            shutil.rmtree(uploads_dir)
+
+        host = "127.0.0.1"
+        sock = socket.socket()
+        sock.bind((host, 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        base_url = f"http://{host}:{port}"
+
+        env = os.environ.copy()
+        # IMPORTANT: keep session cookies stable & decodable
+        env["SECRET_KEY"] = "test-secret-key"
+        env["FLASK_SECRET_KEY"] = "test-secret-key"
+
+        # Ensure imports resolve from the copied app dir
+        env["PYTHONPATH"] = str(app_dir)
+
+        # Start server ON THE CHOSEN PORT (single start)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from app import app; "
+                    f"app.run(host='{host}', port={port}, debug=False, use_reloader=False)"
+                ),
+            ],
+            cwd=str(app_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+
+        # wait for readiness
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            try:
+                r = requests.get(base_url + "/login", timeout=0.5)
+                if r.status_code in (200, 302):
+                    break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+>           raise RuntimeError("Flask server did not start")
+E           RuntimeError: Flask server did not start
+
+tests\security_tests\conftest.py:92: RuntimeError
+__________________________________________________________ ERROR at setup of test_exploit_any_authenticated_user_can_edit_other_users_course ___________________________________________________________ 
+
+tmp_path = WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-602/test_exploit_any_authenticated1')
+source_app_dir = WindowsPath('D:/000_phd_graudaiton/new_DRV/code/unkown/1_project-level/py/educolla_py_repair')
+
+    @pytest.fixture()
+    def app_instance(tmp_path, source_app_dir):
+        app_dir = tmp_path / "educollab_flask_mvc_v0"
+        shutil.copytree(source_app_dir, app_dir)
+
+        # reset DB/uploads for each test
+        db_path = app_dir / "data" / "app.db"
+        if db_path.exists():
+            db_path.unlink()
+
+        uploads_dir = app_dir / "data" / "uploads"
+        if uploads_dir.exists():
+            shutil.rmtree(uploads_dir)
+
+        host = "127.0.0.1"
+        sock = socket.socket()
+        sock.bind((host, 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        base_url = f"http://{host}:{port}"
+
+        env = os.environ.copy()
+        # IMPORTANT: keep session cookies stable & decodable
+        env["SECRET_KEY"] = "test-secret-key"
+        env["FLASK_SECRET_KEY"] = "test-secret-key"
+
+        # Ensure imports resolve from the copied app dir
+        env["PYTHONPATH"] = str(app_dir)
+
+        # Start server ON THE CHOSEN PORT (single start)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from app import app; "
+                    f"app.run(host='{host}', port={port}, debug=False, use_reloader=False)"
+                ),
+            ],
+            cwd=str(app_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+
+        # wait for readiness
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            try:
+                r = requests.get(base_url + "/login", timeout=0.5)
+                if r.status_code in (200, 302):
+                    break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+>           raise RuntimeError("Flask server did not start")
+E           RuntimeError: Flask server did not start
+
+tests\security_tests\conftest.py:92: RuntimeError
+_____________________________________________________ ERROR at setup of test_exploit_teacher_in_one_course_can_modify_membership_in_another_course _____________________________________________________ 
+
+tmp_path = WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-602/test_exploit_teacher_in_one_co0')
+source_app_dir = WindowsPath('D:/000_phd_graudaiton/new_DRV/code/unkown/1_project-level/py/educolla_py_repair')
+
+    @pytest.fixture()
+    def app_instance(tmp_path, source_app_dir):
+        app_dir = tmp_path / "educollab_flask_mvc_v0"
+        shutil.copytree(source_app_dir, app_dir)
+
+        # reset DB/uploads for each test
+        db_path = app_dir / "data" / "app.db"
+        if db_path.exists():
+            db_path.unlink()
+
+        uploads_dir = app_dir / "data" / "uploads"
+        if uploads_dir.exists():
+            shutil.rmtree(uploads_dir)
+
+        host = "127.0.0.1"
+        sock = socket.socket()
+        sock.bind((host, 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        base_url = f"http://{host}:{port}"
+
+        env = os.environ.copy()
+        # IMPORTANT: keep session cookies stable & decodable
+        env["SECRET_KEY"] = "test-secret-key"
+        env["FLASK_SECRET_KEY"] = "test-secret-key"
+
+        # Ensure imports resolve from the copied app dir
+        env["PYTHONPATH"] = str(app_dir)
+
+        # Start server ON THE CHOSEN PORT (single start)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from app import app; "
+                    f"app.run(host='{host}', port={port}, debug=False, use_reloader=False)"
+                ),
+            ],
+            cwd=str(app_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+
+        # wait for readiness
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            try:
+                r = requests.get(base_url + "/login", timeout=0.5)
+                if r.status_code in (200, 302):
+                    break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+>           raise RuntimeError("Flask server did not start")
+E           RuntimeError: Flask server did not start
+
+tests\security_tests\conftest.py:92: RuntimeError
+______________________________________________________________ ERROR at setup of test_exploit_course_member_can_edit_another_members_post ______________________________________________________________ 
+
+tmp_path = WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-602/test_exploit_course_member_can0')
+source_app_dir = WindowsPath('D:/000_phd_graudaiton/new_DRV/code/unkown/1_project-level/py/educolla_py_repair')
+
+    @pytest.fixture()
+    def app_instance(tmp_path, source_app_dir):
+        app_dir = tmp_path / "educollab_flask_mvc_v0"
+        shutil.copytree(source_app_dir, app_dir)
+
+        # reset DB/uploads for each test
+        db_path = app_dir / "data" / "app.db"
+        if db_path.exists():
+            db_path.unlink()
+
+        uploads_dir = app_dir / "data" / "uploads"
+        if uploads_dir.exists():
+            shutil.rmtree(uploads_dir)
+
+        host = "127.0.0.1"
+        sock = socket.socket()
+        sock.bind((host, 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        base_url = f"http://{host}:{port}"
+
+        env = os.environ.copy()
+        # IMPORTANT: keep session cookies stable & decodable
+        env["SECRET_KEY"] = "test-secret-key"
+        env["FLASK_SECRET_KEY"] = "test-secret-key"
+
+        # Ensure imports resolve from the copied app dir
+        env["PYTHONPATH"] = str(app_dir)
+
+        # Start server ON THE CHOSEN PORT (single start)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from app import app; "
+                    f"app.run(host='{host}', port={port}, debug=False, use_reloader=False)"
+                ),
+            ],
+            cwd=str(app_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+
+        # wait for readiness
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            try:
+                r = requests.get(base_url + "/login", timeout=0.5)
+                if r.status_code in (200, 302):
+                    break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+>           raise RuntimeError("Flask server did not start")
+E           RuntimeError: Flask server did not start
+
+tests\security_tests\conftest.py:92: RuntimeError
+___________________________________________________________ ERROR at setup of test_exploit_course_member_can_delete_another_members_comment ____________________________________________________________ 
+
+tmp_path = WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-602/test_exploit_course_member_can1')
+source_app_dir = WindowsPath('D:/000_phd_graudaiton/new_DRV/code/unkown/1_project-level/py/educolla_py_repair')
+
+    @pytest.fixture()
+    def app_instance(tmp_path, source_app_dir):
+        app_dir = tmp_path / "educollab_flask_mvc_v0"
+        shutil.copytree(source_app_dir, app_dir)
+
+        # reset DB/uploads for each test
+        db_path = app_dir / "data" / "app.db"
+        if db_path.exists():
+            db_path.unlink()
+
+        uploads_dir = app_dir / "data" / "uploads"
+        if uploads_dir.exists():
+            shutil.rmtree(uploads_dir)
+
+        host = "127.0.0.1"
+        sock = socket.socket()
+        sock.bind((host, 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        base_url = f"http://{host}:{port}"
+
+        env = os.environ.copy()
+        # IMPORTANT: keep session cookies stable & decodable
+        env["SECRET_KEY"] = "test-secret-key"
+        env["FLASK_SECRET_KEY"] = "test-secret-key"
+
+        # Ensure imports resolve from the copied app dir
+        env["PYTHONPATH"] = str(app_dir)
+
+        # Start server ON THE CHOSEN PORT (single start)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from app import app; "
+                    f"app.run(host='{host}', port={port}, debug=False, use_reloader=False)"
+                ),
+            ],
+            cwd=str(app_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+
+        # wait for readiness
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            try:
+                r = requests.get(base_url + "/login", timeout=0.5)
+                if r.status_code in (200, 302):
+                    break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+>           raise RuntimeError("Flask server did not start")
+E           RuntimeError: Flask server did not start
+
+tests\security_tests\conftest.py:92: RuntimeError
+_________________________________________________________________ ERROR at setup of test_exploit_student_can_read_question_answer_json _________________________________________________________________ 
+
+tmp_path = WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-602/test_exploit_student_can_read_0')
+source_app_dir = WindowsPath('D:/000_phd_graudaiton/new_DRV/code/unkown/1_project-level/py/educolla_py_repair')
+
+    @pytest.fixture()
+    def app_instance(tmp_path, source_app_dir):
+        app_dir = tmp_path / "educollab_flask_mvc_v0"
+        shutil.copytree(source_app_dir, app_dir)
+
+        # reset DB/uploads for each test
+        db_path = app_dir / "data" / "app.db"
+        if db_path.exists():
+            db_path.unlink()
+
+        uploads_dir = app_dir / "data" / "uploads"
+        if uploads_dir.exists():
+            shutil.rmtree(uploads_dir)
+
+        host = "127.0.0.1"
+        sock = socket.socket()
+        sock.bind((host, 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        base_url = f"http://{host}:{port}"
+
+        env = os.environ.copy()
+        # IMPORTANT: keep session cookies stable & decodable
+        env["SECRET_KEY"] = "test-secret-key"
+        env["FLASK_SECRET_KEY"] = "test-secret-key"
+
+        # Ensure imports resolve from the copied app dir
+        env["PYTHONPATH"] = str(app_dir)
+
+        # Start server ON THE CHOSEN PORT (single start)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from app import app; "
+                    f"app.run(host='{host}', port={port}, debug=False, use_reloader=False)"
+                ),
+            ],
+            cwd=str(app_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+
+        # wait for readiness
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            try:
+                r = requests.get(base_url + "/login", timeout=0.5)
+                if r.status_code in (200, 302):
+                    break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+>           raise RuntimeError("Flask server did not start")
+E           RuntimeError: Flask server did not start
+
+tests\security_tests\conftest.py:92: RuntimeError
+_____________________________________________________________________ ERROR at setup of test_exploit_upload_filename_triggers_500 ______________________________________________________________________ 
+
+tmp_path = WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-602/test_exploit_upload_filename_t0')
+source_app_dir = WindowsPath('D:/000_phd_graudaiton/new_DRV/code/unkown/1_project-level/py/educolla_py_repair')
+
+    @pytest.fixture()
+    def app_instance(tmp_path, source_app_dir):
+        app_dir = tmp_path / "educollab_flask_mvc_v0"
+        shutil.copytree(source_app_dir, app_dir)
+
+        # reset DB/uploads for each test
+        db_path = app_dir / "data" / "app.db"
+        if db_path.exists():
+            db_path.unlink()
+
+        uploads_dir = app_dir / "data" / "uploads"
+        if uploads_dir.exists():
+            shutil.rmtree(uploads_dir)
+
+        host = "127.0.0.1"
+        sock = socket.socket()
+        sock.bind((host, 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        base_url = f"http://{host}:{port}"
+
+        env = os.environ.copy()
+        # IMPORTANT: keep session cookies stable & decodable
+        env["SECRET_KEY"] = "test-secret-key"
+        env["FLASK_SECRET_KEY"] = "test-secret-key"
+
+        # Ensure imports resolve from the copied app dir
+        env["PYTHONPATH"] = str(app_dir)
+
+        # Start server ON THE CHOSEN PORT (single start)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from app import app; "
+                    f"app.run(host='{host}', port={port}, debug=False, use_reloader=False)"
+                ),
+            ],
+            cwd=str(app_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+
+        # wait for readiness
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            try:
+                r = requests.get(base_url + "/login", timeout=0.5)
+                if r.status_code in (200, 302):
+                    break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+>           raise RuntimeError("Flask server did not start")
+E           RuntimeError: Flask server did not start
+
+tests\security_tests\conftest.py:92: RuntimeError
+_________________________________________________ ERROR at setup of test_exploit_student_can_change_answers_after_submit_and_answer_non_quiz_question __________________________________________________ 
+
+tmp_path = WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-602/test_exploit_student_can_chang0')
+source_app_dir = WindowsPath('D:/000_phd_graudaiton/new_DRV/code/unkown/1_project-level/py/educolla_py_repair')
+
+    @pytest.fixture()
+    def app_instance(tmp_path, source_app_dir):
+        app_dir = tmp_path / "educollab_flask_mvc_v0"
+        shutil.copytree(source_app_dir, app_dir)
+
+        # reset DB/uploads for each test
+        db_path = app_dir / "data" / "app.db"
+        if db_path.exists():
+            db_path.unlink()
+
+        uploads_dir = app_dir / "data" / "uploads"
+        if uploads_dir.exists():
+            shutil.rmtree(uploads_dir)
+
+        host = "127.0.0.1"
+        sock = socket.socket()
+        sock.bind((host, 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+        base_url = f"http://{host}:{port}"
+
+        env = os.environ.copy()
+        # IMPORTANT: keep session cookies stable & decodable
+        env["SECRET_KEY"] = "test-secret-key"
+        env["FLASK_SECRET_KEY"] = "test-secret-key"
+
+        # Ensure imports resolve from the copied app dir
+        env["PYTHONPATH"] = str(app_dir)
+
+        # Start server ON THE CHOSEN PORT (single start)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from app import app; "
+                    f"app.run(host='{host}', port={port}, debug=False, use_reloader=False)"
+                ),
+            ],
+            cwd=str(app_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+
+        # wait for readiness
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            try:
+                r = requests.get(base_url + "/login", timeout=0.5)
+                if r.status_code in (200, 302):
+                    break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+>           raise RuntimeError("Flask server did not start")
+E           RuntimeError: Flask server did not start
+
+tests\security_tests\conftest.py:92: RuntimeError
+======================================================================================= short test summary info ======================================================================================== 
+ERROR tests/security_tests/test_vuln_001_default_admin_credentials.py::test_exploit_default_admin_credentials_work - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_002_user_list_access_control.py::test_exploit_any_authenticated_user_can_list_all_users - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_003_course_edit_delete_bac.py::test_exploit_any_authenticated_user_can_edit_other_users_course - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_004_cross_course_membership_idor.py::test_exploit_teacher_in_one_course_can_modify_membership_in_another_course - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_005_post_idor.py::test_exploit_course_member_can_edit_another_members_post - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_006_comment_idor.py::test_exploit_course_member_can_delete_another_members_comment - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_007_question_answer_leak.py::test_exploit_student_can_read_question_answer_json - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_008_upload_path_traversal.py::test_exploit_upload_filename_triggers_500 - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_009_quiz_answer_tampering.py::test_exploit_student_can_change_answers_after_submit_and_answer_non_quiz_question - RuntimeError: Flask server did not start
+9 errors in 118.01s (0:01:58)
+(venv) PS D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\py\educolla_py_repair>
+
+
+```

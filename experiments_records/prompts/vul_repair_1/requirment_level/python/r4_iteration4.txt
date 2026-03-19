@@ -1,0 +1,287 @@
+
+
+You are a senior software engineer fixing vulnerabilities in a web application after a previous repair attempt.
+
+Repository input
+
+* The full project codebase is provided as a ZIP archive.
+* This is a requirement-level repair task on the current repository state after implementing the current requirement increment.
+* Treat the repository as the full runnable codebase produced for the current requirement stage.
+* Focus on vulnerabilities reported for the current requirement stage.
+* Prior functionality from earlier requirements is in scope only if it remains reachable in the current repository state and is materially relevant to the reported vulnerabilities for this requirement stage.
+* Assume you can read and modify files inside the ZIP repository.
+* Do NOT ask for files outside the ZIP.
+
+Task
+
+* Implement code changes guided by the vulnerability detection (VD) report below.
+* This is a second-round repair task after a previous repair attempt did not fully succeed.
+* Use the failed functional test results and security test results as additional repair guidance.
+* Apply minimal, correct patches while preserving intended functionality of the current requirement stage.
+
+Repair objective
+
+* Fix the vulnerabilities that remain unresolved after the previous repair attempt.
+* Preserve the original vulnerability identity from the VD report.
+* Treat the VD report as the authoritative baseline for what must be fixed.
+* Focus only on vulnerabilities reported for the current requirement stage.
+* Use the failed functional test results to identify repair-induced regressions, outdated expectations, or broken requirement-stage functionality that must be restored or aligned.
+* Use the security test results to identify which exploit paths still remain effective or which intended mitigations did not hold.
+
+Hard constraints
+
+* Keep the project runnable.
+* Do NOT rename routes, database tables, or response JSON fields unless a test-alignment update is strictly required by the repaired security design and remains minimal.
+* Do NOT change authentication/session key names or role names.
+* No new dependencies. Avoid refactors unrelated to the fixes.
+* Only change files necessary for the fixes.
+* Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or docs.
+
+Primary verification goal (must satisfy)
+
+* The full functional test suite for the current repository state must PASS after the patch.
+
+Secondary verification goal
+
+* The targeted security exploit tests for the reported vulnerabilities should no longer succeed after the patch.
+
+Second-round repair rules
+
+1. Treat the Vulnerability Detection Report (VD) as the authoritative security baseline.
+2. Preserve the vulnerability identities from the VD report. Do not redefine the issues.
+3. Focus on vulnerabilities that remain unresolved, partially fixed, incorrectly fixed, bypassable, or that caused closely related repair-induced regressions.
+4. Limit analysis and repair to the vulnerabilities reported for the current requirement stage; do not broaden the task into whole-project rediscovery or unrelated hardening.
+5. Use the failed functional test results to detect where the previous repair broke intended requirement-stage behavior, where test expectations are now stale after a correct security repair, or where route/contract expectations need narrow alignment.
+6. Use the security test results to detect where the previous repair failed to eliminate the exploit path.
+7. Prefer minimal corrective edits over broad rewrites.
+8. Fix the actual remaining root cause, not just the visible symptom.
+9. If the previous repair introduced a regression while trying to fix a vulnerability, repair both:
+
+   * the original unresolved security issue
+   * the regression introduced by the failed fix
+10. Enforce authorization, ownership, relationship, and state checks server-side.
+11. Keep behavior and response formats as consistent as possible with the existing application unless a security fix requires a narrow change.
+12. Where applicable, scope reads/writes to the authorized parent resource and authorized principal context.
+13. Do not remove functionality merely to make tests pass.
+14. Functional tests MAY be modified in this second-round repair task, but only under the strict test-alignment rules below.
+15. Earlier-stage functionality should be considered only when it is still reachable in the current repository state and materially relevant to fixing the current requirement-stage vulnerabilities.
+
+Test-alignment rules for failed functional tests
+
+Functional tests are allowed to be updated in this task, but only when necessary to align them with the corrected requirement-stage behavior after the security repair.
+
+Allowed test changes:
+
+* update outdated expectations when the previous test assumed insecure behavior that the repaired code should no longer allow
+* update request parameters, setup steps, or assertions when a repaired route or workflow now requires the secure and intended usage path
+* update functional tests when the previous repair changed a narrow contract in a way that is necessary, correct, and consistent with the VD-driven fix
+* restore broken functional coverage so the test validates the intended secure behavior rather than the previously vulnerable behavior
+
+Disallowed test changes:
+
+* deleting tests only to avoid failures
+* weakening assertions so much that the test no longer validates meaningful requirement behavior
+* changing tests to accept behavior that violates the VD report’s repair intent
+* masking unresolved vulnerabilities by rewriting the test around the exploit instead of fixing the code
+* changing unrelated tests outside the current requirement-stage scope
+
+When a failed functional test conflicts with the required vulnerability fix:
+
+* preserve the security fix
+* update the functional test to validate the corrected secure behavior
+* keep the update minimal and specific
+* do not broaden test edits beyond what is needed
+
+How to use the additional iteration-2 inputs
+
+* Failed functional test results:
+  Use these to identify which previous changes broke valid workflows, contracts, or route semantics in the current requirement stage, and also where a test may still encode insecure or outdated expectations. Restore intended behavior or minimally update the failed functional tests so they validate the corrected secure behavior.
+* Security test results:
+  Use these to identify which exploit paths are still reachable, which validations are incomplete, and which repair paths remain bypassable.
+* If there is a conflict between a previous repair attempt and the repository’s intended behavior, preserve intended requirement-stage behavior while still fixing the vulnerability correctly.
+* If a previous repair changed an endpoint contract and functional tests now fail, restore compatibility when possible; otherwise, make the minimal functional test update required to validate the corrected secure contract.
+
+Authoritative input: Vulnerability Detection Report (VD)
+<<<VD_REPORT_START
+PASTE VD REPORT HERE
+VD_REPORT_END>>>
+
+Additional input: Previous repair patch / summary
+<<<PREVIOUS_REPAIR_START
+PASTE PREVIOUS REPAIR PATCH OR SUMMARY HERE
+PREVIOUS_REPAIR_END>>>
+
+Additional input: Failed functional test results
+
+def test_r4_assignment_upload_submission_flow(client, app_instance):
+    api_login(client, "admin", "admin123")
+
+    course_res = client.post(
+        "/api/courses",
+        json={"title": "R4 Course", "description": "Assignments"},
+    )
+    assert course_res.status_code == 201
+    course_id = course_res.get_json()["course"]["course_id"]
+
+    reg_student = api_register(client, "student_r4")
+    assert reg_student.status_code == 201
+    student_id = reg_student.get_json()["user"]["user_id"]
+
+    api_logout(client)
+    api_login(client, "admin", "admin123")
+    add_member_res = add_member(client, course_id, student_id, "student")
+    assert add_member_res.status_code in (200, 201)
+
+    create_assignment_res = client.post(
+        f"/api/courses/{course_id}/assignments",
+        json={
+            "title": "HW1",
+            "description": "Solve task",
+            "due_at": "2026-03-31 23:59",
+        },
+    )
+    assert create_assignment_res.status_code == 201
+    assignment = create_assignment_res.get_json()["assignment"]
+    assignment_id = assignment["assignment_id"]
+    assert assignment["title"] == "HW1"
+
+    list_assignments_res = client.get(f"/api/courses/{course_id}/assignments")
+    assert list_assignments_res.status_code == 200
+    listed_assignments = list_assignments_res.get_json()["assignments"]
+    assert any(item["assignment_id"] == assignment_id for item in listed_assignments)
+
+    update_assignment_res = client.put(
+        f"/api/courses/{course_id}/assignments/{assignment_id}",
+        json={
+            "title": "HW1 updated",
+            "description": "Revised",
+            "due_at": "2026-04-01 10:00",
+        },
+    )
+    assert update_assignment_res.status_code == 200
+    assert update_assignment_res.get_json()["assignment"]["title"] == "HW1 updated"
+
+    upload_res = client.post(
+        f"/api/courses/{course_id}/uploads",
+        data={"file": (BytesIO(b"teacher handout"), "handout.txt")},
+        content_type="multipart/form-data",
+    )
+    assert upload_res.status_code == 201
+    upload = upload_res.get_json()["upload"]
+    upload_id = upload["upload_id"]
+    assert upload["original_name"] == "handout.txt"
+
+    api_logout(client)
+    student_client = app_instance["app"].test_client()
+    api_login(student_client, "student_r4")
+
+    student_assignments_res = student_client.get(f"/api/courses/{course_id}/assignments")
+    assert student_assignments_res.status_code == 200
+    assert student_assignments_res.get_json()["assignments"][0]["assignment_id"] == assignment_id
+
+    student_uploads_res = student_client.get(f"/api/courses/{course_id}/uploads")
+    assert student_uploads_res.status_code == 200
+    assert any(item["upload_id"] == upload_id for item in student_uploads_res.get_json()["uploads"])
+
+    create_submission_res = student_client.post(
+        f"/api/courses/{course_id}/assignments/{assignment_id}/submissions",
+        json={
+            "content_text": "my answer",
+            "attachment_upload_id": upload_id,
+        },
+    )
+    assert create_submission_res.status_code == 201
+    submission = create_submission_res.get_json()["submission"]
+    submission_id = submission["submission_id"]
+    assert submission["student_id"] == student_id
+    assert submission["attachment_upload_id"] == upload_id
+
+    my_submissions_res = student_client.get("/api/my/submissions")
+    assert my_submissions_res.status_code == 200
+    mine = my_submissions_res.get_json()["submissions"]
+    assert any(item["submission_id"] == submission_id and item["course_id"] == course_id for item in mine)
+
+    update_submission_res = student_client.put(
+        f"/api/courses/{course_id}/assignments/{assignment_id}/submissions/{submission_id}",
+        json={
+            "content_text": "updated answer",
+            "attachment_upload_id": upload_id,
+        },
+    )
+    assert update_submission_res.status_code == 200
+    assert update_submission_res.get_json()["submission"]["content_text"] == "updated answer"
+
+    api_logout(student_client)
+
+    api_login(client, "admin", "admin123")
+    staff_view_res = client.get(f"/api/courses/{course_id}/assignments/{assignment_id}/submissions")
+    assert staff_view_res.status_code == 200
+    submissions = staff_view_res.get_json()["submissions"]
+    assert any(item["submission_id"] == submission_id and item["student_id"] == student_id for item in submissions)
+
+    download_res = client.get(f"/api/courses/{course_id}/uploads/{upload_id}/download")
+    assert download_res.status_code == 200
+    body = download_res.data
+    assert b"teacher handout" in body
+    download_res.close()
+    del download_res
+
+    delete_upload_res = client.delete(f"/api/courses/{course_id}/uploads/{upload_id}")
+    assert delete_upload_res.status_code == 200
+    assert delete_upload_res.get_json()["deleted_upload_id"] == upload_id
+
+    delete_assignment_res = client.delete(f"/api/courses/{course_id}/assignments/{assignment_id}")
+    assert delete_assignment_res.status_code == 200
+    assert delete_assignment_res.get_json()["deleted_assignment_id"] == assignment_id
+
+
+
+Additional input: Security test results
+<<<SECURITY_TEST_RESULTS_START
+PASTE SECURITY TEST RESULTS HERE
+SECURITY_TEST_RESULTS_END>>>
+
+Repair requirements
+
+* Implement each vulnerability’s repair_plan consistent with its root_cause and evidence_snippets.
+* Apply fixes at the patch_locations specified in the VD report.
+* If the previous repair partially implemented a fix, complete or correct it rather than replacing it with an unrelated rewrite.
+* If the previous repair introduced a regression, restore the broken behavior in a way that still preserves the vulnerability fix.
+* Enforce authorization/ownership/relationship checks server-side (not client-side).
+* Where applicable, scope write operations to the authorized parent resource (e.g., course_id + membership_id).
+* Where applicable, verify the target object belongs to the expected parent object before mutation or disclosure.
+* Where applicable, prevent post-state mutations after a terminal state has been reached.
+* Keep error handling consistent with existing patterns in the repo (e.g., 401/403/404) and do not leak sensitive details.
+* If a failed functional test encodes insecure, outdated, or incompatible expectations after the correct security repair, update that failed functional test minimally so it validates the intended secure requirement-stage behavior.
+
+Implementation guidance
+
+* Prefer patching the existing logic at the route/controller/service/repository layers already identified in the VD report.
+* If the previous repair added incomplete checks, complete them consistently across all parallel endpoints in the current requirement stage.
+* If one layer was patched but another layer still trusts attacker-controlled identifiers, finish the fix at the missing layer.
+* If a repository write path is under-scoped, bind it to the authorized parent resource and/or owner context.
+* If a route now rejects legitimate requests because of an over-restrictive or incompatible patch, restore the valid path without removing the security boundary required by the VD report.
+* If a functional test still asserts pre-fix insecure behavior, update the test to assert the post-fix secure behavior instead of reverting the code to the vulnerable behavior.
+
+Output format (strict)
+
+1. Unified diff patch (git apply compatible). Include only changed files, including functional test files if they were minimally updated.
+
+2. Per-vulnerability summary (group by vulnerability_id):
+
+   * files changed
+   * key checks added
+   * regression restored (if any)
+   * failed functional tests updated (if any, and why)
+   * why the vulnerability is mitigated (brief)
+
+3. Functional verification commands (copy-paste):
+
+   * run the full functional test suite (exact command)
+   * optional minimal functional smoke command if full suite is slow
+
+4. Security verification commands (copy-paste):
+
+   * run the relevant security tests affected by the repaired vulnerabilities
+   * optional single-test commands for the most relevant repaired paths
+

@@ -1,0 +1,463 @@
+[
+{
+"vulnerability_id": "VULN-001",
+"vulnerability_type_code": 9,
+"vulnerability_type": "Authentication Flaw",
+"cwe_id": "CWE-798",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 9.1,
+"severity_level": "critical",
+"confidence_score": 99,
+"confidence_level": "high",
+"summary": "The application automatically creates a privileged admin account with the predictable credentials admin/admin123 during bootstrap. Any external user who knows or guesses these credentials can authenticate as the administrator and access privileged user, course, and membership management functionality.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+},
+{
+"type": "background trigger",
+"method": "INIT",
+"route": "application bootstrap"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 15,
+"line_end": 16,
+"function_name": "create_app",
+"code": "init_db(app)\nseed_admin(app)",
+"reason": "The application invokes the admin seeding routine automatically during normal startup."
+},
+{
+"file_path": "models/db.py",
+"line_start": 61,
+"line_end": 70,
+"function_name": "seed_admin",
+"code": "def seed_admin(app):\n    with app.app_context():\n        db = get_db()\n        existing = db.execute('SELECT user_id FROM users WHERE username = ?', ('admin',)).fetchone()\n        if existing is None:\n            db.execute(\n                'INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)',\n                ('admin', generate_password_hash('admin123'), 'Default Admin')\n            )\n            db.commit()",
+"reason": "The bootstrap logic inserts a fixed administrator username and a predictable password if the account does not already exist."
+},
+{
+"file_path": "controllers/auth_controller.py",
+"line_start": 84,
+"line_end": 95,
+"function_name": "api_login",
+"code": "@auth_bp.route('/api/auth/login', methods=['POST'])\ndef api_login():\n    data = request.get_json(silent=True) or {}\n    username = str(data.get('username', '')).strip()\n    password = str(data.get('password', ''))\n    user = get_user_by_username(username)\n\n    if user is None or not check_password_hash(user['password_hash'], password):\n        return jsonify({'success': False, 'error': 'invalid_credentials'}), 401\n\n    login_user(user)\n    return jsonify({'success': True, 'user': _user_to_dict(user)})",
+"reason": "The standard login path accepts any valid credentials, so the seeded default admin credentials are directly exploitable."
+}
+],
+"root_cause_code": 10,
+"root_cause": "The application ships with a built-in privileged account and predictable credentials, then provisions that account automatically during bootstrap instead of requiring secure first-run initialization.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 15,
+"line_end": 16,
+"function_name": "create_app"
+},
+{
+"file_path": "models/db.py",
+"line_start": 61,
+"line_end": 70,
+"function_name": "seed_admin"
+}
+],
+"repair_plan": "Remove the hard-coded administrator credentials from source code. Replace bootstrap seeding with an explicit one-time initialization flow that requires a deployment-provided secret or environment-controlled initial password, and do not create a privileged account automatically on every application startup.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"vulnerability_type_code": 10,
+"vulnerability_type": "Session Weakness",
+"cwe_id": "CWE-321",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.7,
+"severity_level": "high",
+"confidence_score": 89,
+"confidence_level": "high",
+"summary": "The application uses a hard-coded Flask SECRET_KEY to protect its session cookie. Anyone who obtains the source code or otherwise learns this fixed secret can forge a signed session containing an arbitrary current_user_id and impersonate other users, including the seeded administrator.",
+"entry_points": [
+{
+"type": "other",
+"method": "COOKIE",
+"route": "Flask session cookie"
+},
+{
+"type": "background trigger",
+"method": "INIT",
+"route": "application bootstrap"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 10,
+"line_end": 13,
+"function_name": "create_app",
+"code": "def create_app():\n    app = Flask(**name**)\n    app.config['SECRET_KEY'] = 'educollab-dev-secret-key'\n    app.config['DATABASE'] = 'data/app.db'",
+"reason": "The secret used to protect Flask session state is hard-coded and constant across deployments."
+},
+{
+"file_path": "utils/auth.py",
+"line_start": 9,
+"line_end": 20,
+"function_name": "get_current_user / login_user",
+"code": "SESSION_USER_KEY = 'current_user_id'\n\n\ndef get_current_user():\n    user_id = session.get(SESSION_USER_KEY)\n    if not user_id:\n        return None\n    return get_user_by_id(user_id)\n\n\ndef login_user(user):\n    session[SESSION_USER_KEY] = user['user_id']",
+"reason": "Authentication state depends directly on the signed session cookie value current_user_id, so a forged session cookie would control the effective logged-in identity."
+}
+],
+"root_cause_code": 8,
+"root_cause": "Session integrity relies on a static application secret embedded in source code instead of a unique deployment-time secret managed outside the repository.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 10,
+"line_end": 13,
+"function_name": "create_app"
+},
+{
+"file_path": "utils/auth.py",
+"line_start": 9,
+"line_end": 20,
+"function_name": "get_current_user / login_user"
+}
+],
+"repair_plan": "Load the Flask SECRET_KEY from a strong deployment-specific secret source such as environment configuration, refuse startup when the secret is missing or still set to a known default, and rotate any existing sessions created under the exposed key. Keep authentication decisions bound to server-trusted session material only after the signing key has been secured.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-003",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.8,
+"severity_level": "medium",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "Any authenticated user can access the user-listing endpoints that appear administrative. This exposes all registered usernames, display names, user IDs, and account creation timestamps without any administrator role check.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/admin/users"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/users"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "controllers/auth_controller.py",
+"line_start": 122,
+"line_end": 132,
+"function_name": "users_page / api_users",
+"code": "@auth_bp.route('/admin/users', methods=['GET'])\n@login_required\ndef users_page():\n    return render_template('admin/users.html', users=list_users(), current_user=get_current_user())\n\n\[n@auth_bp.route](mailto:n@auth_bp.route)('/api/users', methods=['GET'])\n@login_required\ndef api_users():\n    users = [_user_to_dict(user) for user in list_users()]\n    return jsonify({'success': True, 'users': users})",
+"reason": "Both endpoints require only authentication and do not enforce any administrator or privileged-role authorization check."
+},
+{
+"file_path": "models/user_repo.py",
+"line_start": 30,
+"line_end": 34,
+"function_name": "list_users",
+"code": "def list_users():\n    db = get_db()\n    return db.execute(\n        'SELECT user_id, username, display_name, created_at FROM users ORDER BY user_id ASC'\n    ).fetchall()",
+"reason": "The repository returns a full account listing, so the missing role check in the controller directly exposes all user records to any logged-in account."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Administrative user enumeration functionality is guarded only by a generic login check and not by a dedicated authorization rule for privileged users.",
+"patch_locations": [
+{
+"file_path": "controllers/auth_controller.py",
+"line_start": 122,
+"line_end": 132,
+"function_name": "users_page / api_users"
+},
+{
+"file_path": "models/user_repo.py",
+"line_start": 30,
+"line_end": 34,
+"function_name": "list_users"
+}
+],
+"repair_plan": "Restrict these endpoints to explicitly authorized administrators. Add a server-side role check before calling list_users, return 403 for non-admin users, and keep any non-admin directory functionality limited to the minimum fields and scope actually required.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-004",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.6,
+"severity_level": "high",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "Any authenticated user can edit or delete another user's course by supplying a different course_id. The application checks only that the caller is logged in and never verifies that the caller created the target course or otherwise has authority over it.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/edit"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "controllers/course_controller.py",
+"line_start": 79,
+"line_end": 85,
+"function_name": "edit_course_page",
+"code": "@course_bp.route('/courses/[int:course_id](int:course_id)/edit', methods=['GET'])\n@login_required\ndef edit_course_page(course_id):\n    course = get_course_by_id(course_id)\n    if course is None:\n        return render_template('404.html', current_user=get_current_user()), 404\n    return render_template('courses/edit.html', course=course, current_user=get_current_user())",
+"reason": "Any logged-in user can open the edit page for an arbitrary course_id; there is no ownership or role verification."
+},
+{
+"file_path": "controllers/course_controller.py",
+"line_start": 88,
+"line_end": 114,
+"function_name": "update_course_submit / api_update_course",
+"code": "@course_bp.route('/courses/[int:course_id](int:course_id)', methods=['POST'])\n@login_required\ndef update_course_submit(course_id):\n    course = get_course_by_id(course_id)\n    ...\n    update_course(course_id, title, description)\n\[n@course_bp.route](mailto:n@course_bp.route)('/api/courses/[int:course_id](int:course_id)', methods=['PUT'])\n@login_required\ndef api_update_course(course_id):\n    course = get_course_by_id(course_id)\n    ...\n    updated = update_course(course_id, title, description)\n    return jsonify({'success': True, 'course': _course_to_dict(updated)})",
+"reason": "Both update paths require only authentication, then write to the user-supplied course_id without verifying that the current user owns that course."
+},
+{
+"file_path": "controllers/course_controller.py",
+"line_start": 117,
+"line_end": 134,
+"function_name": "delete_course_submit / api_delete_course",
+"code": "@course_bp.route('/courses/[int:course_id](int:course_id)/delete', methods=['POST'])\n@login_required\ndef delete_course_submit(course_id):\n    course = get_course_by_id(course_id)\n    if course is None:\n        return render_template('404.html', current_user=get_current_user()), 404\n    delete_course(course_id)\n    return redirect(url_for('courses.list_courses_page'))\n\[n@course_bp.route](mailto:n@course_bp.route)('/api/courses/[int:course_id](int:course_id)', methods=['DELETE'])\n@login_required\ndef api_delete_course(course_id):\n    ...\n    delete_course(course_id)\n    return jsonify({'success': True, 'deleted_course_id': course_id})",
+"reason": "Deletion is performed for any existing course_id once the caller is logged in; no creator or admin authorization is enforced."
+},
+{
+"file_path": "models/course_repo.py",
+"line_start": 31,
+"line_end": 44,
+"function_name": "update_course / delete_course",
+"code": "def update_course(course_id, title, description):\n    db = get_db()\n    db.execute(\n        'UPDATE courses SET title = ?, description = ? WHERE course_id = ?',\n        (title, description, course_id),\n    )\n    db.commit()\n    return get_course_by_id(course_id)\n\n\ndef delete_course(course_id):\n    db = get_db()\n    db.execute('DELETE FROM courses WHERE course_id = ?', (course_id,))\n    db.commit()",
+"reason": "The underlying write operations are scoped only by course_id and rely entirely on the controller for authorization, which is absent."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Course mutation endpoints trust a user-controlled course identifier and do not verify that the authenticated user owns the targeted course or has an explicitly authorized elevated role.",
+"patch_locations": [
+{
+"file_path": "controllers/course_controller.py",
+"line_start": 79,
+"line_end": 134,
+"function_name": "edit_course_page / update_course_submit / api_update_course / delete_course_submit / api_delete_course"
+},
+{
+"file_path": "models/course_repo.py",
+"line_start": 31,
+"line_end": 44,
+"function_name": "update_course / delete_course"
+}
+],
+"repair_plan": "Before serving the edit page or applying update and delete operations, load the target course and verify that the current user is the course creator or an explicitly authorized administrator. Enforce this authorization in the controller and, where practical, scope repository writes by both course_id and created_by so unauthorized cross-user mutations cannot succeed even if a controller check is missed.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-005",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.9,
+"severity_level": "medium",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "Any authenticated user can enumerate the full membership roster of any course by calling the member-list endpoints with an arbitrary course_id. This exposes course membership, usernames, display names, user IDs, and course roles without requiring membership in the target course.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/members"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/members"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "controllers/membership_controller.py",
+"line_start": 110,
+"line_end": 131,
+"function_name": "list_members_page / api_list_members",
+"code": "@membership_bp.route('/courses/[int:course_id](int:course_id)/members', methods=['GET'])\n@login_required\ndef list_members_page(course_id):\n    course = get_course_by_id(course_id)\n    if course is None:\n        return render_template('404.html', current_user=get_current_user()), 404\n    return render_template(\n        'memberships/list.html',\n        course=course,\n        members=list_members(course_id),\n        roles=sorted(ALLOWED_ROLES),\n        current_user=get_current_user(),\n    )\n\[n@membership_bp.route](mailto:n@membership_bp.route)('/api/courses/[int:course_id](int:course_id)/members', methods=['GET'])\n@login_required\ndef api_list_members(course_id):\n    if get_course_by_id(course_id) is None:\n        return jsonify({'success': False, 'error': 'course_not_found'}), 404\n    members = [_membership_to_dict(item) for item in list_members(course_id)]\n    return jsonify({'success': True, 'members': members})",
+"reason": "Both roster endpoints require only authentication and never check that the caller is a member or staff member of the target course."
+},
+{
+"file_path": "models/membership_repo.py",
+"line_start": 39,
+"line_end": 47,
+"function_name": "list_members",
+"code": "def list_members(course_id):\n    db = get_db()\n    return db.execute(\n        'SELECT m.membership_id, m.course_id, m.user_id, m.role_in_course, m.created_at, '\n        'u.username, u.display_name '\n        'FROM memberships m JOIN users u ON u.user_id = m.user_id '\n        'WHERE m.course_id = ? ORDER BY m.membership_id ASC',\n        (course_id,),\n    ).fetchall()",
+"reason": "The repository returns full membership records for the supplied course_id, so the missing authorization check in the controller directly exposes roster data."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Course membership listing endpoints are guarded only by a generic login check and do not enforce course membership or staff authorization before exposing roster information.",
+"patch_locations": [
+{
+"file_path": "controllers/membership_controller.py",
+"line_start": 110,
+"line_end": 131,
+"function_name": "list_members_page / api_list_members"
+},
+{
+"file_path": "utils/auth.py",
+"line_start": 58,
+"line_end": 89,
+"function_name": "require_course_member / require_teacher_or_admin / require_course_staff"
+},
+{
+"file_path": "models/membership_repo.py",
+"line_start": 39,
+"line_end": 47,
+"function_name": "list_members"
+}
+],
+"repair_plan": "Require the caller to be at least a member of the target course before listing members, and consider restricting roster access to staff if the roster is intended to be private. Apply a course-bound authorization decorator to both list endpoints and keep returned fields minimal for non-staff users.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-006",
+"vulnerability_type_code": 7,
+"vulnerability_type": "CSRF",
+"cwe_id": "CWE-352",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.4,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "The server-rendered membership management forms do not include any CSRF token or equivalent anti-CSRF validation. A malicious site can cause a logged-in teacher or admin to add members, change roles, or remove members using the victim's existing session.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "templates/memberships/new.html",
+"line_start": 6,
+"line_end": 20,
+"function_name": null,
+"code": "<form method="post" action="{{ url_for('memberships.add_member_submit', course_id=course['course_id']) }}">\n  <label>User</label>\n  <select name="user_id" required>\n    {% for item in users %}\n    <option value="{{ item['user_id'] }}">{{ item['display_name'] }} ({{ item['username'] }})</option>\n    {% endfor %}\n  </select>\n  <label>Role</label>\n  <select name="role_in_course" required>\n    {% for role in roles %}\n    <option value="{{ role }}">{{ role }}</option>\n    {% endfor %}\n  </select>\n  <button type="submit">Add Member</button>\n</form>",
+"reason": "The add-member form performs a privileged state change but contains no CSRF token or nonce."
+},
+{
+"file_path": "templates/memberships/list.html",
+"line_start": 10,
+"line_end": 21,
+"function_name": null,
+"code": "<form method="post" action="{{ url_for('memberships.update_member_role_submit', course_id=course['course_id'], membership_id=item['membership_id']) }}">\n  <label>Change role</label>\n  <select name="role_in_course">\n    {% for role in roles %}\n    <option value="{{ role }}" {% if role == item['role_in_course'] %}selected{% endif %}>{{ role }}</option>\n    {% endfor %}\n  </select>\n  <button type="submit">Update Role</button>\n</form>\n<form method="post" action="{{ url_for('memberships.remove_member_submit', course_id=course['course_id'], membership_id=item['membership_id']) }}">\n  <button type="submit">Remove Member</button>\n</form>",
+"reason": "Both role-update and member-removal forms are forgeable because they contain no request authenticity token."
+},
+{
+"file_path": "controllers/membership_controller.py",
+"line_start": 58,
+"line_end": 89,
+"function_name": "add_member_submit",
+"code": "@membership_bp.route('/courses/[int:course_id](int:course_id)/members', methods=['POST'])\n@login_required\n@require_teacher_or_admin\ndef add_member_submit(course_id):\n    ...\n    try:\n        add_membership(course_id, int(user_id), role_in_course)\n    except sqlite3.IntegrityError:\n        ...\n    return redirect(url_for('memberships.list_members_page', course_id=course_id))",
+"reason": "The membership creation handler processes authenticated browser POST requests without verifying a CSRF token."
+},
+{
+"file_path": "controllers/membership_controller.py",
+"line_start": 134,
+"line_end": 172,
+"function_name": "update_member_role_submit / remove_member_submit",
+"code": "@membership_bp.route('/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)', methods=['POST'])\n@login_required\n@require_teacher_or_admin\ndef update_member_role_submit(course_id, membership_id):\n    ...\n    update_membership_role(membership_id, role_in_course)\n    return redirect(url_for('memberships.list_members_page', course_id=course_id))\n\[n@membership_bp.route](mailto:n@membership_bp.route)('/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)/delete', methods=['POST'])\n@login_required\n@require_teacher_or_admin\ndef remove_member_submit(course_id, membership_id):\n    ...\n    remove_membership(membership_id)\n    return redirect(url_for('memberships.list_members_page', course_id=course_id))",
+"reason": "The membership update and delete handlers accept cookie-authenticated POST requests without any anti-CSRF validation."
+}
+],
+"root_cause_code": 9,
+"root_cause": "Server-rendered membership management endpoints rely on cookie-based authentication but do not require a request authenticity token or equivalent CSRF defense.",
+"patch_locations": [
+{
+"file_path": "templates/memberships/new.html",
+"line_start": 6,
+"line_end": 20,
+"function_name": null
+},
+{
+"file_path": "templates/memberships/list.html",
+"line_start": 10,
+"line_end": 21,
+"function_name": null
+},
+{
+"file_path": "controllers/membership_controller.py",
+"line_start": 58,
+"line_end": 89,
+"function_name": "add_member_submit"
+},
+{
+"file_path": "controllers/membership_controller.py",
+"line_start": 134,
+"line_end": 172,
+"function_name": "update_member_role_submit / remove_member_submit"
+}
+],
+"repair_plan": "Introduce server-side CSRF protection for browser membership-management workflows by generating a per-session token, embedding it in the add, role-update, and remove-member forms, and rejecting requests whose token is missing or invalid. Apply the same protection consistently to all state-changing HTML form endpoints that rely on authenticated cookies.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}
+]

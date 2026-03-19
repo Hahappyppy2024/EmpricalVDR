@@ -1,0 +1,87 @@
+{
+  "vulnerability_id": "VULN-007",
+  "vulnerability_type_code": 13,
+  "vulnerability_type": "Business Logic",
+  "cwe_id": "CWE-841",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.2,
+  "severity_level": "high",
+  "confidence_score": 90,
+  "confidence_level": "high",
+  "summary": "Quiz attempt endpoints trust client-supplied attempt_id and question_id without verifying attempt ownership, quiz-question membership, or submission state. A student in the same course can tamper with another student's attempt, answer questions not bound to the quiz, and continue changing answers after submission.",
+  "entry_points": [
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 95,
+      "line_end": 98,
+      "function_name": null,
+      "code": "router.post('/courses/:course_id/quizzes/:quiz_id/attempts/start', auth.requireLogin, auth.requireCourseMember, auth.requireStudent, takeQuizCtrl.startAttempt);\nrouter.post('/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers', auth.requireLogin, auth.requireCourseMember, auth.requireStudent, takeQuizCtrl.answerQuestion);\nrouter.post('/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit', auth.requireLogin, auth.requireCourseMember, auth.requireStudent, takeQuizCtrl.submitAttempt);",
+      "reason": "The sensitive quiz workflow is reachable by any student member of the course and relies on attempt_id provided by the client."
+    },
+    {
+      "file_path": "src/controllers/takeQuizController.js",
+      "line_start": 34,
+      "line_end": 49,
+      "function_name": "answerQuestion / submitAttempt",
+      "code": "const attempt_id = Number(req.params.attempt_id);\nconst { question_id, answer_json } = req.body;\nconst ans = quizAttemptRepo.upsertAnswer({ attempt_id, question_id: Number(question_id), answer_json: answer_json || '' });\n...\nconst attempt = quizAttemptRepo.submitAttempt(attempt_id);",
+      "reason": "The controller neither checks that the attempt belongs to req.session.user nor confirms that question_id belongs to the quiz or that the attempt is still open."
+    },
+    {
+      "file_path": "src/repos/quizAttemptRepo.js",
+      "line_start": 10,
+      "line_end": 35,
+      "function_name": "getAttempt / upsertAnswer / submitAttempt",
+      "code": "function getAttempt(attempt_id) {\n  return db.prepare('SELECT * FROM quiz_attempts WHERE attempt_id=?').get(attempt_id);\n}\n...\ndb.prepare(\n  'INSERT INTO quiz_answers (attempt_id, question_id, answer_json, created_at) VALUES (?,?,?,?)\n     ON CONFLICT(attempt_id, question_id) DO UPDATE SET answer_json=excluded.answer_json'\n).run(attempt_id, question_id, answer_json, nowIso());\n...\ndb.prepare('UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?').run(nowIso(), attempt_id);",
+      "reason": "The repository trusts attempt_id and question_id alone; it does not enforce student ownership, quiz-question binding, or immutability after submission."
+    }
+  ],
+  "root_cause_code": 12,
+  "root_cause": "The quiz workflow lacks server-side enforcement of core state and relationship rules: attempt ownership, allowed question membership within the quiz, and a closed state after submission.",
+  "patch_locations": [
+    {
+      "file_path": "src/controllers/takeQuizController.js",
+      "line_start": 5,
+      "line_end": 59,
+      "function_name": "startAttempt / attemptPage / answerQuestion / submitAttempt"
+    },
+    {
+      "file_path": "src/repos/quizAttemptRepo.js",
+      "line_start": 10,
+      "line_end": 40,
+      "function_name": "getAttempt / upsertAnswer / submitAttempt / listAnswers"
+    },
+    {
+      "file_path": "src/repos/quizRepo.js",
+      "line_start": 46,
+      "line_end": 53,
+      "function_name": "getQuizQuestions"
+    }
+  ],
+  "repair_plan": "Before viewing, answering, or submitting an attempt, load the attempt and verify that student_id matches the authenticated user and that quiz_id and course_id match the route. Before accepting an answer, verify that question_id is configured for that quiz. Reject writes when submitted_at is already set or when the quiz is outside its allowed answering window.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

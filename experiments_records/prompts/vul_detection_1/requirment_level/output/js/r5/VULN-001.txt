@@ -1,0 +1,120 @@
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 11,
+  "vulnerability_type": "Sensitive Data Exposure",
+  "cwe_id": "CWE-200",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.0,
+  "severity_level": "high",
+  "confidence_score": 96,
+  "confidence_level": "high",
+  "summary": "Any authenticated course member (including students) can access question-bank records that include answer_json, exposing correct answers and assessment secrets. This allows enrolled users to retrieve quiz answers directly via the UI and API without staff privileges.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/questions"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/questions/:question_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/courses/:course_id/questions"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/courses/:course_id/questions/:question_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/routes/web.js",
+      "line_start": 105,
+      "line_end": 108,
+      "function_name": null,
+      "code": "router.get('/courses/:course_id/questions/new', requireCourseStaff, questionController.showNewQuestion);\nrouter.post('/courses/:course_id/questions', requireCourseStaff, questionController.createQuestion);\nrouter.get('/courses/:course_id/questions', requireCourseMember, questionController.listQuestions);\nrouter.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.getQuestion);",
+      "reason": "Question list and detail pages are available to any course member (students included), not restricted to staff."
+    },
+    {
+      "file_path": "src/views/question_show.ejs",
+      "line_start": 6,
+      "line_end": 9,
+      "function_name": null,
+      "code": "<p><strong>Options JSON:</strong> <%= question.options_json || '' %></p>\n<p><strong>Answer JSON:</strong> <%= question.answer_json || '' %></p>",
+      "reason": "The question detail page explicitly displays answer_json to any user who can access the page."
+    },
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 92,
+      "line_end": 100,
+      "function_name": null,
+      "code": "router.post('/courses/:course_id/questions', requireCourseStaff, questionController.apiCreateQuestion);\nrouter.get('/courses/:course_id/questions', requireCourseMember, questionController.apiListQuestions);\nrouter.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.apiGetQuestion);\n...\nrouter.get('/courses/:course_id/quizzes/:quiz_id', requireCourseMember, quizController.apiGetQuiz);",
+      "reason": "The API exposes question-bank and quiz detail data to any course member, not staff-only."
+    },
+    {
+      "file_path": "src/repositories/questionRepository.js",
+      "line_start": 11,
+      "line_end": 21,
+      "function_name": "listByCourse",
+      "code": "return db.prepare(`\n  SELECT q.*, u.username AS creator_username, u.display_name AS creator_display_name\n  FROM questions q\n  JOIN users u ON u.user_id = q.created_by\n  WHERE q.course_id = ?\n  ORDER BY q.question_id DESC\n`).all(courseId);",
+      "reason": "The repository returns q.* (including answer_json) for listings, so any caller that can hit the list endpoint receives correct answers."
+    },
+    {
+      "file_path": "src/repositories/quizRepository.js",
+      "line_start": 56,
+      "line_end": 68,
+      "function_name": "listQuizQuestions",
+      "code": "SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,\n       q.course_id, q.qtype, q.prompt, q.options_json, q.answer_json,\n       q.created_at, q.updated_at\nFROM quiz_questions qq\nJOIN questions q ON q.question_id = qq.question_id\nWHERE qq.quiz_id = ?",
+      "reason": "Quiz detail queries include q.answer_json for each quiz question, so quiz detail APIs can expose correct answers when returned to course members."
+    }
+  ],
+  "root_cause_code": 2,
+  "root_cause": "Question bank and quiz-question data containing answer_json is exposed under endpoints protected only by generic course membership, without a staff-only authorization boundary or student-safe field projection.",
+  "patch_locations": [
+    {
+      "file_path": "src/routes/web.js",
+      "line_start": 105,
+      "line_end": 108,
+      "function_name": null
+    },
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 92,
+      "line_end": 100,
+      "function_name": null
+    },
+    {
+      "file_path": "src/views/question_show.ejs",
+      "line_start": 1,
+      "line_end": 12,
+      "function_name": null
+    },
+    {
+      "file_path": "src/repositories/questionRepository.js",
+      "line_start": 1,
+      "line_end": 40,
+      "function_name": "listByCourse / findById"
+    },
+    {
+      "file_path": "src/repositories/quizRepository.js",
+      "line_start": 56,
+      "line_end": 68,
+      "function_name": "listQuizQuestions"
+    }
+  ],
+  "repair_plan": "Restrict question-bank management reads (and any answer_json-bearing quiz-question views/APIs) to staff roles only. If students need quiz content, return a student-safe representation that excludes answer_json and any other grading keys, and ensure both HTML views and API responses follow the same role-based field projection.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

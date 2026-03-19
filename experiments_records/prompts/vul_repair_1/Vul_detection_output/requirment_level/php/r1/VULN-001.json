@@ -1,0 +1,88 @@
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 9,
+  "vulnerability_type": "Authentication Flaw",
+  "cwe_id": "CWE-798",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 9.1,
+  "severity_level": "critical",
+  "confidence_score": 99,
+  "confidence_level": "high",
+  "summary": "The application ships with a hard-coded default administrator credential and automatically seeds that account at startup. Anyone who knows the published default username and password can authenticate as the seeded admin and obtain full access intended for the bootstrap administrator.",
+  "entry_points": [
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/login"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/api/auth/login"
+    },
+    {
+      "type": "other",
+      "method": "CLI",
+      "route": "scripts/init.php"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "config/config.php",
+      "line_start": 8,
+      "line_end": 12,
+      "function_name": null,
+      "code": "'admin' => [ 'username' => 'admin', 'password' => 'admin123', 'display_name' => 'Default Admin' ]",
+      "reason": "The bootstrap administrator credentials are embedded in the repository as fixed, predictable values."
+    },
+    {
+      "file_path": "app/core/Bootstrap.php",
+      "line_start": 35,
+      "line_end": 47,
+      "function_name": "seed_admin",
+      "code": "$admin = $userRepo->findByUsername($config['admin']['username']); ... $userRepo->create([ 'username' => $config['admin']['username'], 'password_hash' => password_hash($config['admin']['password'], PASSWORD_DEFAULT), 'display_name' => $config['admin']['display_name'], ]);",
+      "reason": "On initialization, the application automatically provisions the default admin account using the hard-coded password from configuration."
+    },
+    {
+      "file_path": "public/index.php",
+      "line_start": 15,
+      "line_end": 16,
+      "function_name": null,
+      "code": "init_db($config);\nseed_admin($config);",
+      "reason": "The admin seeding logic runs on normal application startup, so the predictable account is created automatically whenever it does not already exist."
+    }
+  ],
+  "root_cause_code": 10,
+  "root_cause": "The bootstrap design relies on a reusable, hard-coded privileged credential in configuration and automatically creates that account instead of requiring secure one-time initialization.",
+  "patch_locations": [
+    {
+      "file_path": "config/config.php",
+      "line_start": 8,
+      "line_end": 12,
+      "function_name": null
+    },
+    {
+      "file_path": "app/core/Bootstrap.php",
+      "line_start": 35,
+      "line_end": 47,
+      "function_name": "seed_admin"
+    },
+    {
+      "file_path": "public/index.php",
+      "line_start": 15,
+      "line_end": 16,
+      "function_name": null
+    },
+    {
+      "file_path": "scripts/init.php",
+      "line_start": 8,
+      "line_end": 9,
+      "function_name": null
+    }
+  ],
+  "repair_plan": "Remove the hard-coded bootstrap password from the repository and stop creating a privileged account from fixed credentials during normal startup. Require an explicit first-run setup step or an environment-provided one-time secret, and ensure any bootstrap admin credential must be rotated or invalidated immediately after initial provisioning.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

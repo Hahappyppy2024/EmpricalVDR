@@ -1,0 +1,497 @@
+可以，下面直接给你 **可整文件复制** 的版本。
+按这 6 个文件覆盖即可：
+
+* `app.js`
+* `src/middleware/auth.js`
+* `src/routes/web.js`
+* `src/routes/api.js`
+* `src/views/course_member_new.ejs`
+* `src/views/course_members_list.ejs`
+
+这版对应你上面两个漏洞一起修：
+
+* **VULN-001**：成员列表读取要先验证课程成员身份
+* **VULN-002**：membership 相关页面表单增加 CSRF 校验
+
+---
+
+## 1) `app.js`
+
+```javascript
+const path = require('path');
+const express = require('express');
+const session = require('express-session');
+const crypto = require('crypto');
+
+const { initDb, seedAdmin } = require('./scripts/initDb');
+const webRoutes = require('./src/routes/web');
+const apiRoutes = require('./src/routes/api');
+const { attachCurrentUser } = require('./src/middleware/auth');
+
+initDb();
+seedAdmin();
+
+const app = express();
+
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'src', 'views'));
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'educollab-dev-secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true
+    }
+  })
+);
+
+app.use(attachCurrentUser);
+
+app.use((req, res, next) => {
+  if (req.session && !req.session.csrfToken) {
+    req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+  }
+
+  res.locals.currentUser = req.currentUser || null;
+  res.locals.csrfToken = req.session ? req.session.csrfToken : null;
+  next();
+});
+
+app.use('/', webRoutes);
+app.use('/api', apiRoutes);
+
+app.use((req, res) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ success: false, error: 'Not found' });
+  }
+  return res.status(404).send('Not found');
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`EduCollab running on http://localhost:${PORT}`);
+});
+```
+
+---
+
+## 2) `src/middleware/auth.js`
+
+```javascript
+const userRepository = require('../repositories/userRepository');
+const membershipRepository = require('../repositories/membershipRepository');
+
+function attachCurrentUser(req, res, next) {
+  const userId = req.session.userId;
+  if (userId) {
+    req.currentUser = userRepository.findById(userId) || null;
+  } else {
+    req.currentUser = null;
+  }
+  next();
+}
+
+function requireLogin(req, res, next) {
+  if (!req.currentUser) {
+    if (req.path.startsWith('/api') || req.originalUrl.startsWith('/api')) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    return res.redirect('/login');
+  }
+  next();
+}
+
+function requireAuthPage(req, res, next) {
+  if (!req.currentUser) {
+    return res.redirect('/login');
+  }
+  next();
+}
+
+function requireAuthApi(req, res, next) {
+  if (!req.currentUser) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  next();
+}
+
+function requireAdminPage(req, res, next) {
+  if (!req.currentUser || req.currentUser.username !== 'admin') {
+    return res.status(403).send('Forbidden');
+  }
+  next();
+}
+
+function requireAdminApi(req, res, next) {
+  if (!req.currentUser || req.currentUser.username !== 'admin') {
+    return res.status(403).json({ success: false, error: 'Admin access required' });
+  }
+  next();
+}
+
+function loadCourseMembership(req, res, next) {
+  if (!req.currentUser) {
+    if (req.path.startsWith('/api') || req.originalUrl.startsWith('/api')) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    return res.redirect('/login');
+  }
+
+  const courseId = req.params.course_id;
+  req.courseMembership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id) || null;
+  next();
+}
+
+function requireCourseMember(req, res, next) {
+  if (!req.courseMembership) {
+    if (req.path.startsWith('/api') || req.originalUrl.startsWith('/api')) {
+      return res.status(403).json({ success: false, error: 'Course membership required' });
+    }
+    return res.status(403).send('Course membership required');
+  }
+  next();
+}
+
+function requireValidPageCsrf(req, res, next) {
+  if (!req.session || !req.session.csrfToken) {
+    return res.status(403).send('Invalid CSRF token');
+  }
+
+  const token = req.body && req.body._csrf;
+  if (!token || token !== req.session.csrfToken) {
+    return res.status(403).send('Invalid CSRF token');
+  }
+
+  next();
+}
+
+function requireTeacherOrAdmin(req, res, next) {
+  const membership = req.courseMembership;
+  const ok = membership && ['teacher', 'admin'].includes(membership.role_in_course);
+  if (!ok) {
+    if (req.path.startsWith('/api') || req.originalUrl.startsWith('/api')) {
+      return res.status(403).json({ success: false, error: 'Teacher or admin role required' });
+    }
+    return res.status(403).send('Teacher or admin role required');
+  }
+  next();
+}
+
+function requireCourseStaff(req, res, next) {
+  const membership = req.courseMembership;
+  const ok = membership && ['teacher', 'admin', 'assistant', 'senior-assistant'].includes(membership.role_in_course);
+  if (!ok) {
+    if (req.path.startsWith('/api') || req.originalUrl.startsWith('/api')) {
+      return res.status(403).json({ success: false, error: 'Course staff role required' });
+    }
+    return res.status(403).send('Course staff role required');
+  }
+  next();
+}
+
+module.exports = {
+  attachCurrentUser,
+  requireLogin,
+  requireAuthPage,
+  requireAuthApi,
+  requireAdminPage,
+  requireAdminApi,
+  loadCourseMembership,
+  requireCourseMember,
+  requireValidPageCsrf,
+  requireTeacherOrAdmin,
+  requireCourseStaff
+};
+```
+
+---
+
+## 3) `src/routes/web.js`
+
+```javascript
+const express = require('express');
+const authController = require('../controllers/authController');
+const userController = require('../controllers/userController');
+const courseController = require('../controllers/courseController');
+const membershipController = require('../controllers/membershipController');
+const {
+  requireAuthPage,
+  requireAdminPage,
+  loadCourseMembership,
+  requireCourseMember,
+  requireTeacherOrAdmin,
+  requireValidPageCsrf
+} = require('../middleware/auth');
+
+const router = express.Router();
+
+router.get('/', (req, res) => {
+  res.render('index');
+});
+
+router.get('/register', authController.showRegister);
+router.post('/register', authController.register);
+
+router.get('/login', authController.showLogin);
+router.post('/login', authController.login);
+
+router.post('/logout', authController.logout);
+router.get('/me', authController.me);
+
+router.get('/admin/users', requireAuthPage, requireAdminPage, userController.listUsersPage);
+
+router.get('/courses/new', requireAuthPage, courseController.showNewCourse);
+router.post('/courses', requireAuthPage, courseController.createCourse);
+router.get('/courses', requireAuthPage, courseController.listCourses);
+router.get('/courses/:course_id', requireAuthPage, courseController.getCourse);
+router.get('/courses/:course_id/edit', requireAuthPage, courseController.showEditCourse);
+router.post('/courses/:course_id', requireAuthPage, courseController.updateCourse);
+router.post('/courses/:course_id/delete', requireAuthPage, courseController.deleteCourse);
+
+router.get(
+  '/courses/:course_id/members',
+  requireAuthPage,
+  loadCourseMembership,
+  requireCourseMember,
+  membershipController.listMembers
+);
+
+router.get(
+  '/courses/:course_id/members/new',
+  requireAuthPage,
+  loadCourseMembership,
+  requireTeacherOrAdmin,
+  membershipController.showAddMember
+);
+
+router.post(
+  '/courses/:course_id/members',
+  requireAuthPage,
+  loadCourseMembership,
+  requireTeacherOrAdmin,
+  requireValidPageCsrf,
+  membershipController.addMember
+);
+
+router.post(
+  '/courses/:course_id/members/:membership_id',
+  requireAuthPage,
+  loadCourseMembership,
+  requireTeacherOrAdmin,
+  requireValidPageCsrf,
+  membershipController.updateMemberRole
+);
+
+router.post(
+  '/courses/:course_id/members/:membership_id/delete',
+  requireAuthPage,
+  loadCourseMembership,
+  requireTeacherOrAdmin,
+  requireValidPageCsrf,
+  membershipController.removeMember
+);
+
+router.get('/memberships', requireAuthPage, membershipController.myMemberships);
+
+module.exports = router;
+```
+
+---
+
+## 4) `src/routes/api.js`
+
+```javascript
+const express = require('express');
+const authController = require('../controllers/authController');
+const userController = require('../controllers/userController');
+const courseController = require('../controllers/courseController');
+const membershipController = require('../controllers/membershipController');
+const {
+  requireAuthApi,
+  requireAdminApi,
+  loadCourseMembership,
+  requireCourseMember,
+  requireTeacherOrAdmin
+} = require('../middleware/auth');
+
+const router = express.Router();
+
+router.post('/auth/register', authController.apiRegister);
+router.post('/auth/login', authController.apiLogin);
+router.post('/auth/logout', authController.apiLogout);
+router.get('/auth/me', authController.apiMe);
+
+router.get('/users', requireAuthApi, requireAdminApi, userController.listUsersApi);
+
+router.post('/courses', requireAuthApi, courseController.apiCreateCourse);
+router.get('/courses', requireAuthApi, courseController.apiListCourses);
+router.get('/courses/:course_id', requireAuthApi, courseController.apiGetCourse);
+router.put('/courses/:course_id', requireAuthApi, courseController.apiUpdateCourse);
+router.delete('/courses/:course_id', requireAuthApi, courseController.apiDeleteCourse);
+
+router.post(
+  '/courses/:course_id/members',
+  requireAuthApi,
+  loadCourseMembership,
+  requireTeacherOrAdmin,
+  membershipController.apiAddMember
+);
+
+router.get(
+  '/courses/:course_id/members',
+  requireAuthApi,
+  loadCourseMembership,
+  requireCourseMember,
+  membershipController.apiListMembers
+);
+
+router.put(
+  '/courses/:course_id/members/:membership_id',
+  requireAuthApi,
+  loadCourseMembership,
+  requireTeacherOrAdmin,
+  membershipController.apiUpdateMemberRole
+);
+
+router.delete(
+  '/courses/:course_id/members/:membership_id',
+  requireAuthApi,
+  loadCourseMembership,
+  requireTeacherOrAdmin,
+  membershipController.apiRemoveMember
+);
+
+router.get('/memberships', requireAuthApi, membershipController.apiMyMemberships);
+
+module.exports = router;
+```
+
+---
+
+## 5) `src/views/course_member_new.ejs`
+
+```ejs
+<%- include('partials/header') %>
+
+<h1>Add Course Member</h1>
+<p><strong>Course:</strong> <a href="/courses/<%= course.course_id %>"><%= course.title %></a></p>
+
+<% if (error) { %>
+  <p style="color:red;"><%= error %></p>
+<% } %>
+
+<form method="post" action="/courses/<%= course.course_id %>/members">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
+  <div>
+    <label>User</label>
+    <select name="user_id" required>
+      <option value="">Select a user</option>
+      <% users.forEach(function(user) { %>
+        <option value="<%= user.user_id %>"><%= user.display_name %> (@<%= user.username %>)</option>
+      <% }) %>
+    </select>
+  </div>
+  <div>
+    <label>Role</label>
+    <select name="role_in_course" required>
+      <% roles.forEach(function(role) { %>
+        <option value="<%= role %>"><%= role %></option>
+      <% }) %>
+    </select>
+  </div>
+  <button type="submit">Add member</button>
+</form>
+
+<%- include('partials/footer') %>
+```
+
+---
+
+## 6) `src/views/course_members_list.ejs`
+
+```ejs
+<%- include('partials/header') %>
+
+<h1>Course Members</h1>
+<p><strong>Course:</strong> <a href="/courses/<%= course.course_id %>"><%= course.title %></a></p>
+<p><a href="/courses/<%= course.course_id %>/members/new">Add member</a></p>
+
+<% if (!memberships.length) { %>
+  <p>No members found.</p>
+<% } %>
+
+<table border="1" cellpadding="6">
+  <tr>
+    <th>Membership ID</th>
+    <th>User</th>
+    <th>Role</th>
+    <th>Actions</th>
+  </tr>
+  <% memberships.forEach(function(membership) { %>
+    <tr>
+      <td><%= membership.membership_id %></td>
+      <td><%= membership.display_name %> (@<%= membership.username %>)</td>
+      <td>
+        <form method="post" action="/courses/<%= course.course_id %>/members/<%= membership.membership_id %>">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
+          <select name="role_in_course">
+            <% roles.forEach(function(role) { %>
+              <option value="<%= role %>" <%= membership.role_in_course === role ? 'selected' : '' %>><%= role %></option>
+            <% }) %>
+          </select>
+          <button type="submit">Update</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/courses/<%= course.course_id %>/members/<%= membership.membership_id %>/delete">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
+          <button type="submit">Remove</button>
+        </form>
+      </td>
+    </tr>
+  <% }) %>
+</table>
+
+<%- include('partials/footer') %>
+```
+
+---
+
+## 说明
+
+`src/controllers/membershipController.js` **不用改**。
+因为这两个漏洞的最小正确修复边界已经放在：
+
+* route middleware
+* csrf middleware
+* form hidden field
+
+这样更稳，也更符合你 prompt 里的 “minimal patch”。
+
+---
+
+## 运行命令
+
+在项目根目录：
+
+```bash
+npm install
+npm start
+```
+
+如果你要继续验证 exploit test：
+
+```bash
+node --test tests\security\test_exploit_vuln_001_roster_disclosure.js
+```
+
+```bash
+node --test tests\security\test_exploit_vuln_002_membership_csrf.js
+```
+
+如果你愿意，我下一条可以继续直接给你一个 **“修复后完整的 unified diff 版本”**，你可以直接保存成 `.patch` 文件。

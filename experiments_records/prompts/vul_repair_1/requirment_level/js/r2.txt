@@ -1,0 +1,164 @@
+{
+    "vulnerability_id": "VULN-001",
+    "vulnerability_type_code": 3,
+    "vulnerability_type": "Broken Access Control",
+    "cwe_id": "CWE-862",
+    "cvss_version": "CVSS v4.0 (2023)",
+    "cvss_score": 7.1,
+    "severity_level": "high",
+    "confidence_score": 96,
+    "confidence_level": "high",
+    "summary": "Any authenticated user can retrieve the full membership roster for an arbitrary course by supplying its course_id. This exposes user identities and role assignments for courses the attacker is not a member of.",
+    "entry_points": [
+      {
+        "type": "server-rendered form/page",
+        "method": "GET",
+        "route": "/courses/:course_id/members"
+      },
+      {
+        "type": "JSON API endpoint",
+        "method": "GET",
+        "route": "/api/courses/:course_id/members"
+      }
+    ],
+    "evidence_snippets": [
+      {
+        "file_path": "src/routes/web.js",
+        "line_start": 38,
+        "line_end": 42,
+        "function_name": null,
+        "code": "router.get('/courses/:course_id/members', requireAuthPage, membershipController.listMembers);\nrouter.get('/courses/:course_id/members/new', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.showAddMember);\nrouter.post('/courses/:course_id/members', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.addMember);\nrouter.post('/courses/:course_id/members/:membership_id', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.updateMemberRole);\nrouter.post('/courses/:course_id/members/:membership_id/delete', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.removeMember);",
+        "reason": "The member-list page is protected only by authentication and does not load/require course membership, unlike the write endpoints."
+      },
+      {
+        "file_path": "src/routes/api.js",
+        "line_start": 28,
+        "line_end": 31,
+        "function_name": null,
+        "code": "router.post('/courses/:course_id/members', requireAuthApi, loadCourseMembership, requireTeacherOrAdmin, membershipController.apiAddMember);\nrouter.get('/courses/:course_id/members', requireAuthApi, membershipController.apiListMembers);\nrouter.put('/courses/:course_id/members/:membership_id', requireAuthApi, loadCourseMembership, requireTeacherOrAdmin, membershipController.apiUpdateMemberRole);\nrouter.delete('/courses/:course_id/members/:membership_id', requireAuthApi, loadCourseMembership, requireTeacherOrAdmin, membershipController.apiRemoveMember);",
+        "reason": "The API member-list endpoint requires only authentication and omits course membership enforcement."
+      },
+      {
+        "file_path": "src/controllers/membershipController.js",
+        "line_start": 101,
+        "line_end": 119,
+        "function_name": "listMembers / apiListMembers",
+        "code": "function listMembers(req, res) {\n  const course = ensureCourse(req.params.course_id);\n  ...\n  const memberships = membershipRepository.listByCourse(req.params.course_id);\n  return res.render('course_members_list', { course, memberships, roles: membershipRepository.ALLOWED_ROLES });\n}\n\nfunction apiListMembers(req, res) {\n  const course = ensureCourse(req.params.course_id);\n  ...\n  const memberships = membershipRepository.listByCourse(req.params.course_id);\n  return res.json({ success: true, memberships });\n}",
+        "reason": "The controllers return the full membership list for any course_id provided in the request and do not verify the caller is a member of that course."
+      }
+    ],
+    "root_cause_code": 2,
+    "root_cause": "Course-scoped membership listing endpoints are protected only by authentication and do not enforce a course-membership authorization boundary before returning roster data.",
+    "patch_locations": [
+      {
+        "file_path": "src/routes/web.js",
+        "line_start": 38,
+        "line_end": 38,
+        "function_name": null
+      },
+      {
+        "file_path": "src/routes/api.js",
+        "line_start": 29,
+        "line_end": 29,
+        "function_name": null
+      },
+      {
+        "file_path": "src/controllers/membershipController.js",
+        "line_start": 101,
+        "line_end": 119,
+        "function_name": "listMembers / apiListMembers"
+      }
+    ],
+    "repair_plan": "Require course membership (or an explicit staff/admin role) before returning a course roster. Apply loadCourseMembership + requireCourseMember (or requireCourseStaff) to both the web and API list-members routes, and keep the controller logic unchanged except for returning 403 when the caller is not authorized for the target course.",
+    "detection_report_complete": 1,
+    "has_root_cause": 1,
+    "has_patch_location": 1,
+    "has_repair_plan": 1
+  }{
+    "vulnerability_id": "VULN-002",
+    "vulnerability_type_code": 7,
+    "vulnerability_type": "CSRF",
+    "cwe_id": "CWE-352",
+    "cvss_version": "CVSS v4.0 (2023)",
+    "cvss_score": 6.5,
+    "severity_level": "medium",
+    "confidence_score": 93,
+    "confidence_level": "high",
+    "summary": "Membership management actions are implemented as server-rendered POST forms without CSRF protection. A malicious site can trick a logged-in teacher/admin into submitting forged requests that add members, change roles, or remove members.",
+    "entry_points": [
+      {
+        "type": "server-rendered form/page",
+        "method": "POST",
+        "route": "/courses/:course_id/members"
+      },
+      {
+        "type": "server-rendered form/page",
+        "method": "POST",
+        "route": "/courses/:course_id/members/:membership_id"
+      },
+      {
+        "type": "server-rendered form/page",
+        "method": "POST",
+        "route": "/courses/:course_id/members/:membership_id/delete"
+      }
+    ],
+    "evidence_snippets": [
+      {
+        "file_path": "src/views/course_member_new.ejs",
+        "line_start": 10,
+        "line_end": 29,
+        "function_name": null,
+        "code": "<form method=\"post\" action=\"/courses/<%= course.course_id %>/members\">\n  ...\n  <button type=\"submit\">Add member</button>\n</form>",
+        "reason": "The add-member form performs a state-changing POST and includes no CSRF token field."
+      },
+      {
+        "file_path": "src/views/course_members_list.ejs",
+        "line_start": 23,
+        "line_end": 35,
+        "function_name": null,
+        "code": "<form method=\"post\" action=\"/courses/<%= course.course_id %>/members/<%= membership.membership_id %>\">\n  <select name=\"role_in_course\"> ... </select>\n  <button type=\"submit\">Update</button>\n</form>\n...\n<form method=\"post\" action=\"/courses/<%= course.course_id %>/members/<%= membership.membership_id %>/delete\">\n  <button type=\"submit\">Remove</button>\n</form>",
+        "reason": "Role update and member removal are implemented as POST forms with no CSRF token."
+      },
+      {
+        "file_path": "src/routes/web.js",
+        "line_start": 39,
+        "line_end": 42,
+        "function_name": null,
+        "code": "router.post('/courses/:course_id/members', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.addMember);\nrouter.post('/courses/:course_id/members/:membership_id', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.updateMemberRole);\nrouter.post('/courses/:course_id/members/:membership_id/delete', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.removeMember);",
+        "reason": "The server accepts state-changing membership POST requests based on session authentication/authorization and does not perform CSRF token validation."
+      }
+    ],
+    "root_cause_code": 9,
+    "root_cause": "The server-rendered membership management workflows do not generate or validate anti-CSRF tokens, so authenticated browser requests are trusted solely because the session cookie is present.",
+    "patch_locations": [
+      {
+        "file_path": "app.js",
+        "line_start": 13,
+        "line_end": 41,
+        "function_name": null
+      },
+      {
+        "file_path": "src/routes/web.js",
+        "line_start": 38,
+        "line_end": 43,
+        "function_name": null
+      },
+      {
+        "file_path": "src/views/course_member_new.ejs",
+        "line_start": 10,
+        "line_end": 29,
+        "function_name": null
+      },
+      {
+        "file_path": "src/views/course_members_list.ejs",
+        "line_start": 23,
+        "line_end": 35,
+        "function_name": null
+      }
+    ],
+    "repair_plan": "Add a centralized CSRF mechanism for all server-rendered POST endpoints (e.g., per-session token stored server-side and embedded as a hidden field in every form). Validate the token before executing add/update/remove membership actions, and apply the same CSRF check consistently across other state-changing HTML endpoints.",
+    "detection_report_complete": 1,
+    "has_root_cause": 1,
+    "has_patch_location": 1,
+    "has_repair_plan": 1
+  }请你根据这两个vulnerability帮我根据提供的代码。写两个explloit test

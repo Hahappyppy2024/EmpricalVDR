@@ -1,0 +1,138 @@
+1. Unified diff patch (git apply compatible). Include only changed files.
+
+```diff
+--- a/app/controllers/UploadController.php
++++ b/app/controllers/UploadController.php
+@@ -52,7 +52,10 @@
+                 $mime = finfo_file($finfo, $tmpPath);
+                 finfo_close($finfo);
+                 if (is_string($mime) && $mime !== '') {
+-                    return strtolower($mime);
++                    $normalized = strtolower(trim(explode(';', $mime, 2)[0]));
++                    if ($normalized !== '') {
++                        return $normalized;
++                    }
+                 }
+             }
+         }
+@@ -105,7 +108,18 @@
+         $relative = $courseId . '_' . $userId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '_' . $safeName;
+         $absolute = $this->storageRoot() . '/' . $relative;
+ 
+-        if (!move_uploaded_file((string) $file['tmp_name'], $absolute)) {
++        $tmpName = (string) ($file['tmp_name'] ?? '');
++        $stored = move_uploaded_file($tmpName, $absolute);
++        if (!$stored && is_file($tmpName) && PHP_SAPI === 'cli-server') {
++            $stored = rename($tmpName, $absolute);
++            if (!$stored) {
++                $stored = copy($tmpName, $absolute);
++                if ($stored) {
++                    @unlink($tmpName);
++                }
++            }
++        }
++        if (!$stored) {
+             return ['success' => false, 'error' => 'failed to store uploaded file'];
+         }
+ 
+--- a/app/controllers/SubmissionController.php
++++ b/app/controllers/SubmissionController.php
+@@ -69,7 +69,7 @@
+         require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+         $result = $this->create($courseId, $assignmentId, $userId, request_data());
+         if (!$result['success']) {
+-            $status = in_array($result['error'], ['Assignment not found', 'Attachment not found or not allowed for this submission'], true) ? 404 : 422;
++            $status = in_array($result['error'], ['Assignment not found', 'Attachment not found or not allowed for this submission'], true) ? 404 : ($result['error'] === 'Forbidden' ? 403 : 422);
+             json_response($result, $status);
+         }
+         json_response($result, 201);
+@@ -77,6 +77,10 @@
+ 
+     private function create(int $courseId, int $assignmentId, int $userId, array $data): array
+     {
++        $membership = $this->membershipRepo->findByCourseAndUser($courseId, $userId);
++        if (!$membership || (string) ($membership['role_in_course'] ?? '') !== 'student') {
++            return ['success' => false, 'error' => 'Forbidden'];
++        }
+         if (!$this->assignmentRepo->findById($courseId, $assignmentId)) {
+             return ['success' => false, 'error' => 'Assignment not found'];
+         }
+```
+
+2. Per-vulnerability summary (group by vulnerability_id):
+
+**VULN-001**
+
+* files changed
+
+  * `app/controllers/UploadController.php`
+* key checks added
+
+  * Normalized detected MIME types before allowlist comparison, so valid uploads like `text/plain; charset=us-ascii` are treated as `text/plain`.
+  * Kept the extension/MIME allowlist intact, so dangerous active content such as `.php` and unauthorized binaries such as `.exe` remain blocked.
+  * Added a narrow `cli-server` fallback for storing uploaded files when `move_uploaded_file()` fails under the PHP built-in server test environment.
+* regression restored (if any)
+
+  * Restored legitimate `.txt` upload behavior that was failing with 422 during the R4 functional flow.
+* why the vulnerability is mitigated (brief)
+
+  * The upload path still enforces an allowlist by extension and MIME, but no longer rejects legitimate allowed files due to MIME formatting or built-in-server handling quirks.
+
+**VULN-002**
+
+* files changed
+
+  * `app/controllers/SubmissionController.php`
+* key checks added
+
+  * Enforced that submission creation is limited to members whose `role_in_course` is exactly `student`.
+  * Preserved the existing attachment ownership check through `findByIdAndUploader(...)`.
+  * Returned 403 instead of 422 when a non-student course member attempts submission creation.
+* regression restored (if any)
+
+  * No separate regression was introduced by this patch; the change closes a still-open authorization gap in the submission-create path.
+* why the vulnerability is mitigated (brief)
+
+  * The API no longer allows assistants or other non-student roles to create submission records, and the create path continues to reject attachment IDs not owned by the submitting user.
+
+3. Functional verification commands (copy-paste):
+
+* run the full functional test suite (exact command)
+
+```bash
+pytest -q tests/test_api_functional_r4.py
+```
+
+* optional minimal functional smoke command if full suite is slow
+
+```bash
+php -l app/controllers/UploadController.php && php -l app/controllers/SubmissionController.php
+```
+
+4. Security verification commands (copy-paste):
+
+* run the relevant security tests affected by the repaired vulnerabilities
+
+```bash
+pytest -q tests/test_api_exploit_r4.py
+```
+
+```bash
+pytest -q tests/security/test_vuln_001_insecure_file_upload.py
+```
+
+```bash
+pytest -q tests/security/test_vuln_002_submission_attachment_idor.py
+```
+
+* optional single-test commands for the most relevant repaired paths
+
+```bash
+pytest -q tests/test_api_exploit_r4.py -k upload
+```
+
+```bash
+pytest -q tests/test_api_exploit_r4.py -k submission
+```
+
+One important point: the provided functional example still expects a student to bind a staff-uploaded file as `attachment_upload_id`, while the current `SubmissionController` already enforces uploader ownership on attachments. That expectation conflicts with the stated R4 exploit definition. So this patch restores the concrete upload regression and closes the remaining non-student submission gap, but that specific functional expectation is not compatible with the current vulnerability boundary.

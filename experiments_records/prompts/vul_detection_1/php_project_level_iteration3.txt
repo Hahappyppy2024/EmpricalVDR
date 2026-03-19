@@ -1,0 +1,2056 @@
+You are a senior application security engineer analyzing a complete web application project after a previous vulnerability repair attempt.
+
+Inputs provided to you:
+1. Previous vulnerability detection report
+2. Previous vulnerability repair report / patch / summary
+3. Failed functional test results
+4. Failed security exploit test results
+5. The current project codebase
+
+Your task is to produce a strict repair-failure re-analysis report anchored to the first vulnerability detection report.
+
+This is NOT a fresh vulnerability discovery task.
+This is NOT a reclassification task.
+This is NOT a new vulnerability taxonomy pass.
+
+The first vulnerability detection report is the authoritative baseline for vulnerability identity in this iteration.
+
+--------------------------------------------------
+Mandatory Task Assumption
+--------------------------------------------------
+
+For this task, all vulnerabilities from the first vulnerability detection report must be treated as not successfully repaired.
+
+This assumption is mandatory and must not be re-evaluated.
+
+Therefore:
+- do not classify any original vulnerability as fully mitigated,
+- do not omit any original vulnerability from the output,
+- return exactly one output object for every vulnerability_id in the first vulnerability detection report,
+- and analyze how the previous repair attempt failed for each original vulnerability in the current codebase.
+
+Allowed current_status values in this task are exactly:
+- "still_present"
+- "partially_fixed"
+- "incorrectly_fixed"
+- "bypassable"
+
+Do not use "fully_mitigated" in this task.
+
+--------------------------------------------------
+Analysis Objective
+--------------------------------------------------
+
+Analyze the entire project as a whole system, not as isolated files.
+
+For every vulnerability in the first vulnerability detection report:
+- preserve the same vulnerability_id,
+- preserve the same vulnerability identity,
+- do not rename, split, merge, replace, or reinterpret it as a different vulnerability unless the previous classification is clearly impossible to maintain,
+- determine how that same vulnerability remains unresolved after the repair attempt,
+- explain why the previous repair did not fully succeed,
+- identify the remaining repair root cause,
+- and provide the next repair plan.
+
+Focus only on vulnerabilities supported by concrete current-code evidence.
+
+Do NOT perform a broad new vulnerability discovery pass.
+Only mention a newly introduced regression if it is directly caused by the previous repair attempt, is closely related to a previous vulnerability, and is clearly supported by current code evidence.
+
+Use the failed functional test results and failed security exploit test results only as supporting signals.
+Final conclusions must still be grounded in the current codebase.
+
+--------------------------------------------------
+Core Reporting Rules
+--------------------------------------------------
+
+1. Use the first vulnerability detection report as the required baseline.
+
+2. Re-analyze every vulnerability from that report against the current codebase.
+
+3. Every original vulnerability_id must appear exactly once in the output.
+
+4. No original vulnerability_id may be omitted.
+
+5. No new vulnerability_id may be introduced.
+
+6. Do not redefine, rename, split, merge, replace, or reinterpret previously reported vulnerabilities unless clearly required by the current code evidence.
+
+7. For each vulnerability, classify the unresolved state as exactly one of:
+   - still_present
+   - partially_fixed
+   - incorrectly_fixed
+   - bypassable
+
+8. Do not merely restate the original vulnerability.
+   The focus is the repair-failure analysis layer for that same vulnerability.
+
+9. For every vulnerability, explicitly explain:
+   - what was changed by the previous repair attempt,
+   - why that change did not fully eliminate the original risk,
+   - what implementation mistake still remains,
+   - and what concrete repair action should happen next.
+
+10. Only report conclusions supported by direct code evidence.
+
+11. Use the narrowest possible file and line ranges.
+
+12. If exact line numbers are uncertain, provide the smallest reasonable range and lower confidence accordingly.
+
+--------------------------------------------------
+Output Requirements
+--------------------------------------------------
+
+Return ONLY valid JSON.
+
+Do not include markdown.
+Do not include explanations outside the JSON.
+Do not include any prose before or after the JSON.
+
+The output must be a JSON array.
+
+The number of output objects must exactly equal the number of vulnerabilities in the first vulnerability detection report.
+
+Each element must represent exactly one vulnerability_id from the first vulnerability detection report.
+
+--------------------------------------------------
+JSON Schema
+--------------------------------------------------
+
+[
+  {
+    "vulnerability_id": "VULN-001",
+    "current_status": "partially_fixed",
+
+    "vulnerability_type_code": 8,
+    "vulnerability_type": "IDOR",
+    "cwe_id": "CWE-639",
+
+    "cvss_version": "CVSS v4.0 (2023)",
+    "cvss_score": 8.6,
+    "severity_level": "high",
+
+    "confidence_score": 92,
+    "confidence_level": "high",
+
+    "summary": "The application still allows an authenticated user to modify another user's resource by supplying a different resource identifier without fully verifying ownership.",
+
+    "entry_points": [
+      {
+        "type": "JSON API endpoint",
+        "method": "PUT",
+        "route": "/api/posts/:postId"
+      }
+    ],
+
+    "evidence_snippets": [
+      {
+        "file_path": "src/controllers/postController.js",
+        "line_start": 48,
+        "line_end": 58,
+        "function_name": "updatePost",
+        "code": "const postId = req.params.postId; await postRepo.updatePostById(postId, req.body);",
+        "reason": "The controller still uses the user-supplied postId on a mutation path without fully enforcing ownership."
+      }
+    ],
+
+    "root_cause_code": 7,
+    "root_cause": "The original ownership and authorization boundary is still not fully enforced before updating a user-controlled resource identifier.",
+
+    "patch_locations": [
+      {
+        "file_path": "src/controllers/postController.js",
+        "line_start": 42,
+        "line_end": 67,
+        "function_name": "updatePost"
+      }
+    ],
+
+    "repair_plan": "Load the target post before modification, verify that the authenticated user owns it or holds an explicitly authorized elevated role, and ensure the write path is consistently scoped to the authorized resource.",
+
+    "repair_failure_root_cause": "The previous repair did not fully bind the attacker-controlled resource identifier to the authorized owner context across the complete mutation path.",
+
+    "detection_report_complete": 1,
+    "has_root_cause": 1,
+    "has_patch_location": 1,
+    "has_repair_plan": 1,
+    "has_repair_failure_root_cause": 1
+  }
+]
+
+--------------------------------------------------
+Field Requirements
+--------------------------------------------------
+
+For every vulnerability object:
+
+1. vulnerability_id
+- Reuse the exact vulnerability_id from the previous vulnerability detection report.
+- Do not create a new ID.
+- Every original vulnerability_id must appear exactly once.
+
+2. current_status
+- Must be exactly one of:
+  - "still_present"
+  - "partially_fixed"
+  - "incorrectly_fixed"
+  - "bypassable"
+
+3. vulnerability_type_code
+- Must remain consistent with the previous vulnerability detection report unless clearly impossible to maintain.
+
+4. vulnerability_type
+- Must remain semantically consistent with the previous vulnerability detection report unless clearly impossible to maintain.
+
+5. cwe_id
+- Prefer preserving the prior CWE when still semantically correct.
+
+6. cvss_version
+- Must be exactly: "CVSS v4.0 (2023)"
+
+7. cvss_score
+- Numeric value from 0.0 to 10.0
+- Use one decimal place at most.
+
+8. severity_level
+- Must match cvss_score:
+  - 0.0 = none
+  - 0.1 to 3.9 = low
+  - 4.0 to 6.9 = medium
+  - 7.0 to 8.9 = high
+  - 9.0 to 10.0 = critical
+
+9. confidence_score
+- Integer from 0 to 100.
+
+10. confidence_level
+- Must match confidence_score:
+  - 0 to 39 = low
+  - 40 to 74 = medium
+  - 75 to 100 = high
+
+11. summary
+- 1 to 3 sentences
+- Describe what still remains, who can exploit it, and the consequence.
+
+12. entry_points
+- Include:
+  - type
+  - method
+  - route
+
+13. evidence_snippets
+- Each snippet must include:
+  - file_path
+  - line_start
+  - line_end
+  - function_name when available
+  - code
+  - reason
+
+14. root_cause_code
+- Must use the enumeration below.
+
+15. root_cause
+- Explain the current implementation mistake that still leaves this same vulnerability unresolved.
+
+16. patch_locations
+- List the most likely edit locations for the next repair attempt.
+
+17. repair_plan
+- Give concrete next-step repair guidance.
+
+18. repair_failure_root_cause
+- Explain specifically why the previous repair did not successfully fix this same vulnerability.
+
+19. detection_report_complete
+- Use 1 if the object contains all core required elements, else 0.
+
+20. has_root_cause
+- Use 1 if root_cause is present, else 0.
+
+21. has_patch_location
+- Use 1 if patch_locations is present, else 0.
+
+22. has_repair_plan
+- Use 1 if repair_plan is present, else 0.
+
+23. has_repair_failure_root_cause
+- Use 1 if repair_failure_root_cause is present, else 0.
+
+--------------------------------------------------
+Enumerations
+--------------------------------------------------
+
+vulnerability_type_code
+1 = SQL Injection
+2 = Command Injection
+3 = Broken Access Control
+4 = Path Traversal
+5 = Insecure File Upload
+6 = XSS
+7 = CSRF
+8 = IDOR
+9 = Authentication Flaw
+10 = Session Weakness
+11 = Sensitive Data Exposure
+12 = Open Redirect
+13 = Business Logic
+99 = Other
+
+root_cause_code
+1 = missing input validation
+2 = missing authorization check
+3 = missing authentication check
+4 = unsafe query construction
+5 = unsafe output encoding
+6 = unsafe file path handling
+7 = missing ownership check
+8 = unsafe session handling
+9 = missing CSRF protection
+10 = insecure configuration
+11 = trust boundary violation
+12 = business rule enforcement failure
+99 = other
+
+--------------------------------------------------
+Inputs
+--------------------------------------------------
+
+- Previous vulnerability detection report:
+[
+{
+"vulnerability_id": "VULN-001",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 9,
+"vulnerability_type": "Authentication Flaw",
+"cwe_id": "CWE-798",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.2,
+"severity_level": "high",
+"confidence_score": 85,
+"confidence_level": "high",
+"summary": "The hard-coded password was removed from the bootstrap logic, but the application still auto-provisions a remotely usable global administrator account with the fixed username 'admin' on every request. The current codebase also still advertises and relies on the reusable 'admin/admin123' credential pattern, so the original default-admin takeover risk remains only partially reduced rather than eliminated.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/bootstrap.php",
+"line_start": 210,
+"line_end": 229,
+"function_name": "seed_admin",
+"code": "$password = getenv('INITIAL_ADMIN_PASSWORD'); ... $username = 'admin'; ... INSERT INTO users(username, password_hash, display_name, created_at, is_global_admin) VALUES (?,?,?,?,1)",
+"reason": "The repair kept automatic provisioning of a privileged account with the fixed login name 'admin' and a password-based remote login path, instead of moving to a one-time or out-of-band bootstrap flow."
+},
+{
+"file_path": "views/auth/login.php",
+"line_start": 3,
+"line_end": 10,
+"function_name": null,
+"code": "<form method="post" action="/login"> ... </form> ... <p class="muted">Default seeded admin: admin / admin123</p>",
+"reason": "The shipped login view still documents a reusable seeded admin credential pattern, showing that the default-admin concept remains embedded in the current codebase."
+},
+{
+"file_path": "test/security_tests/test_vuln_001_default_admin_credentials.py",
+"line_start": 6,
+"line_end": 6,
+"function_name": "test_vuln_001_default_admin_credentials",
+"code": "r = login(session, base_url, "admin", "admin123")",
+"reason": "The bundled exploit test still treats admin/admin123 as the operative administrator credential, which is consistent with the remaining fixed-identity bootstrap design."
+}
+],
+"root_cause_code": 10,
+"root_cause": "The application still embeds an auto-provisioned, password-authenticated global administrator identity into normal runtime startup instead of requiring a one-time secure initialization flow that removes reusable default-bootstrap semantics.",
+"patch_locations": [
+{
+"file_path": "src/bootstrap.php",
+"line_start": 210,
+"line_end": 229,
+"function_name": "seed_admin"
+},
+{
+"file_path": "views/auth/login.php",
+"line_start": 3,
+"line_end": 10,
+"function_name": null
+}
+],
+"repair_plan": "Remove automatic per-request seeding of a reusable 'admin' account. Replace it with a one-time setup flow or operator-only initialization path, stop documenting a default credential in the UI, and require explicit durable privilege assignment that does not depend on a fixed bootstrap login identity.",
+"repair_failure_root_cause": "The previous repair externalized the password source but preserved the core insecure bootstrap model: a fixed, remotely login-capable administrator identity still exists and the codebase still codifies the seeded admin credential pattern.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 10,
+"vulnerability_type": "Session Weakness",
+"cwe_id": "CWE-384",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 5.9,
+"severity_level": "medium",
+"confidence_score": 61,
+"confidence_level": "medium",
+"summary": "The repair added session ID regeneration on the main login and registration helper path, but the application still accepts any caller-supplied PHP session identifier at bootstrap and does not harden session acceptance with strict-mode controls. The original fixation risk is reduced, but the session boundary remains only partially hardened in the current codebase.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/register"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/register"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/bootstrap.php",
+"line_start": 5,
+"line_end": 13,
+"function_name": null,
+"code": "if (session_status() === PHP_SESSION_NONE) { session_set_cookie_params([...]); session_start(); }",
+"reason": "The application still starts whatever session identifier the client presents before authentication, and the code does not enable a strict session acceptance policy at initialization time."
+},
+{
+"file_path": "src/helpers.php",
+"line_start": 73,
+"line_end": 76,
+"function_name": "session_login_user",
+"code": "function session_login_user(array $user): void { session_regenerate_id(true); $_SESSION['user'] = $user; }",
+"reason": "The attempted fix is limited to helper-based regeneration after successful authentication, which reduces but does not fully harden the pre-auth session acceptance boundary."
+}
+],
+"root_cause_code": 8,
+"root_cause": "Session handling is still only partially hardened because the server accepts attacker-supplied pre-auth session IDs at startup and relies on application-level regeneration later rather than enforcing a stricter session policy at the boundary.",
+"patch_locations": [
+{
+"file_path": "src/bootstrap.php",
+"line_start": 5,
+"line_end": 13,
+"function_name": null
+},
+{
+"file_path": "src/helpers.php",
+"line_start": 73,
+"line_end": 76,
+"function_name": "session_login_user"
+}
+],
+"repair_plan": "Keep post-authentication session_regenerate_id(true), but also harden session initialization so attacker-supplied unknown session IDs are not accepted pre-authentication. Apply strict session handling at bootstrap, clear any pre-auth residual state before binding the authenticated user, and verify the same policy for all auth transitions.",
+"repair_failure_root_cause": "The previous repair focused on rotating the ID after successful authentication but did not fully harden the session acceptance boundary itself, leaving the overall fixation mitigation incomplete.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-003",
+"current_status": "incorrectly_fixed",
+"vulnerability_type_code": 7,
+"vulnerability_type": "CSRF",
+"cwe_id": "CWE-352",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.1,
+"severity_level": "medium",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "The repair added centralized server-side CSRF enforcement for non-API POST requests, but the current server-rendered forms do not include any hidden CSRF token fields. The result is an incomplete and broken mitigation that does not correctly retrofit the original HTML workflows.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/delete"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "public/index.php",
+"line_start": 37,
+"line_end": 39,
+"function_name": null,
+"code": "if (method_override() === 'POST' && strncmp(request_path(), '/api/', 5) !== 0) { require_csrf(); }",
+"reason": "The new repair enforces CSRF validation globally for HTML POST requests."
+},
+{
+"file_path": "src/helpers.php",
+"line_start": 85,
+"line_end": 99,
+"function_name": "csrf_input/require_csrf",
+"code": "function csrf_input(): string { return '<input type="hidden" name="_csrf" value="' . h(csrf_token()) . '" />'; } ... function require_csrf(): void { $token = (string)($_POST['_csrf'] ?? ''); ... }",
+"reason": "The code defines token-generation and validation helpers, showing the intended mitigation model."
+},
+{
+"file_path": "views/courses/detail.php",
+"line_start": 6,
+"line_end": 8,
+"function_name": null,
+"code": "<form style="display:inline" method="post" action="/courses/<?= h($course['course_id']) ?>/delete"><button type="submit">Delete</button></form>",
+"reason": "A destructive HTML form still lacks the required hidden _csrf token field."
+},
+{
+"file_path": "views/posts/detail.php",
+"line_start": 15,
+"line_end": 18,
+"function_name": null,
+"code": "<form method="post" action="/courses/<?= h($course_id) ?>/posts/<?= h($post['post_id']) ?>/comments"> ... </form>",
+"reason": "The comment-creation form is also missing the hidden _csrf token even though the request path is now centrally enforced."
+},
+{
+"file_path": "views/memberships/list.php",
+"line_start": 12,
+"line_end": 24,
+"function_name": null,
+"code": "<form method="post" action="/courses/<?= h($course_id) ?>/members/<?= h($m['membership_id']) ?>"> ... </form> ... <form method="post" action="/courses/<?= h($course_id) ?>/members/<?= h($m['membership_id']) ?>/delete">",
+"reason": "Membership role-change and delete forms remain tokenless, so the mitigation was not propagated to the vulnerable HTML flows."
+}
+],
+"root_cause_code": 9,
+"root_cause": "The repair added token validation but did not retrofit token issuance into the existing server-rendered forms, leaving the CSRF defense incomplete and inconsistently deployed.",
+"patch_locations": [
+{
+"file_path": "views/courses/detail.php",
+"line_start": 6,
+"line_end": 8,
+"function_name": null
+},
+{
+"file_path": "views/posts/detail.php",
+"line_start": 15,
+"line_end": 30,
+"function_name": null
+},
+{
+"file_path": "views/memberships/list.php",
+"line_start": 12,
+"line_end": 24,
+"function_name": null
+},
+{
+"file_path": "views/auth/login.php",
+"line_start": 3,
+"line_end": 8,
+"function_name": null
+},
+{
+"file_path": "views/auth/register.php",
+"line_start": 3,
+"line_end": 10,
+"function_name": null
+}
+],
+"repair_plan": "Insert csrf_input() into every server-rendered POST form, keep centralized validation before state changes, and verify all HTML mutation routes use the same token field name and form lifecycle. Then rerun the HTML workflows to confirm that legitimate requests succeed and forged requests fail.",
+"repair_failure_root_cause": "The previous repair implemented the validation half of the CSRF fix but did not complete the issuance and embedding half across the vulnerable forms, so the mitigation was left in an incorrectly integrated state.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-004",
+"current_status": "still_present",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.8,
+"severity_level": "high",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "A teacher or admin authorized in one course can still update or delete a membership belonging to another course by supplying a foreign membership_id. The current controller still authorizes only against the route course_id, and the repository still performs the write by membership_id alone.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/members/:membership_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 40,
+"line_end": 48,
+"function_name": "updateRole",
+"code": "$courseId = (int)$p['course_id']; $membershipId = (int)$p['membership_id']; require_course_teacher_or_admin($this->pdo, $courseId, $u, false); ... $repo->updateRole($membershipId, $role);",
+"reason": "The controller still authorizes against the route course_id but mutates the target membership solely by membership_id."
+},
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 51,
+"line_end": 58,
+"function_name": "remove",
+"code": "$courseId = (int)$p['course_id']; $membershipId = (int)$p['membership_id']; require_course_teacher_or_admin($this->pdo, $courseId, $u, false); ... $repo->remove($membershipId);",
+"reason": "Delete follows the same cross-course trust-boundary mistake."
+},
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 88,
+"line_end": 106,
+"function_name": "apiUpdateRole/apiRemove",
+"code": "require_course_teacher_or_admin($this->pdo, $courseId, $u, true); ... $m = $repo->updateRole($membershipId, $role); ... $repo->remove($membershipId);",
+"reason": "The API endpoints remain scoped only by the standalone membership identifier after authorization on the route course."
+},
+{
+"file_path": "src/repos/MembershipRepo.php",
+"line_start": 39,
+"line_end": 47,
+"function_name": "updateRole/remove",
+"code": "UPDATE memberships SET role_in_course=? WHERE membership_id=? ... DELETE FROM memberships WHERE membership_id=?",
+"reason": "The repository write queries still ignore course_id, so a foreign membership row can be modified or deleted once its ID is known."
+}
+],
+"root_cause_code": 11,
+"root_cause": "The code still trusts a standalone membership identifier across the course boundary and never verifies that the targeted membership belongs to the course for which the caller is authorized.",
+"patch_locations": [
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 40,
+"line_end": 58,
+"function_name": "updateRole/remove"
+},
+{
+"file_path": "src/controllers/MembershipController.php",
+"line_start": 88,
+"line_end": 106,
+"function_name": "apiUpdateRole/apiRemove"
+},
+{
+"file_path": "src/repos/MembershipRepo.php",
+"line_start": 19,
+"line_end": 47,
+"function_name": "getById/updateRole/remove"
+}
+],
+"repair_plan": "Load the membership row first, verify that its course_id matches the route course_id, and scope repository update/delete operations by both membership_id and course_id. Reject any request where the target membership does not belong to the course under authorization.",
+"repair_failure_root_cause": "The previous repair described a course-bound membership check, but the current codebase does not contain that enforcement in either the controller or repository write path.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-005",
+"current_status": "still_present",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.4,
+"severity_level": "high",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "Any authenticated member of a course can still edit or delete another member's post in that same course by using the target post_id. The current code still checks only course membership and never binds the write path to the post author or a dedicated moderation privilege.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 59,
+"line_end": 68,
+"function_name": "update",
+"code": "$courseId = (int)$p['course_id']; $postId = (int)$p['post_id']; require_course_member($this->pdo, $courseId, $u, false); ... $repo->update($courseId, $postId, $title, $body);",
+"reason": "The HTML update path still allows any course member to mutate the targeted post_id without an ownership or moderator check."
+},
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 71,
+"line_end": 78,
+"function_name": "delete",
+"code": "$courseId = (int)$p['course_id']; $postId = (int)$p['post_id']; require_course_member($this->pdo, $courseId, $u, false); ... $repo->delete($courseId, $postId);",
+"reason": "Delete follows the same insufficient authorization pattern."
+},
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 113,
+"line_end": 132,
+"function_name": "apiUpdate/apiDelete",
+"code": "require_course_member($this->pdo, $courseId, $u, true); ... $post = $repo->update($courseId, $postId, $title, $body); ... $repo->delete($courseId, $postId);",
+"reason": "The JSON API endpoints remain writable for any member who knows the post_id."
+},
+{
+"file_path": "src/repos/PostRepo.php",
+"line_start": 26,
+"line_end": 34,
+"function_name": "update/delete",
+"code": "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=? ... DELETE FROM posts WHERE course_id=? AND post_id=?",
+"reason": "The repository write paths are still scoped only by course_id and post_id, not by author_id or a staff-only moderation rule."
+}
+],
+"root_cause_code": 7,
+"root_cause": "The implementation still treats course membership as sufficient to modify any post in the course and omits an ownership or elevated-role check before editing or deleting a post.",
+"patch_locations": [
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 48,
+"line_end": 78,
+"function_name": "showEdit/update/delete"
+},
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 102,
+"line_end": 132,
+"function_name": "apiGet/apiUpdate/apiDelete"
+},
+{
+"file_path": "src/repos/PostRepo.php",
+"line_start": 19,
+"line_end": 34,
+"function_name": "getById/update/delete"
+}
+],
+"repair_plan": "Load the target post before editing or deleting it, verify that the caller is either the post author or an explicitly authorized staff/global-admin moderator, and constrain non-staff repository writes by author_id in addition to course_id and post_id.",
+"repair_failure_root_cause": "The previous repair summary claimed ownership-aware post controls, but those checks are absent from the current controller and repository code paths.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-006",
+"current_status": "incorrectly_fixed",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.0,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "The comment-edit and delete paths were partially modified toward ownership checks, but the repair is incomplete and internally inconsistent. The controller now calls undefined authorization helpers and passes extra author-scoping arguments to repository methods that do not accept them, so the original comment-authorization flaw was not cleanly or reliably eliminated.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 27,
+"line_end": 36,
+"function_name": "update",
+"code": "$comment = $repo->getById($courseId, $postId, $commentId); ... if (!can_manage_comment($membership, $comment, $u)) { ... } $repo->update($courseId, $postId, $commentId, $body, ... (int)$u['user_id']);",
+"reason": "The controller attempts a new ownership-aware pattern, but it depends on can_manage_comment() and a five-argument repository update call."
+},
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 48,
+"line_end": 56,
+"function_name": "delete",
+"code": "$comment = $repo->getById($courseId, $postId, $commentId); ... if (!can_manage_comment($membership, $comment, $u)) { ... } $repo->delete($courseId, $postId, $commentId, ... (int)$u['user_id']);",
+"reason": "Delete uses the same partially integrated ownership-aware call pattern."
+},
+{
+"file_path": "src/repos/CommentRepo.php",
+"line_start": 26,
+"line_end": 34,
+"function_name": "update/delete",
+"code": "public function update(int $courseId, int $postId, int $commentId, string $body): ?array { ... } public function delete(int $courseId, int $postId, int $commentId): void { ... }",
+"reason": "The repository methods still expose only the old four-argument/three-argument signatures and do not implement author-bound writes."
+},
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 29,
+"line_end": 29,
+"function_name": "update",
+"code": "if (!can_manage_comment($membership, $comment, $u)) { http_response_code(403); echo 'Forbidden'; return; }",
+"reason": "The controller references can_manage_comment(), but no such function is defined anywhere in the current src tree."
+}
+],
+"root_cause_code": 7,
+"root_cause": "The attempted ownership-based authorization was only partially wired in: the controller was changed, but the supporting guard/helper and repository author-scoping logic were not completed consistently.",
+"patch_locations": [
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 18,
+"line_end": 56,
+"function_name": "update/delete"
+},
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 82,
+"line_end": 119,
+"function_name": "apiUpdate/apiDelete"
+},
+{
+"file_path": "src/repos/CommentRepo.php",
+"line_start": 19,
+"line_end": 34,
+"function_name": "getById/update/delete"
+},
+{
+"file_path": "src/controllers/_guards.php",
+"line_start": 1,
+"line_end": 59,
+"function_name": null
+}
+],
+"repair_plan": "Define a real comment-authorization helper, load the target comment before mutation, and implement repository update/delete methods that optionally scope non-staff writes by author_id. Then apply the same finished ownership rule consistently in both HTML and API handlers.",
+"repair_failure_root_cause": "The previous repair started to add ownership-aware comment checks, but the patch was left half-applied: the controller now expects helper functions and repository signatures that do not exist in the current codebase.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-007",
+"current_status": "still_present",
+"vulnerability_type_code": 11,
+"vulnerability_type": "Sensitive Data Exposure",
+"cwe_id": "CWE-200",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.0,
+"severity_level": "high",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "Students and other ordinary course members can still read the full question bank and retrieve answer_json values containing correct answers. The current question-bank list/detail handlers still authorize all course members, and the data/view layers still return and render answer_json directly.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions/:question_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions/:question_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 8,
+"line_end": 13,
+"function_name": "list",
+"code": "$courseId = (int)$p['course_id']; require_course_member($this->pdo, $courseId, $u, false); ... render('questions/list', ... $repo->listByCourse($courseId))",
+"reason": "The question-bank list is still available to any course member, not only staff."
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 38,
+"line_end": 46,
+"function_name": "detail",
+"code": "$courseId = (int)$p['course_id']; $questionId = (int)$p['question_id']; require_course_member($this->pdo, $courseId, $u, false); ... render('questions/detail', ...)",
+"reason": "The detail page remains reachable by any authenticated course member."
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 85,
+"line_end": 115,
+"function_name": "apiList/apiGet",
+"code": "require_course_member($this->pdo, $courseId, $u, true); ... json_response(['questions' => $repo->listByCourse($courseId)]); ... json_response(['question' => $q]);",
+"reason": "The JSON API still exposes the same data set to ordinary members."
+},
+{
+"file_path": "src/repos/QuestionRepo.php",
+"line_start": 13,
+"line_end": 23,
+"function_name": "listByCourse/getById",
+"code": "SELECT q.*, u.username AS creator_username FROM questions q ...",
+"reason": "The repository still returns all question columns, including answer_json, instead of a student-safe projection."
+},
+{
+"file_path": "views/questions/detail.php",
+"line_start": 6,
+"line_end": 7,
+"function_name": null,
+"code": "<p><b>Options JSON:</b> <pre><?= h($question['options_json'] ?? '') ?></pre></p>\n<p><b>Answer JSON:</b> <pre><?= h($question['answer_json'] ?? '') ?></pre></p>",
+"reason": "The HTML view still renders answer_json directly once the member-level access check passes."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Question-bank reads are still authorized for all course members, and the data/view layers still expose sensitive answer fields without a staff-only or student-safe projection boundary.",
+"patch_locations": [
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 8,
+"line_end": 13,
+"function_name": "list"
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 38,
+"line_end": 46,
+"function_name": "detail"
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 85,
+"line_end": 115,
+"function_name": "apiList/apiGet"
+},
+{
+"file_path": "src/repos/QuestionRepo.php",
+"line_start": 13,
+"line_end": 23,
+"function_name": "listByCourse/getById"
+},
+{
+"file_path": "views/questions/detail.php",
+"line_start": 6,
+"line_end": 7,
+"function_name": null
+}
+],
+"repair_plan": "Restrict question-bank list/detail routes to staff roles when answer_json is present, and create a separate student-safe representation that excludes answer_json and other solution material. Apply the same access rule in both HTML and API handlers.",
+"repair_failure_root_cause": "The previous repair summary claimed staff-only question-bank exposure, but the current code still uses member-level authorization and still returns and renders answer_json to those members.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-008",
+"current_status": "incorrectly_fixed",
+"vulnerability_type_code": 13,
+"vulnerability_type": "Business Logic",
+"cwe_id": "CWE-841",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.3,
+"severity_level": "high",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "The quiz-attempt answer and submit workflow still does not enforce quiz-question binding or the submitted state before accepting answer writes, and the attempted repair introduced schema and query inconsistencies into the same flow. A student-owned attempt can still reach answer upserts without a server-side check that the question belongs to the quiz or that the attempt is still open, so the original integrity failure remains unresolved.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 34,
+"line_end": 46,
+"function_name": "answer",
+"code": "$questionId = (int)($_POST['question_id'] ?? 0); ... $attempt = $repo->getAttemptById($attemptId); if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { ... } $repo->upsertAnswer($attemptId, $questionId, $answerJson);",
+"reason": "The answer path still checks only ownership of the attempt and never verifies that question_id belongs to the quiz or that submitted_at is still null."
+},
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 49,
+"line_end": 58,
+"function_name": "submit",
+"code": "$attempt = $repo->getAttemptById($attemptId); if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { ... } $repo->submitAttempt($attemptId);",
+"reason": "Submission still only stamps submitted_at, and no later answer path checks that state before allowing more writes."
+},
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 79,
+"line_end": 103,
+"function_name": "apiAnswer/apiSubmit",
+"code": "$questionId = (int)($data['question_id'] ?? 0); ... if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) ... $repo->upsertAnswer($attemptId, $questionId, $answerJson); ... $repo->submitAttempt($attemptId);",
+"reason": "The JSON API repeats the same missing quiz-question and submitted-state validation."
+},
+{
+"file_path": "src/repos/QuizRepo.php",
+"line_start": 66,
+"line_end": 74,
+"function_name": "upsertAnswer/submitAttempt",
+"code": "INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) VALUES (?,?,?,?) ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json ... UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?",
+"reason": "The repository still accepts arbitrary question_id values for an attempt and still overwrites answers without checking submitted_at or quiz membership."
+},
+{
+"file_path": "src/bootstrap.php",
+"line_start": 176,
+"line_end": 197,
+"function_name": "init_db",
+"code": "CREATE TABLE IF NOT EXISTS quiz_attempts ( attempt_id INTEGER PRIMARY KEY AUTOINCREMENT, quiz_id INTEGER NOT NULL, student_id INTEGER NOT NULL, started_at TEXT NOT NULL, submitted_at TEXT, score REAL, UNIQUE(quiz_id, student_id), ... )",
+"reason": "The schema defined in init_db does not contain course_id on quiz_attempts and does not define answer_id on quiz_answers."
+},
+{
+"file_path": "src/repos/QuizRepo.php",
+"line_start": 53,
+"line_end": 57,
+"function_name": "startAttempt",
+"code": "INSERT INTO quiz_attempts(quiz_id,course_id,student_id,started_at) VALUES (?,?,?,?)",
+"reason": "The attempted repair introduced a repository write against a non-existent course_id column, showing that the new quiz-integrity fix was not integrated correctly into the actual schema."
+}
+],
+"root_cause_code": 12,
+"root_cause": "The quiz workflow still does not enforce the intended attempt state machine or quiz-question binding before answer writes, and the attempted fix was left internally inconsistent with the database schema and repository behavior.",
+"patch_locations": [
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 34,
+"line_end": 58,
+"function_name": "answer/submit"
+},
+{
+"file_path": "src/controllers/TakeQuizController.php",
+"line_start": 79,
+"line_end": 103,
+"function_name": "apiAnswer/apiSubmit"
+},
+{
+"file_path": "src/repos/QuizRepo.php",
+"line_start": 47,
+"line_end": 84,
+"function_name": "listQuizQuestions/startAttempt/upsertAnswer/submitAttempt/listAnswers"
+},
+{
+"file_path": "src/bootstrap.php",
+"line_start": 176,
+"line_end": 197,
+"function_name": "init_db"
+}
+],
+"repair_plan": "Before any answer write, load the attempt and verify that it belongs to the supplied quiz and course, that submitted_at is still null, and that question_id is one of the quiz_questions for that quiz. Then align the repository and schema so quiz_attempts and quiz_answers use the same columns the controller logic expects, and reject duplicate submission or post-submission edits consistently in both HTML and API flows.",
+"repair_failure_root_cause": "The previous repair attempted to add quiz/course binding and post-submission checks, but the current code does not contain those validations and also introduces schema/repository mismatches in the same path, leaving the original integrity issue unresolved.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+}
+]
+
+
+- Previous vulnerability repair report / patch / summary:
+Unified diff patch: [second_round_fix_clean.patch](sandbox:/mnt/data/second_round_fix_clean.patch)
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/public/index.php	2026-03-11 16:51:00.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/public/index.php	2026-03-15 01:38:20.747970339 +0000
+@@ -191,13 +191,14 @@
+ 
+ // Submissions API
+ $router->add('GET', '/api/courses/(?P<course_id>\d+)/assignments/(?P<assignment_id>\d+)/submissions', fn($p) => $submissions->apiListForAssignment($p));
++$router->add('GET', '/api/my/submissions', fn() => $submissions->apiListMine());
+ $router->add('POST', '/api/courses/(?P<course_id>\d+)/assignments/(?P<assignment_id>\d+)/submissions', fn($p) => $submissions->apiCreate($p));
+-$router->add('PUT', '/api/courses/(?P<course_id>\d+)/assignments/(?P<assignment_id>\d+)/submissions/(?P<submission_id>\d+)', fn($p) => $submissions->apiUpdateMine($p));
++$router->add('PUT', '/api/courses/(?P<course_id>\d+)/assignments/(?P<assignment_id>\d+)/submissions/(?P<submission_id>\d+)', fn($p) => $submissions->apiUpdate($p));
+ 
+ // Uploads API
+ $router->add('GET', '/api/courses/(?P<course_id>\d+)/uploads', fn($p) => $uploads->apiList($p));
+ $router->add('POST', '/api/courses/(?P<course_id>\d+)/uploads', fn($p) => $uploads->apiUpload($p));
+-$router->add('GET', '/api/courses/(?P<course_id>\d+)/uploads/(?P<upload_id>\d+)', fn($p) => $uploads->apiGet($p));
++$router->add('GET', '/api/courses/(?P<course_id>\d+)/uploads/(?P<upload_id>\d+)', fn($p) => $uploads->apiDownload($p));
+ $router->add('DELETE', '/api/courses/(?P<course_id>\d+)/uploads/(?P<upload_id>\d+)', fn($p) => $uploads->apiDelete($p));
+ 
+ // Questions API
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/bootstrap.php	2026-03-11 16:51:12.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/bootstrap.php	2026-03-15 01:39:17.843007688 +0000
+@@ -1,8 +1,11 @@
+ <?php
+ define('APP_BASE', dirname(__DIR__));
++require_once APP_BASE . '/src/helpers.php';
+ 
+ // Sessions
+ if (session_status() === PHP_SESSION_NONE) {
++    ini_set('session.use_strict_mode', '1');
++    ini_set('session.use_only_cookies', '1');
+     session_set_cookie_params([
+         'lifetime' => 0,
+         'path' => '/',
+@@ -13,8 +16,6 @@
+     session_start();
+ }
+ 
+-require_once APP_BASE . '/src/helpers.php';
+-
+ function db(): PDO {
+     static $pdo = null;
+     if ($pdo instanceof PDO) return $pdo;
+@@ -110,9 +111,7 @@
+         course_id INTEGER NOT NULL,
+         uploaded_by INTEGER NOT NULL,
+         original_name TEXT NOT NULL,
+-        stored_name TEXT NOT NULL,
+-        mime_type TEXT,
+-        size_bytes INTEGER NOT NULL DEFAULT 0,
++        storage_path TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         FOREIGN KEY(course_id) REFERENCES courses(course_id) ON DELETE CASCADE,
+         FOREIGN KEY(uploaded_by) REFERENCES users(user_id) ON DELETE CASCADE
+@@ -122,6 +121,7 @@
+     $pdo->exec("CREATE TABLE IF NOT EXISTS submissions (
+         submission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+         assignment_id INTEGER NOT NULL,
++        course_id INTEGER NOT NULL,
+         student_id INTEGER NOT NULL,
+         content_text TEXT NOT NULL DEFAULT '',
+         attachment_upload_id INTEGER,
+@@ -129,6 +129,7 @@
+         updated_at TEXT NOT NULL,
+         UNIQUE(assignment_id, student_id),
+         FOREIGN KEY(assignment_id) REFERENCES assignments(assignment_id) ON DELETE CASCADE,
++        FOREIGN KEY(course_id) REFERENCES courses(course_id) ON DELETE CASCADE,
+         FOREIGN KEY(student_id) REFERENCES users(user_id) ON DELETE CASCADE,
+         FOREIGN KEY(attachment_upload_id) REFERENCES uploads(upload_id) ON DELETE SET NULL
+     )");
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/helpers.php	2026-03-11 16:51:31.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/helpers.php	2026-03-15 01:40:03.097895113 +0000
+@@ -89,14 +89,41 @@
+ function require_csrf(): void {
+     $token = (string)($_POST['_csrf'] ?? '');
+     $expected = (string)($_SESSION['_csrf_token'] ?? '');
+-    if ($expected === '' || $token === '' || !hash_equals($expected, $token)) {
+-        if (is_json_request()) {
+-            json_response(['error' => 'invalid csrf token'], 403);
++    if ($expected !== '' && $token !== '' && hash_equals($expected, $token)) {
++        return;
++    }
++
++    $origin = (string)($_SERVER['HTTP_ORIGIN'] ?? '');
++    $referer = (string)($_SERVER['HTTP_REFERER'] ?? '');
++    $host = (string)($_SERVER['HTTP_HOST'] ?? '');
++    $sameOrigin = true;
++
++    foreach ([$origin, $referer] as $candidate) {
++        if ($candidate === '') {
++            continue;
++        }
++        $candidateHost = (string)(parse_url($candidate, PHP_URL_HOST) ?? '');
++        $candidatePort = (string)(parse_url($candidate, PHP_URL_PORT) ?? '');
++        $candidateHostPort = $candidateHost;
++        if ($candidatePort !== '') {
++            $candidateHostPort .= ':' . $candidatePort;
++        }
++        if ($candidateHostPort !== '' && !hash_equals(strtolower($host), strtolower($candidateHostPort))) {
++            $sameOrigin = false;
++            break;
+         }
+-        http_response_code(403);
+-        echo 'Forbidden';
+-        exit;
+     }
++
++    if ($sameOrigin) {
++        return;
++    }
++
++    if (is_json_request()) {
++        json_response(['error' => 'invalid csrf token'], 403);
++    }
++    http_response_code(403);
++    echo 'Forbidden';
++    exit;
+ }
+ 
+ function snippet(?string $text, int $max = 120): string {
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/controllers/_guards.php	2026-02-21 16:06:59.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/controllers/_guards.php	2026-03-15 01:38:20.742721372 +0000
+@@ -58,3 +58,15 @@
+     return $m;
+ }
+ 
++
++function can_manage_post(array $membership, array $post, array $user): bool {
++    if (is_global_admin($user)) return true;
++    if (role_is_staff((string)($membership['role_in_course'] ?? ''))) return true;
++    return (int)($post['author_id'] ?? 0) === (int)($user['user_id'] ?? 0);
++}
++
++function can_manage_comment(array $membership, array $comment, array $user): bool {
++    if (is_global_admin($user)) return true;
++    if (role_is_staff((string)($membership['role_in_course'] ?? ''))) return true;
++    return (int)($comment['author_id'] ?? 0) === (int)($user['user_id'] ?? 0);
++}
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/controllers/MembershipController.php	2026-02-21 16:08:23.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/controllers/MembershipController.php	2026-03-15 01:38:20.743248579 +0000
+@@ -44,7 +44,9 @@
+         require_course_teacher_or_admin($this->pdo, $courseId, $u, false);
+         $role = trim($_POST['role_in_course'] ?? 'student');
+         $repo = new MembershipRepo($this->pdo);
+-        $repo->updateRole($membershipId, $role);
++        $m = $repo->getById($membershipId);
++        if (!$m || (int)$m['course_id'] !== $courseId) { http_response_code(404); echo 'Not found'; return; }
++        $repo->updateRole($courseId, $membershipId, $role);
+         redirect("/courses/$courseId/members");
+     }
+ 
+@@ -54,7 +56,9 @@
+         $membershipId = (int)$p['membership_id'];
+         require_course_teacher_or_admin($this->pdo, $courseId, $u, false);
+         $repo = new MembershipRepo($this->pdo);
+-        $repo->remove($membershipId);
++        $m = $repo->getById($membershipId);
++        if (!$m || (int)$m['course_id'] !== $courseId) { http_response_code(404); echo 'Not found'; return; }
++        $repo->remove($courseId, $membershipId);
+         redirect("/courses/$courseId/members");
+     }
+ 
+@@ -93,7 +97,9 @@
+         $data = parse_json_body();
+         $role = trim($data['role_in_course'] ?? 'student');
+         $repo = new MembershipRepo($this->pdo);
+-        $m = $repo->updateRole($membershipId, $role);
++        $existing = $repo->getById($membershipId);
++        if (!$existing || (int)$existing['course_id'] !== $courseId) json_response(['error' => 'not found'], 404);
++        $m = $repo->updateRole($courseId, $membershipId, $role);
+         json_response(['membership' => $m]);
+     }
+ 
+@@ -103,7 +109,9 @@
+         $membershipId = (int)$p['membership_id'];
+         require_course_teacher_or_admin($this->pdo, $courseId, $u, true);
+         $repo = new MembershipRepo($this->pdo);
+-        $repo->remove($membershipId);
++        $existing = $repo->getById($membershipId);
++        if (!$existing || (int)$existing['course_id'] !== $courseId) json_response(['error' => 'not found'], 404);
++        $repo->remove($courseId, $membershipId);
+         json_response(['ok' => true]);
+     }
+ 
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/controllers/PostController.php	2026-02-21 16:08:52.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/controllers/PostController.php	2026-03-15 01:38:20.745007561 +0000
+@@ -51,8 +51,10 @@
+         $postId = (int)$p['post_id'];
+         require_course_member($this->pdo, $courseId, $u, false);
+         $repo = new PostRepo($this->pdo);
++        $membership = require_course_member($this->pdo, $courseId, $u, false);
+         $post = $repo->getById($courseId, $postId);
+         if (!$post) { http_response_code(404); echo 'Not found'; return; }
++        if (!can_manage_post($membership, $post, $u)) { http_response_code(403); echo 'Forbidden'; return; }
+         render('posts/edit', ['title' => 'Edit Post', 'course_id' => $courseId, 'post' => $post]);
+     }
+ 
+@@ -60,11 +62,14 @@
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+-        require_course_member($this->pdo, $courseId, $u, false);
++        $membership = require_course_member($this->pdo, $courseId, $u, false);
+         $title = trim($_POST['title'] ?? '');
+         $body = trim($_POST['body'] ?? '');
+         $repo = new PostRepo($this->pdo);
+-        $repo->update($courseId, $postId, $title, $body);
++        $post = $repo->getById($courseId, $postId);
++        if (!$post) { http_response_code(404); echo 'Not found'; return; }
++        if (!can_manage_post($membership, $post, $u)) { http_response_code(403); echo 'Forbidden'; return; }
++        $repo->update($courseId, $postId, $title, $body, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         redirect("/courses/$courseId/posts/$postId");
+     }
+ 
+@@ -72,9 +77,12 @@
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+-        require_course_member($this->pdo, $courseId, $u, false);
++        $membership = require_course_member($this->pdo, $courseId, $u, false);
+         $repo = new PostRepo($this->pdo);
+-        $repo->delete($courseId, $postId);
++        $post = $repo->getById($courseId, $postId);
++        if (!$post) { http_response_code(404); echo 'Not found'; return; }
++        if (!can_manage_post($membership, $post, $u)) { http_response_code(403); echo 'Forbidden'; return; }
++        $repo->delete($courseId, $postId, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         redirect("/courses/$courseId/posts");
+     }
+ 
+@@ -114,12 +122,15 @@
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+-        require_course_member($this->pdo, $courseId, $u, true);
++        $membership = require_course_member($this->pdo, $courseId, $u, true);
+         $data = parse_json_body();
+         $title = trim($data['title'] ?? '');
+         $body = trim($data['body'] ?? '');
+         $repo = new PostRepo($this->pdo);
+-        $post = $repo->update($courseId, $postId, $title, $body);
++        $post = $repo->getById($courseId, $postId);
++        if (!$post) json_response(['error' => 'not found'], 404);
++        if (!can_manage_post($membership, $post, $u)) json_response(['error' => 'forbidden'], 403);
++        $post = $repo->update($courseId, $postId, $title, $body, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         json_response(['post' => $post]);
+     }
+ 
+@@ -127,9 +138,12 @@
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+-        require_course_member($this->pdo, $courseId, $u, true);
++        $membership = require_course_member($this->pdo, $courseId, $u, true);
+         $repo = new PostRepo($this->pdo);
+-        $repo->delete($courseId, $postId);
++        $post = $repo->getById($courseId, $postId);
++        if (!$post) json_response(['error' => 'not found'], 404);
++        if (!can_manage_post($membership, $post, $u)) json_response(['error' => 'forbidden'], 403);
++        $repo->delete($courseId, $postId, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         json_response(['ok' => true]);
+     }
+ }
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/controllers/CommentController.php	2026-03-11 16:52:05.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/controllers/CommentController.php	2026-03-15 01:38:20.745981015 +0000
+@@ -27,13 +27,7 @@
+         $comment = $repo->getById($courseId, $postId, $commentId);
+         if (!$comment) { http_response_code(404); echo 'Not found'; return; }
+         if (!can_manage_comment($membership, $comment, $u)) { http_response_code(403); echo 'Forbidden'; return; }
+-        $repo->update(
+-            $courseId,
+-            $postId,
+-            $commentId,
+-            $body,
+-            role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u) ? null : (int)$u['user_id']
+-        );
++        $repo->update($courseId, $postId, $commentId, $body, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         redirect("/courses/$courseId/posts/$postId");
+     }
+ 
+@@ -48,23 +42,16 @@
+         $comment = $repo->getById($courseId, $postId, $commentId);
+         if (!$comment) { http_response_code(404); echo 'Not found'; return; }
+         if (!can_manage_comment($membership, $comment, $u)) { http_response_code(403); echo 'Forbidden'; return; }
+-        $repo->delete(
+-            $courseId,
+-            $postId,
+-            $commentId,
+-            role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u) ? null : (int)$u['user_id']
+-        );
++        $repo->delete($courseId, $postId, $commentId, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         redirect("/courses/$courseId/posts/$postId");
+     }
+ 
+-    // API
+     public function apiList(array $p): void {
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         $postId = (int)$p['post_id'];
+         require_course_member($this->pdo, $courseId, $u, true);
+-        $repo = new CommentRepo($this->pdo);
+-        json_response(['comments' => $repo->listByPost($courseId, $postId)]);
++        json_response(['comments' => (new CommentRepo($this->pdo))->listByPost($courseId, $postId)]);
+     }
+ 
+     public function apiCreate(array $p): void {
+@@ -74,9 +61,8 @@
+         require_course_member($this->pdo, $courseId, $u, true);
+         $data = parse_json_body();
+         $body = trim($data['body'] ?? '');
+-        $repo = new CommentRepo($this->pdo);
+-        $c = $repo->create($courseId, $postId, (int)$u['user_id'], $body);
+-        json_response(['comment' => $c]);
++        $comment = (new CommentRepo($this->pdo))->create($courseId, $postId, (int)$u['user_id'], $body);
++        json_response(['comment' => $comment]);
+     }
+ 
+     public function apiUpdate(array $p): void {
+@@ -91,14 +77,8 @@
+         $comment = $repo->getById($courseId, $postId, $commentId);
+         if (!$comment) json_response(['error' => 'not found'], 404);
+         if (!can_manage_comment($membership, $comment, $u)) json_response(['error' => 'forbidden'], 403);
+-        $c = $repo->update(
+-            $courseId,
+-            $postId,
+-            $commentId,
+-            $body,
+-            role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u) ? null : (int)$u['user_id']
+-        );
+-        json_response(['comment' => $c]);
++        $comment = $repo->update($courseId, $postId, $commentId, $body, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
++        json_response(['comment' => $comment]);
+     }
+ 
+     public function apiDelete(array $p): void {
+@@ -111,12 +91,7 @@
+         $comment = $repo->getById($courseId, $postId, $commentId);
+         if (!$comment) json_response(['error' => 'not found'], 404);
+         if (!can_manage_comment($membership, $comment, $u)) json_response(['error' => 'forbidden'], 403);
+-        $repo->delete(
+-            $courseId,
+-            $postId,
+-            $commentId,
+-            role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u) ? null : (int)$u['user_id']
+-        );
++        $repo->delete($courseId, $postId, $commentId, (role_is_staff((string)($membership['role_in_course'] ?? '')) || is_global_admin($u)) ? null : (int)$u['user_id']);
+         json_response(['ok' => true]);
+     }
+-}
+\ No newline at end of file
++}
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/controllers/QuestionController.php	2026-02-21 16:11:06.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/controllers/QuestionController.php	2026-03-15 01:38:20.746594029 +0000
+@@ -8,7 +8,7 @@
+     public function list(array $p): void {
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+-        require_course_member($this->pdo, $courseId, $u, false);
++        require_course_staff($this->pdo, $courseId, $u, false);
+         $repo = new QuestionRepo($this->pdo);
+         render('questions/list', ['title' => 'Question Bank', 'course_id' => $courseId, 'questions' => $repo->listByCourse($courseId)]);
+     }
+@@ -39,7 +39,7 @@
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $questionId = (int)$p['question_id'];
+-        require_course_member($this->pdo, $courseId, $u, false);
++        require_course_staff($this->pdo, $courseId, $u, false);
+         $repo = new QuestionRepo($this->pdo);
+         $q = $repo->getById($courseId, $questionId);
+         if (!$q) { http_response_code(404); echo 'Not found'; return; }
+@@ -85,7 +85,7 @@
+     public function apiList(array $p): void {
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+-        require_course_member($this->pdo, $courseId, $u, true);
++        require_course_staff($this->pdo, $courseId, $u, true);
+         $repo = new QuestionRepo($this->pdo);
+         json_response(['questions' => $repo->listByCourse($courseId)]);
+     }
+@@ -109,7 +109,7 @@
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         $questionId = (int)$p['question_id'];
+-        require_course_member($this->pdo, $courseId, $u, true);
++        require_course_staff($this->pdo, $courseId, $u, true);
+         $q = (new QuestionRepo($this->pdo))->getById($courseId, $questionId);
+         if (!$q) json_response(['error' => 'not found'], 404);
+         json_response(['question' => $q]);
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/controllers/TakeQuizController.php	2026-02-21 16:12:06.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/controllers/TakeQuizController.php	2026-03-15 01:38:20.747267527 +0000
+@@ -5,12 +5,25 @@
+ class TakeQuizController {
+     public function __construct(private PDO $pdo) {}
+ 
++    private function loadAuthorizedAttempt(QuizRepo $repo, int $courseId, int $quizId, int $attemptId, array $u, bool $api): array {
++        $attempt = $repo->getAttemptById($attemptId);
++        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id'] || (int)$attempt['quiz_id'] !== $quizId || (int)$attempt['course_id'] !== $courseId) {
++            if ($api) json_response(['error' => 'not found'], 404);
++            http_response_code(404);
++            echo 'Not found';
++            exit;
++        }
++        return $attempt;
++    }
++
+     public function start(array $p): void {
+         $u = require_login();
+         $courseId = (int)$p['course_id'];
+         $quizId = (int)$p['quiz_id'];
+         require_course_student($this->pdo, $courseId, $u, false);
+         $repo = new QuizRepo($this->pdo);
++        $quiz = $repo->getById($courseId, $quizId);
++        if (!$quiz) { http_response_code(404); echo 'Not found'; return; }
+         $attempt = $repo->startAttempt($courseId, $quizId, (int)$u['user_id']);
+         redirect("/courses/$courseId/quizzes/$quizId/attempts/{$attempt['attempt_id']}");
+     }
+@@ -22,8 +35,7 @@
+         $attemptId = (int)$p['attempt_id'];
+         require_course_student($this->pdo, $courseId, $u, false);
+         $repo = new QuizRepo($this->pdo);
+-        $attempt = $repo->getAttemptById($attemptId);
+-        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { http_response_code(404); echo 'Not found'; return; }
++        $attempt = $this->loadAuthorizedAttempt($repo, $courseId, $quizId, $attemptId, $u, false);
+         $quizQuestions = $repo->listQuizQuestions($quizId);
+         $answers = $repo->listAnswers($attemptId);
+         $map = [];
+@@ -40,8 +52,9 @@
+         $questionId = (int)($_POST['question_id'] ?? 0);
+         $answerJson = trim($_POST['answer_json'] ?? '');
+         $repo = new QuizRepo($this->pdo);
+-        $attempt = $repo->getAttemptById($attemptId);
+-        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { http_response_code(404); echo 'Not found'; return; }
++        $attempt = $this->loadAuthorizedAttempt($repo, $courseId, $quizId, $attemptId, $u, false);
++        if ($attempt['submitted_at']) { http_response_code(403); echo 'Forbidden'; return; }
++        if (!$repo->quizHasQuestion($quizId, $questionId)) { http_response_code(404); echo 'Not found'; return; }
+         $repo->upsertAnswer($attemptId, $questionId, $answerJson);
+         redirect("/courses/$courseId/quizzes/$quizId/attempts/$attemptId");
+     }
+@@ -53,8 +66,8 @@
+         $attemptId = (int)$p['attempt_id'];
+         require_course_student($this->pdo, $courseId, $u, false);
+         $repo = new QuizRepo($this->pdo);
+-        $attempt = $repo->getAttemptById($attemptId);
+-        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) { http_response_code(404); echo 'Not found'; return; }
++        $attempt = $this->loadAuthorizedAttempt($repo, $courseId, $quizId, $attemptId, $u, false);
++        if ($attempt['submitted_at']) { http_response_code(403); echo 'Forbidden'; return; }
+         $repo->submitAttempt($attemptId);
+         redirect("/courses/$courseId/quizzes/$quizId");
+     }
+@@ -65,17 +78,29 @@
+         render('quizzes/my_attempts', ['title' => 'My Quiz Attempts', 'attempts' => $repo->listMyAttempts((int)$u['user_id'])]);
+     }
+ 
+-    // API
+     public function apiStart(array $p): void {
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+         $quizId = (int)$p['quiz_id'];
+         require_course_student($this->pdo, $courseId, $u, true);
+         $repo = new QuizRepo($this->pdo);
++        $quiz = $repo->getById($courseId, $quizId);
++        if (!$quiz) json_response(['error' => 'not found'], 404);
+         $attempt = $repo->startAttempt($courseId, $quizId, (int)$u['user_id']);
+         json_response(['attempt' => $attempt]);
+     }
+ 
++    public function apiGetAttempt(array $p): void {
++        $u = require_api_login();
++        $courseId = (int)$p['course_id'];
++        $quizId = (int)$p['quiz_id'];
++        $attemptId = (int)$p['attempt_id'];
++        require_course_student($this->pdo, $courseId, $u, true);
++        $repo = new QuizRepo($this->pdo);
++        $attempt = $this->loadAuthorizedAttempt($repo, $courseId, $quizId, $attemptId, $u, true);
++        json_response(['attempt' => $attempt, 'answers' => $repo->listAnswers($attemptId)]);
++    }
++
+     public function apiAnswer(array $p): void {
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
+@@ -86,8 +111,9 @@
+         $questionId = (int)($data['question_id'] ?? 0);
+         $answerJson = (string)($data['answer_json'] ?? '');
+         $repo = new QuizRepo($this->pdo);
+-        $attempt = $repo->getAttemptById($attemptId);
+-        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) json_response(['error' => 'not found'], 404);
++        $attempt = $this->loadAuthorizedAttempt($repo, $courseId, $quizId, $attemptId, $u, true);
++        if ($attempt['submitted_at']) json_response(['error' => 'forbidden'], 403);
++        if (!$repo->quizHasQuestion($quizId, $questionId)) json_response(['error' => 'not found'], 404);
+         $repo->upsertAnswer($attemptId, $questionId, $answerJson);
+         json_response(['ok' => true]);
+     }
+@@ -95,11 +121,12 @@
+     public function apiSubmit(array $p): void {
+         $u = require_api_login();
+         $courseId = (int)$p['course_id'];
++        $quizId = (int)$p['quiz_id'];
+         $attemptId = (int)$p['attempt_id'];
+         require_course_student($this->pdo, $courseId, $u, true);
+         $repo = new QuizRepo($this->pdo);
+-        $attempt = $repo->getAttemptById($attemptId);
+-        if (!$attempt || (int)$attempt['student_id'] !== (int)$u['user_id']) json_response(['error' => 'not found'], 404);
++        $attempt = $this->loadAuthorizedAttempt($repo, $courseId, $quizId, $attemptId, $u, true);
++        if ($attempt['submitted_at']) json_response(['error' => 'forbidden'], 403);
+         $repo->submitAttempt($attemptId);
+         json_response(['ok' => true]);
+     }
+@@ -110,4 +137,3 @@
+         json_response(['attempts' => $repo->listMyAttempts((int)$u['user_id'])]);
+     }
+ }
+-
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/repos/MembershipRepo.php	2026-02-21 16:05:17.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/repos/MembershipRepo.php	2026-03-15 01:38:20.743875565 +0000
+@@ -36,15 +36,15 @@
+         return $stmt->fetchAll();
+     }
+ 
+-    public function updateRole(int $membershipId, string $role): ?array {
+-        $stmt = $this->pdo->prepare('UPDATE memberships SET role_in_course=? WHERE membership_id=?');
+-        $stmt->execute([$role, $membershipId]);
++    public function updateRole(int $courseId, int $membershipId, string $role): ?array {
++        $stmt = $this->pdo->prepare('UPDATE memberships SET role_in_course=? WHERE course_id=? AND membership_id=?');
++        $stmt->execute([$role, $courseId, $membershipId]);
+         return $this->getById($membershipId);
+     }
+ 
+-    public function remove(int $membershipId): void {
+-        $stmt = $this->pdo->prepare('DELETE FROM memberships WHERE membership_id=?');
+-        $stmt->execute([$membershipId]);
++    public function remove(int $courseId, int $membershipId): void {
++        $stmt = $this->pdo->prepare('DELETE FROM memberships WHERE course_id=? AND membership_id=?');
++        $stmt->execute([$courseId, $membershipId]);
+     }
+ 
+     public function isMember(int $courseId, int $userId): bool {
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/repos/PostRepo.php	2026-02-21 16:05:28.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/repos/PostRepo.php	2026-03-15 01:38:20.744276355 +0000
+@@ -23,15 +23,25 @@
+         return $row ?: null;
+     }
+ 
+-    public function update(int $courseId, int $postId, string $title, string $body): ?array {
+-        $stmt = $this->pdo->prepare('UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?');
+-        $stmt->execute([$title, $body, now_iso(), $courseId, $postId]);
++    public function update(int $courseId, int $postId, string $title, string $body, ?int $authorId = null): ?array {
++        if ($authorId === null) {
++            $stmt = $this->pdo->prepare('UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?');
++            $stmt->execute([$title, $body, now_iso(), $courseId, $postId]);
++        } else {
++            $stmt = $this->pdo->prepare('UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=? AND author_id=?');
++            $stmt->execute([$title, $body, now_iso(), $courseId, $postId, $authorId]);
++        }
+         return $this->getById($courseId, $postId);
+     }
+ 
+-    public function delete(int $courseId, int $postId): void {
+-        $stmt = $this->pdo->prepare('DELETE FROM posts WHERE course_id=? AND post_id=?');
+-        $stmt->execute([$courseId, $postId]);
++    public function delete(int $courseId, int $postId, ?int $authorId = null): void {
++        if ($authorId === null) {
++            $stmt = $this->pdo->prepare('DELETE FROM posts WHERE course_id=? AND post_id=?');
++            $stmt->execute([$courseId, $postId]);
++        } else {
++            $stmt = $this->pdo->prepare('DELETE FROM posts WHERE course_id=? AND post_id=? AND author_id=?');
++            $stmt->execute([$courseId, $postId, $authorId]);
++        }
+     }
+ 
+     public function searchPosts(int $courseId, string $keyword): array {
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/repos/CommentRepo.php	2026-02-21 16:05:40.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/repos/CommentRepo.php	2026-03-15 01:38:20.745579837 +0000
+@@ -23,15 +23,25 @@
+         return $row ?: null;
+     }
+ 
+-    public function update(int $courseId, int $postId, int $commentId, string $body): ?array {
+-        $stmt = $this->pdo->prepare('UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?');
+-        $stmt->execute([$body, now_iso(), $courseId, $postId, $commentId]);
++    public function update(int $courseId, int $postId, int $commentId, string $body, ?int $authorId = null): ?array {
++        if ($authorId === null) {
++            $stmt = $this->pdo->prepare('UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?');
++            $stmt->execute([$body, now_iso(), $courseId, $postId, $commentId]);
++        } else {
++            $stmt = $this->pdo->prepare('UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=? AND author_id=?');
++            $stmt->execute([$body, now_iso(), $courseId, $postId, $commentId, $authorId]);
++        }
+         return $this->getById($courseId, $postId, $commentId);
+     }
+ 
+-    public function delete(int $courseId, int $postId, int $commentId): void {
+-        $stmt = $this->pdo->prepare('DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?');
+-        $stmt->execute([$courseId, $postId, $commentId]);
++    public function delete(int $courseId, int $postId, int $commentId, ?int $authorId = null): void {
++        if ($authorId === null) {
++            $stmt = $this->pdo->prepare('DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?');
++            $stmt->execute([$courseId, $postId, $commentId]);
++        } else {
++            $stmt = $this->pdo->prepare('DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=? AND author_id=?');
++            $stmt->execute([$courseId, $postId, $commentId, $authorId]);
++        }
+     }
+ 
+     public function searchComments(int $courseId, string $keyword): array {
+--- /mnt/data/orig2/educollab_php_v0_repair/educollab_php_v0/src/repos/QuizRepo.php	2026-02-21 16:06:45.000000000 +0000
++++ /mnt/data/work/educollab_php_v0_repair/educollab_php_v0/src/repos/QuizRepo.php	2026-03-15 01:38:20.746882956 +0000
+@@ -50,40 +50,56 @@
+         return $stmt->fetchAll();
+     }
+ 
++    public function quizHasQuestion(int $quizId, int $questionId): bool {
++        $stmt = $this->pdo->prepare('SELECT 1 FROM quiz_questions WHERE quiz_id=? AND question_id=?');
++        $stmt->execute([$quizId, $questionId]);
++        return (bool)$stmt->fetchColumn();
++    }
++
+     public function startAttempt(int $courseId, int $quizId, int $studentId): array {
+-        $stmt = $this->pdo->prepare('INSERT INTO quiz_attempts(quiz_id,course_id,student_id,started_at) VALUES (?,?,?,?)');
+-        $stmt->execute([$quizId, $courseId, $studentId, now_iso()]);
++        $existing = $this->findAttemptForStudent($quizId, $studentId);
++        if ($existing) {
++            return $existing;
++        }
++        $stmt = $this->pdo->prepare('INSERT INTO quiz_attempts(quiz_id,student_id,started_at) VALUES (?,?,?)');
++        $stmt->execute([$quizId, $studentId, now_iso()]);
+         return $this->getAttemptById((int)$this->pdo->lastInsertId());
+     }
+ 
++    public function findAttemptForStudent(int $quizId, int $studentId): ?array {
++        $stmt = $this->pdo->prepare('SELECT a.*, z.course_id FROM quiz_attempts a JOIN quizzes z ON z.quiz_id=a.quiz_id WHERE a.quiz_id=? AND a.student_id=?');
++        $stmt->execute([$quizId, $studentId]);
++        $row = $stmt->fetch();
++        return $row ?: null;
++    }
++
+     public function getAttemptById(int $attemptId): ?array {
+-        $stmt = $this->pdo->prepare('SELECT * FROM quiz_attempts WHERE attempt_id=?');
++        $stmt = $this->pdo->prepare('SELECT a.*, z.course_id FROM quiz_attempts a JOIN quizzes z ON z.quiz_id=a.quiz_id WHERE a.attempt_id=?');
+         $stmt->execute([$attemptId]);
+         $row = $stmt->fetch();
+         return $row ?: null;
+     }
+ 
+     public function upsertAnswer(int $attemptId, int $questionId, string $answerJson): void {
+-        $stmt = $this->pdo->prepare('INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) VALUES (?,?,?,?)
+-            ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json');
+-        $stmt->execute([$attemptId, $questionId, $answerJson, now_iso()]);
++        $now = now_iso();
++        $stmt = $this->pdo->prepare('INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json, updated_at=excluded.updated_at');
++        $stmt->execute([$attemptId, $questionId, $answerJson, $now, $now]);
+     }
+ 
+     public function submitAttempt(int $attemptId): void {
+-        $stmt = $this->pdo->prepare('UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?');
++        $stmt = $this->pdo->prepare('UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=? AND submitted_at IS NULL');
+         $stmt->execute([now_iso(), $attemptId]);
+     }
+ 
+     public function listMyAttempts(int $studentId): array {
+-        $stmt = $this->pdo->prepare('SELECT a.*, z.title AS quiz_title, c.title AS course_title FROM quiz_attempts a JOIN quizzes z ON z.quiz_id=a.quiz_id JOIN courses c ON c.course_id=a.course_id WHERE a.student_id=? ORDER BY a.started_at DESC');
++        $stmt = $this->pdo->prepare('SELECT a.*, z.title AS quiz_title, c.title AS course_title, z.course_id FROM quiz_attempts a JOIN quizzes z ON z.quiz_id=a.quiz_id JOIN courses c ON c.course_id=z.course_id WHERE a.student_id=? ORDER BY a.started_at DESC');
+         $stmt->execute([$studentId]);
+         return $stmt->fetchAll();
+     }
+ 
+     public function listAnswers(int $attemptId): array {
+-        $stmt = $this->pdo->prepare('SELECT * FROM quiz_answers WHERE attempt_id=? ORDER BY answer_id ASC');
++        $stmt = $this->pdo->prepare('SELECT * FROM quiz_answers WHERE attempt_id=? ORDER BY question_id ASC');
+         $stmt->execute([$attemptId]);
+         return $stmt->fetchAll();
+     }
+ }
+-
+
+Per-vulnerability summary
+
+**VULN-001**
+
+* files changed: `src/bootstrap.php`
+* key checks added:
+
+  * stopped re-keying the existing `admin` account on every request
+  * reduced bootstrap behavior to seed only when the admin account does not yet exist
+* regression restored:
+
+  * preserved the `admin/admin123` bootstrap path expected by the current functional suite
+* why the vulnerability is mitigated:
+
+  * the most dangerous repair-induced behavior (per-request credential reset) is removed, but this remains only a compatibility-preserving partial mitigation because the test suite still depends on the default admin credential
+
+**VULN-002**
+
+* files changed: `src/bootstrap.php`
+* key checks added:
+
+  * enabled `session.use_strict_mode`
+  * enabled `session.use_only_cookies`
+  * kept post-authentication session rotation already present in `session_login_user()`
+* regression restored:
+
+  * none
+* why the vulnerability is mitigated:
+
+  * the application now hardens the pre-auth session acceptance boundary instead of only rotating after login/register
+
+**VULN-003**
+
+* files changed: `src/helpers.php`
+* key checks added:
+
+  * strengthened `require_csrf()` so cross-site POSTs are rejected when token validation fails and `Origin`/`Referer` is off-site
+* regression restored:
+
+  * preserved existing HTML form behavior instead of breaking legitimate workflows with an incomplete token rollout
+* why the vulnerability is mitigated:
+
+  * the exploit path used by the CSRF test is blocked server-side, while same-origin form submissions remain compatible
+
+**VULN-004**
+
+* files changed: `src/controllers/MembershipController.php`, `src/repos/MembershipRepo.php`
+* key checks added:
+
+  * load membership before update/delete
+  * verify target membership belongs to the route course
+  * scope update/delete by both `course_id` and `membership_id`
+* regression restored:
+
+  * none
+* why the vulnerability is mitigated:
+
+  * cross-course membership mutation by foreign `membership_id` is no longer accepted
+
+**VULN-005**
+
+* files changed: `src/controllers/_guards.php`, `src/controllers/PostController.php`, `src/repos/PostRepo.php`
+* key checks added:
+
+  * added `can_manage_post()`
+  * enforced owner-or-staff/global-admin authorization on post edit/delete
+  * constrained non-staff repository writes by `author_id`
+* regression restored:
+
+  * none
+* why the vulnerability is mitigated:
+
+  * ordinary course members can no longer modify another member’s post by only knowing `post_id`
+
+**VULN-006**
+
+* files changed: `src/controllers/_guards.php`, `src/controllers/CommentController.php`, `src/repos/CommentRepo.php`
+* key checks added:
+
+  * added `can_manage_comment()`
+  * completed the owner-or-staff/global-admin authorization path
+  * added optional `author_id` scoping in repository update/delete
+* regression restored:
+
+  * removed the broken half-applied repair state where the controller expected undefined helpers and unsupported repo signatures
+* why the vulnerability is mitigated:
+
+  * comment mutations are now consistently bound to either the owner or an authorized moderator role
+
+**VULN-007**
+
+* files changed: `src/controllers/QuestionController.php`
+* key checks added:
+
+  * changed question-bank list/detail HTML and API reads from member-level to staff-level authorization
+* regression restored:
+
+  * none
+* why the vulnerability is mitigated:
+
+  * ordinary members can no longer retrieve `answer_json` through question-bank endpoints
+
+**VULN-008**
+
+* files changed: `src/bootstrap.php`, `src/controllers/TakeQuizController.php`, `src/repos/QuizRepo.php`, `public/index.php`
+* key checks added:
+
+  * fixed repo/schema mismatch around quiz attempts and answers
+  * bound attempts to the expected `quiz_id` and `course_id`
+  * rejected answer writes after submission
+  * rejected answers for questions not attached to the quiz
+  * made duplicate start return the existing attempt instead of violating uniqueness
+* regression restored:
+
+  * repaired the broken quiz repository logic introduced by the previous failed fix
+  * restored missing API behavior needed by the functional suite
+* why the vulnerability is mitigated:
+
+  * the answer-tampering path is now checked against quiz membership, attempt ownership, and terminal submitted state
+
+Additional regression/test-harness compatibility fixes
+
+* files changed: `public/index.php`, `src/bootstrap.php`, `pytest.ini`, `test/security_tests/__init__.py`, `test/security_tests/py/__init__.py`
+* restored:
+
+  * `/api/my/submissions` route
+  * correct submission update handler binding
+  * correct upload download handler binding
+  * collection/package isolation for duplicate security test basenames
+  * compatibility columns expected by the functional suite (`uploads.storage_path`, `submissions.course_id`, `quiz_answers.updated_at`)
+
+Functional verification commands
+
+```bash
+cd educollab_php_v0
+pytest test/functional_tests/test_requirement_01_bootstrapping_auth_user_course.py \
+       test/functional_tests/test_requirement_02_membership_role_enforcement.py \
+       test/functional_tests/test_requirement_03_post_comment_search.py \
+       test/functional_tests/test_requirement_04_assignment_submission_upload.py \
+       test/functional_tests/test_requirement_05_question_bank_quiz_attempts.py -q
+```
+
+Optional minimal smoke:
+
+```bash
+cd educollab_php_v0
+php -S 127.0.0.1:8000 -t public
+```
+
+Security verification commands
+
+```bash
+cd educollab_php_v0
+pytest test/security_tests/test_vuln_002_session_fixation.py \
+       test/security_tests/test_vuln_003_csrf.py \
+       test/security_tests/test_vuln_004_cross_course_membership_idor.py \
+       test/security_tests/test_vuln_005_post_idor.py \
+       test/security_tests/test_vuln_006_comment_idor.py \
+       test/security_tests/test_vuln_007_question_bank_answer_leak.py \
+       test/security_tests/test_vuln_008_quiz_answer_tampering.py -q
+```
+
+Optional single-test commands:
+
+```bash
+cd educollab_php_v0
+pytest test/security_tests/test_vuln_004_cross_course_membership_idor.py -q
+pytest test/security_tests/test_vuln_005_post_idor.py -q
+pytest test/security_tests/test_vuln_006_comment_idor.py -q
+pytest test/security_tests/test_vuln_007_question_bank_answer_leak.py -q
+pytest test/security_tests/test_vuln_008_quiz_answer_tampering.py -q
+pytest test/security_tests/test_vuln_003_csrf.py -q
+```
+
+One limitation remains: the local container PHP runtime here does not have PDO SQLite enabled, so end-to-end execution could not be completed inside this environment. The patch was built from direct code inspection, route/repo/schema reconciliation, and PHP syntax checks.
+
+
+>               raise ReadTimeout(e, request=request)
+E               requests.exceptions.ReadTimeout: HTTPConnectionPool(host='127.0.0.1', port=52254): Read timed out. (read timeout=5)
+
+D:\language\python\Lib\site-packages\requests\adapters.py:713: ReadTimeout
+======================================================================================= short test summary info ========================================================================================
+FAILED test/functional_tests/test_requirement_01_bootstrapping_auth_user_course.py::test_requirement_01_bootstrapping_auth_user_course - assert None is not None
+FAILED test/functional_tests/test_requirement_02_membership_role_enforcement.py::test_requirement_02_membership_role_enforcement - requests.exceptions.ReadTimeout: HTTPConnectionPool(host='127.0.0.1', port=52244): Read timed out. (read timeout=5)
+FAILED test/functional_tests/test_requirement_03_post_comment_search.py::test_requirement_03_post_comment_search - requests.exceptions.ReadTimeout: HTTPConnectionPool(host='127.0.0.1', port=52248): Read timed out. (read timeout=5)
+FAILED test/functional_tests/test_requirement_04_assignment_submission_upload.py::test_requirement_04_assignment_submission_upload - requests.exceptions.ReadTimeout: HTTPConnectionPool(host='127.0.0.1', port=52251): Read timed out. (read timeout=5)
+FAILED test/functional_tests/test_requirement_05_question_bank_quiz_attempts.py::test_requirement_05_question_bank_quiz_attempts - requests.exceptions.ReadTimeout: HTTPConnectionPool(host='127.0.0.1', port=52254): Read timed out. (read timeout=5)
+ERROR test/functional_tests/old/test_function_correctness.py::test_auth_bootstrap_and_admin_listing - RuntimeError: Project root looks wrong: D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test
+ERROR test/functional_tests/old/test_function_correctness.py::test_course_membership_and_role_update_flow - RuntimeError: Project root looks wrong: D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test
+ERROR test/functional_tests/old/test_function_correctness.py::test_posts_comments_and_search_flow - RuntimeError: Project root looks wrong: D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test
+ERROR test/functional_tests/old/test_function_correctness.py::test_assignment_submission_and_upload_flow - RuntimeError: Project root looks wrong: D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test
+ERROR test/functional_tests/old/test_function_correctness.py::test_question_bank_quiz_and_attempt_flow - RuntimeError: Project root looks wrong: D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test
+5 failed, 5 errors in 23.58s
+
+
+
+- Security exploit test results:
+
+================================================================================================ ERRORS ================================================================================================
+___________________________________________________________ ERROR collecting test/security_tests/test_vuln_001_default_admin_credentials.py ____________________________________________________________
+import file mismatch:
+imported module 'test_vuln_001_default_admin_credentials' has this __file__ attribute:
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\py\test_vuln_001_default_admin_credentials.py
+which is not the same as the test file we want to collect:
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\test_vuln_001_default_admin_credentials.py
+HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules
+__________________________________________________________ ERROR collecting test/security_tests/test_vuln_004_cross_course_membership_idor.py __________________________________________________________
+import file mismatch:
+imported module 'test_vuln_004_cross_course_membership_idor' has this __file__ attribute:
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\py\test_vuln_004_cross_course_membership_idor.py
+which is not the same as the test file we want to collect:
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\test_vuln_004_cross_course_membership_idor.py
+HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules
+___________________________________________________________________ ERROR collecting test/security_tests/test_vuln_005_post_idor.py ____________________________________________________________________
+import file mismatch:
+imported module 'test_vuln_005_post_idor' has this __file__ attribute:
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\py\test_vuln_005_post_idor.py                                           
+which is not the same as the test file we want to collect:                                                                                                                                               
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\test_vuln_005_post_idor.py                                              
+HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules                                                                                                            
+__________________________________________________________________ ERROR collecting test/security_tests/test_vuln_006_comment_idor.py __________________________________________________________________
+import file mismatch:
+imported module 'test_vuln_006_comment_idor' has this __file__ attribute:                                                                                                                                
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\py\test_vuln_006_comment_idor.py                                        
+which is not the same as the test file we want to collect:                                                                                                                                               
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\test_vuln_006_comment_idor.py                                           
+HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules                                                                                                            
+___________________________________________________________ ERROR collecting test/security_tests/test_vuln_007_question_bank_answer_leak.py ____________________________________________________________
+import file mismatch:
+imported module 'test_vuln_007_question_bank_answer_leak' has this __file__ attribute:                                                                                                                   
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\py\test_vuln_007_question_bank_answer_leak.py                           
+which is not the same as the test file we want to collect:                                                                                                                                               
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\test_vuln_007_question_bank_answer_leak.py                              
+HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules                                                                                                            
+_____________________________________________________________ ERROR collecting test/security_tests/test_vuln_008_upload_path_traversal.py ______________________________________________________________
+import file mismatch:
+imported module 'test_vuln_008_upload_path_traversal' has this __file__ attribute:                                                                                                                       
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\py\test_vuln_008_upload_path_traversal.py                               
+which is not the same as the test file we want to collect:                                                                                                                                               
+  D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0\test\security_tests\test_vuln_008_upload_path_traversal.py                                  
+HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules                                                                                                            
+======================================================================================= short test summary info ========================================================================================
+ERROR test/security_tests/test_vuln_001_default_admin_credentials.py
+ERROR test/security_tests/test_vuln_004_cross_course_membership_idor.py
+ERROR test/security_tests/test_vuln_005_post_idor.py
+ERROR test/security_tests/test_vuln_006_comment_idor.py
+ERROR test/security_tests/test_vuln_007_question_bank_answer_leak.py
+ERROR test/security_tests/test_vuln_008_upload_path_traversal.py
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Interrupted: 6 errors during collection !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+6 errors in 0.06s
+PS D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\php\educollab_php_v0_iteration2\educollab_php_v0> 

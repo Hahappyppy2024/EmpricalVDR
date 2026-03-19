@@ -1,0 +1,77 @@
+Here is the English version:
+
+The root cause is now clearly identified.
+
+The problem is not with the 9 security tests themselves. The real issue is that the application returns **500 on the very first `GET /login`** after startup, so the fixture never sees a healthy response and therefore all tests fail with:
+
+`RuntimeError: Flask server did not start`
+
+The actual error is:
+
+```python
+werkzeug.routing.exceptions.BuildError:
+Could not build url for endpoint 'my_memberships_page'. Did you mean 'my_memberships' instead?
+```
+
+That means this line in `templates/base.html` is wrong:
+
+```html
+<a class="btn" href="{{ url_for('my_memberships_page') }}">My Memberships</a>
+```
+
+It should be changed to:
+
+```html
+<a class="btn" href="{{ url_for('my_memberships') }}">My Memberships</a>
+```
+
+I also checked the related endpoint names, and the result is:
+
+* `my_memberships_page` ❌ does not exist
+* `my_memberships` ✅ exists
+* `my_submissions_page` ✅ exists
+* `my_quiz_attempts_page` ✅ exists
+* `me_page` ✅ exists
+
+So right now, you only need to fix **this one line**.
+
+The corrected `templates/base.html` should be:
+
+```html
+<!doctype html>
+<html><head><meta charset="utf-8"><title>{{ title or "EduCollab v0" }}</title>
+<style>
+body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:24px}
+a{text-decoration:none}
+.nav a{margin-right:10px}
+.err{color:#b00020}
+input,textarea,select{width:100%;padding:8px;margin:6px 0 12px}
+table{border-collapse:collapse;width:100%}
+th,td{border:1px solid #ddd;padding:8px;vertical-align:top}
+th{background:#f5f5f5;text-align:left}
+.btn{display:inline-block;padding:6px 10px;border:1px solid #999;border-radius:6px;background:#fff}
+form.inline{display:inline}
+</style></head>
+<body>
+<div class="nav">
+  <a class="btn" href="{{ url_for('courses_list') }}">Courses</a>
+  <a class="btn" href="{{ url_for('my_memberships') }}">My Memberships</a>
+  <a class="btn" href="{{ url_for('my_submissions_page') }}">My Submissions</a>
+  <a class="btn" href="{{ url_for('my_quiz_attempts_page') }}">My Quiz Attempts</a>
+  <a class="btn" href="{{ url_for('me_page') }}">Me</a>
+  {% if session.get('user_id') %}
+  <form class="inline" method="post" action="{{ url_for('logout_submit') }}"><button class="btn" type="submit">Logout</button></form>
+  {% endif %}
+</div><hr/>
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
+{% block content %}{% endblock %}
+</body></html>
+```
+
+After making that change, run this first to confirm the startup problem is gone:
+
+```bash
+pytest -q tests/security_tests/test_vuln_001_default_admin_credentials.py -q
+```
+
+If it no longer reports `Flask server did not start`, then the startup issue is fixed and the tests will proceed to the real vulnerability assertions.

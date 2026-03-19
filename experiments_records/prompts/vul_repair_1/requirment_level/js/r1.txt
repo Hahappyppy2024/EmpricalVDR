@@ -1,0 +1,444 @@
+You are a senior software engineer fixing vulnerabilities in a web application.
+
+Repository input
+- The full project codebase is provided as a ZIP archive.
+- Assume you can read and modify files inside the ZIP repository.
+- Do NOT ask for files outside the ZIP.
+
+Task
+- Implement code changes guided by the vulnerability detection (VD) report below.
+- This is a requirement-level vulnerability repair task.
+- Treat the repository as the full runnable codebase produced after implementing the current requirement increment.
+- Focus only on vulnerabilities reported for the current requirement scope.
+- The current requirement may interact with functionality introduced earlier, but do not perform unrelated hardening, cleanup, or broad refactors outside the reported issue.
+- Apply minimal, correct patches while preserving intended functionality.
+
+Hard constraints
+- Keep the project runnable.
+- Do NOT rename routes, database tables, or response JSON fields.
+- Do NOT change authentication/session key names or role names.
+- No new dependencies. Avoid refactors unrelated to the fixes.
+- Only change files necessary for the fixes.
+- Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or docs.
+
+Primary verification goal (must satisfy)
+- The functional test suite must PASS after the patch (no regressions).
+- Prioritize preserving the intended behavior of the current requirement.
+- Do not over-fix in ways that risk breaking valid workflows.
+
+Authoritative input: Vulnerability Detection Report (VD)
+[
+{
+"vulnerability_id": "VULN-001",
+"vulnerability_type_code": 9,
+"vulnerability_type": "Authentication Flaw",
+"cwe_id": "CWE-798",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 9.1,
+"severity_level": "critical",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "The application auto-seeds a privileged administrator account with hard-coded credentials. An external attacker who knows or guesses the shipped admin username/password can log in as the administrator and gain full admin capabilities.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "scripts/initDb.js",
+"line_start": 25,
+"line_end": 33,
+"function_name": "seedAdmin",
+"code": "function seedAdmin() {\n  const existing = userRepository.findByUsername('admin');\n  if (!existing) {\n    userRepository.createUser({\n      username: 'admin',\n      password: 'adminpass',\n      display_name: 'Admin'\n    });\n  }\n}",
+"reason": "A built-in admin user is created with a fixed username and password, making the privileged account credentials predictable."
+},
+{
+"file_path": "app.js",
+"line_start": 10,
+"line_end": 12,
+"function_name": null,
+"code": "initDb();\nseedAdmin();",
+"reason": "The hard-coded admin seeding routine runs automatically on application startup."
+},
+{
+"file_path": "src/middleware/auth.js",
+"line_start": 27,
+"line_end": 38,
+"function_name": "requireAdminPage / requireAdminApi",
+"code": "function requireAdminPage(req, res, next) {\n  if (!req.currentUser || req.currentUser.username !== 'admin') {\n    return res.status(403).send('Forbidden');\n  }\n  next();\n}\n\nfunction requireAdminApi(req, res, next) {\n  if (!req.currentUser || req.currentUser.username !== 'admin') {\n    return res.status(403).json({ success: false, error: 'Admin access required' });\n  }\n  next();\n}",
+"reason": "Admin authorization is granted based on the fixed username 'admin', so compromising the seeded admin account yields administrator access."
+}
+],
+"root_cause_code": 10,
+"root_cause": "The application embeds and auto-provisions a privileged default credential instead of requiring secure first-run provisioning or deployment-time secrets.",
+"patch_locations": [
+{
+"file_path": "scripts/initDb.js",
+"line_start": 25,
+"line_end": 34,
+"function_name": "seedAdmin"
+},
+{
+"file_path": "app.js",
+"line_start": 10,
+"line_end": 12,
+"function_name": null
+},
+{
+"file_path": "src/middleware/auth.js",
+"line_start": 27,
+"line_end": 38,
+"function_name": "requireAdminPage / requireAdminApi"
+}
+],
+"repair_plan": "Remove hard-coded administrator credentials and stop auto-seeding a reusable privileged account. Replace it with an explicit first-run initialization flow (e.g., one-time setup token or environment-provided initial admin password) and store administrator privilege as server-side role state (e.g., users.is_admin) instead of inferring it from a fixed username.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"vulnerability_type_code": 10,
+"vulnerability_type": "Session Weakness",
+"cwe_id": "CWE-384",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.8,
+"severity_level": "medium",
+"confidence_score": 93,
+"confidence_level": "high",
+"summary": "The application authenticates users by attaching userId to the existing session without rotating the session identifier after login or registration. An attacker who can set or learn a victim's pre-auth session ID can reuse it after the victim authenticates (session fixation).",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/register"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/register"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/authController.js",
+"line_start": 7,
+"line_end": 22,
+"function_name": "register",
+"code": "const user = userRepository.createUser({ username, password, display_name });\nreq.session.userId = user.user_id;\nreturn res.redirect('/me');",
+"reason": "Registration logs the user into the existing session by setting session userId without regenerating the session identifier."
+},
+{
+"file_path": "src/controllers/authController.js",
+"line_start": 45,
+"line_end": 55,
+"function_name": "login",
+"code": "if (!authUser || !userRepository.verifyPassword(authUser, password)) {\n  return res.status(401).render('login', { error: 'Invalid credentials.' });\n}\n\nreq.session.userId = authUser.user_id;\nreturn res.redirect('/me');",
+"reason": "Login binds authenticated identity to the current session without rotating/regenerating the session ID."
+},
+{
+"file_path": "src/controllers/authController.js",
+"line_start": 57,
+"line_end": 68,
+"function_name": "apiLogin",
+"code": "if (!authUser || !userRepository.verifyPassword(authUser, password)) {\n  return res.status(401).json({ success: false, error: 'Invalid credentials' });\n}\n\nreq.session.userId = authUser.user_id;\nconst user = userRepository.findById(authUser.user_id);\nreturn res.json({ success: true, user });",
+"reason": "The API login path has the same missing session ID rotation, enabling fixation through API login as well."
+}
+],
+"root_cause_code": 8,
+"root_cause": "Authentication state is attached to an existing session without regenerating the session identifier when privilege changes from unauthenticated to authenticated.",
+"patch_locations": [
+{
+"file_path": "src/controllers/authController.js",
+"line_start": 7,
+"line_end": 39,
+"function_name": "register / apiRegister"
+},
+{
+"file_path": "src/controllers/authController.js",
+"line_start": 45,
+"line_end": 68,
+"function_name": "login / apiLogin"
+}
+],
+"repair_plan": "Regenerate the session identifier immediately after successful login and registration (e.g., req.session.regenerate(...) then set req.session.userId). Ensure the regenerated session is the only authenticated session and keep logout destroying the session server-side.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-003",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.6,
+"severity_level": "high",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "Any authenticated user can update or delete arbitrary courses by supplying a different course_id. This enables unauthorized modification or destruction of other users' course resources.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/routes/api.js",
+"line_start": 19,
+"line_end": 23,
+"function_name": null,
+"code": "router.post('/courses', requireAuthApi, courseController.apiCreateCourse);\nrouter.get('/courses', requireAuthApi, courseController.apiListCourses);\nrouter.get('/courses/:course_id', requireAuthApi, courseController.apiGetCourse);\nrouter.put('/courses/:course_id', requireAuthApi, courseController.apiUpdateCourse);\nrouter.delete('/courses/:course_id', requireAuthApi, courseController.apiDeleteCourse);",
+"reason": "Course mutation endpoints require only authentication and do not apply any course-level ownership/staff authorization middleware."
+},
+{
+"file_path": "src/controllers/courseController.js",
+"line_start": 73,
+"line_end": 114,
+"function_name": "updateCourse / apiUpdateCourse",
+"code": "const existing = courseRepository.findById(req.params.course_id);\n...\ncourseRepository.updateCourse(req.params.course_id, {\n  title,\n  description: description || ''\n});",
+"reason": "The controller never verifies that the current user is the course owner/creator (existing.created_by) before updating the course identified by attacker-controlled course_id."
+},
+{
+"file_path": "src/controllers/courseController.js",
+"line_start": 116,
+"line_end": 134,
+"function_name": "deleteCourse / apiDeleteCourse",
+"code": "const existing = courseRepository.findById(req.params.course_id);\n...\ncourseRepository.deleteCourse(req.params.course_id);",
+"reason": "The delete controller likewise performs no ownership/staff check before deleting the course by course_id."
+},
+{
+"file_path": "src/repositories/courseRepository.js",
+"line_start": 44,
+"line_end": 56,
+"function_name": "updateCourse / deleteCourse",
+"code": "UPDATE courses\nSET title = ?, description = ?\nWHERE course_id = ?\n...\nDELETE FROM courses WHERE course_id = ?",
+"reason": "Repository write operations are scoped only by course_id, so any caller that reaches these methods can modify/delete any course row."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Course update/delete operations trust a user-supplied course_id without enforcing ownership or an elevated authorization rule tied to the target course.",
+"patch_locations": [
+{
+"file_path": "src/controllers/courseController.js",
+"line_start": 65,
+"line_end": 134,
+"function_name": "showEditCourse / updateCourse / apiUpdateCourse / deleteCourse / apiDeleteCourse"
+},
+{
+"file_path": "src/repositories/courseRepository.js",
+"line_start": 44,
+"line_end": 56,
+"function_name": "updateCourse / deleteCourse"
+},
+{
+"file_path": "src/routes/api.js",
+"line_start": 19,
+"line_end": 23,
+"function_name": null
+}
+],
+"repair_plan": "Before updating or deleting a course, load the course and enforce that req.currentUser.user_id matches course.created_by (or an explicitly defined staff/admin role). Apply the same authorization rule consistently for both web and API handlers, and consider adding repository methods that scope updates/deletes by (course_id, created_by) for non-admin operations.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-004",
+"vulnerability_type_code": 7,
+"vulnerability_type": "CSRF",
+"cwe_id": "CWE-352",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.5,
+"severity_level": "medium",
+"confidence_score": 90,
+"confidence_level": "high",
+"summary": "Server-rendered state-changing endpoints rely only on the session cookie and do not use anti-CSRF tokens. A malicious site can cause a logged-in victim to submit forged POST requests that create, update, or delete courses (and log out the user).",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/delete"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/logout"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/views/course_edit.ejs",
+"line_start": 9,
+"line_end": 19,
+"function_name": null,
+"code": "<form method="post" action="/courses/<%= course.course_id %>">\n  ...\n  <button type="submit">Save</button>\n</form>",
+"reason": "A state-changing course update form is rendered without any CSRF token field."
+},
+{
+"file_path": "src/views/course_show.ejs",
+"line_start": 14,
+"line_end": 16,
+"function_name": null,
+"code": "<form method="post" action="/courses/<%= course.course_id %>/delete">\n  <button type="submit">Delete</button>\n</form>",
+"reason": "A destructive POST form is rendered without a CSRF token."
+},
+{
+"file_path": "src/routes/web.js",
+"line_start": 28,
+"line_end": 33,
+"function_name": null,
+"code": "router.post('/courses', requireAuthPage, courseController.createCourse);\n...\nrouter.post('/courses/:course_id', requireAuthPage, courseController.updateCourse);\nrouter.post('/courses/:course_id/delete', requireAuthPage, courseController.deleteCourse);",
+"reason": "The server accepts state-changing POST requests based on the session cookie and does not include any CSRF verification middleware."
+}
+],
+"root_cause_code": 9,
+"root_cause": "The application does not generate or validate CSRF tokens for server-rendered POST workflows, so browser-submitted authenticated requests are trusted solely because the session cookie is present.",
+"patch_locations": [
+{
+"file_path": "app.js",
+"line_start": 18,
+"line_end": 40,
+"function_name": null
+},
+{
+"file_path": "src/routes/web.js",
+"line_start": 16,
+"line_end": 33,
+"function_name": null
+},
+{
+"file_path": "src/views/course_edit.ejs",
+"line_start": 9,
+"line_end": 19,
+"function_name": null
+},
+{
+"file_path": "src/views/course_show.ejs",
+"line_start": 14,
+"line_end": 16,
+"function_name": null
+}
+],
+"repair_plan": "Add a centralized CSRF defense for all server-rendered state-changing endpoints (e.g., per-session token stored server-side and embedded as a hidden field in every POST form, then validated on submit). Apply the check consistently across course create/update/delete and other POST actions such as logout.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-005",
+"vulnerability_type_code": 10,
+"vulnerability_type": "Session Weakness",
+"cwe_id": "CWE-321",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.2,
+"severity_level": "medium",
+"confidence_score": 78,
+"confidence_level": "high",
+"summary": "The application uses a hard-coded default session secret when SESSION_SECRET is not provided. Deployments that keep this default weaken session integrity and enable attackers who know the secret to forge or fixate signed session cookies.",
+"entry_points": [
+{
+"type": "other",
+"method": "N/A",
+"route": "process.env.SESSION_SECRET fallback"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.js",
+"line_start": 21,
+"line_end": 29,
+"function_name": null,
+"code": "session({\n  secret: process.env.SESSION_SECRET || 'educollab-dev-secret',\n  resave: false,\n  saveUninitialized: false,\n  cookie: { httpOnly: true }\n})",
+"reason": "A fixed fallback secret is embedded in code, so deployments without an environment-provided secret use a predictable signing key."
+}
+],
+"root_cause_code": 10,
+"root_cause": "The session signing secret is hard-coded as a default value rather than being required as a deployment-time secret.",
+"patch_locations": [
+{
+"file_path": "app.js",
+"line_start": 21,
+"line_end": 30,
+"function_name": null
+}
+],
+"repair_plan": "Require SESSION_SECRET to be provided at deployment (fail fast if missing) and remove the hard-coded fallback. Use a high-entropy secret, and consider setting secure cookie attributes (Secure, SameSite) based on deployment environment.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}
+]
+
+Repair requirements
+- Implement each vulnerability’s repair_plan consistent with its root_cause and evidence_snippets.
+- Apply fixes at the patch_locations specified in the VD report.
+- Enforce authorization, ownership, and relationship checks server-side (not client-side).
+- Where applicable, scope read/write operations to the authorized parent resource (e.g., course_id + membership_id, course_id + post_id, quiz_id + question_id).
+- Do not introduce client-side-only protections as the primary fix.
+- Do not change unrelated behavior, response schemas, or persistence semantics unless required by the fix.
+- Do not fix additional speculative vulnerabilities that are not supported by the VD report.
+- If a vulnerability spans earlier and current requirement logic, patch the narrowest correct server-side boundary that removes the exploit path and preserves intended behavior.
+- Keep error handling consistent with existing patterns in the repo (e.g., 401/403/404) and do not leak sensitive details.
+- Preserve compatibility with the existing functional test expectations.
+
+Output format (strict)
+1) Unified diff patch (git apply compatible). Include only changed files.
+2) Per-vulnerability summary (group by vulnerability_id):
+   - files changed
+   - key checks added
+   - why the vulnerability is mitigated (brief)
+3) Functional verification commands (copy-paste):
+   - run the full functional test suite (exact command)
+   - run the functional tests relevant to the current requirement (exact command)
+   - (optional) a minimal functional smoke command if full suite is slow

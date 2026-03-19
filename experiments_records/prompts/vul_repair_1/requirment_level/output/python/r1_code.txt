@@ -1,0 +1,666 @@
+下面是**所有被修改后的完整文件全文**，你可以直接 copy 覆盖。
+
+---
+
+## `app.py`
+
+```python
+import os
+import secrets
+
+from flask import Flask
+
+from controllers.auth_controller import auth_bp
+from controllers.course_controller import course_bp
+from controllers.page_controller import page_bp
+from models.db import init_db, seed_admin
+from utils.auth import get_csrf_token
+
+
+def _load_secret_key():
+    configured_secret = os.environ.get('EDUCOLLAB_SECRET_KEY', '').strip()
+    if configured_secret and configured_secret != 'educollab-dev-secret-key':
+        return configured_secret
+    return secrets.token_hex(32)
+
+
+def create_app():
+    app = Flask(__name__)
+    app.config['SECRET_KEY'] = _load_secret_key()
+    app.config['DATABASE'] = 'data/app.db'
+
+    @app.context_processor
+    def inject_template_security_helpers():
+        return {'csrf_token': get_csrf_token}
+
+    init_db(app)
+    seed_admin(app)
+
+    app.register_blueprint(page_bp)
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(course_bp)
+    return app
+
+
+app = create_app()
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
+```
+
+---
+
+## `utils/auth.py`
+
+```python
+import secrets
+from functools import wraps
+
+from flask import abort, current_app, jsonify, redirect, request, session, url_for
+
+from models.user_repo import get_user_by_id
+
+
+SESSION_USER_KEY = 'current_user_id'
+CSRF_TOKEN_KEY = '_csrf_token'
+ADMIN_USERNAME = 'admin'
+
+
+def get_current_user():
+    user_id = session.get(SESSION_USER_KEY)
+    if not user_id:
+        return None
+    return get_user_by_id(user_id)
+
+
+def login_user(user):
+    existing_csrf_token = session.get(CSRF_TOKEN_KEY)
+    session.clear()
+    session[SESSION_USER_KEY] = user['user_id']
+    session[CSRF_TOKEN_KEY] = existing_csrf_token or secrets.token_urlsafe(32)
+
+
+def logout_user():
+    session.clear()
+
+
+def is_api_request():
+    return request.path.startswith('/api/')
+
+
+def is_admin_user(user=None):
+    current_user = user or get_current_user()
+    return current_user is not None and current_user['username'] == ADMIN_USERNAME
+
+
+def can_manage_course(course, user=None):
+    current_user = user or get_current_user()
+    if current_user is None or course is None:
+        return False
+    return is_admin_user(current_user) or current_user['user_id'] == course['created_by']
+
+
+def get_csrf_token():
+    token = session.get(CSRF_TOKEN_KEY)
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session[CSRF_TOKEN_KEY] = token
+    return token
+
+
+def validate_csrf():
+    token = request.form.get('csrf_token', '')
+    expected = session.get(CSRF_TOKEN_KEY, '')
+    return bool(token and expected and secrets.compare_digest(token, expected))
+
+
+def csrf_protect(view_func):
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        if not validate_csrf():
+            abort(403)
+        return view_func(*args, **kwargs)
+
+    return wrapped
+
+
+def login_required(view_func):
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        user = get_current_user()
+        if user is None:
+            if is_api_request():
+                return jsonify({'success': False, 'error': 'authentication_required'}), 401
+            return redirect(url_for('auth.login_page'))
+        return view_func(*args, **kwargs)
+
+    return wrapped
+
+
+def admin_required(view_func):
+    @wraps(view_func)
+    @login_required
+    def wrapped(*args, **kwargs):
+        if not is_admin_user():
+            if is_api_request():
+                return jsonify({'success': False, 'error': 'forbidden'}), 403
+            return current_app.response_class('Forbidden', status=403)
+        return view_func(*args, **kwargs)
+
+    return wrapped
+```
+
+---
+
+## `controllers/auth_controller.py`
+
+```python
+import sqlite3
+
+from flask import Blueprint, jsonify, redirect, render_template, request, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from models.user_repo import create_user, get_user_by_username, list_users
+from utils.auth import admin_required, csrf_protect, get_current_user, login_required, login_user, logout_user
+
+
+auth_bp = Blueprint('auth', __name__)
+
+
+def _user_to_dict(user):
+    if user is None:
+        return None
+    return {
+        'user_id': user['user_id'],
+        'username': user['username'],
+        'display_name': user['display_name'],
+        'created_at': user['created_at'],
+    }
+
+
+@auth_bp.route('/register', methods=['GET'])
+def register_page():
+    return render_template('auth/register.html', current_user=get_current_user())
+
+
+@auth_bp.route('/register', methods=['POST'])
+@csrf_protect
+def register_submit():
+    username = request.form.get('username', '').strip()
+    password = request.form.get('password', '')
+    display_name = request.form.get('display_name', '').strip()
+
+    if not username or not password or not display_name:
+        return render_template('auth/register.html', error='All fields are required.', current_user=get_current_user()), 400
+
+    try:
+        user = create_user(username, generate_password_hash(password), display_name)
+    except sqlite3.IntegrityError:
+        return render_template('auth/register.html', error='Username already exists.', current_user=get_current_user()), 400
+
+    login_user(user)
+    return redirect(url_for('auth.me_page'))
+
+
+@auth_bp.route('/api/auth/register', methods=['POST'])
+def api_register():
+    data = request.get_json(silent=True) or {}
+    username = str(data.get('username', '')).strip()
+    password = str(data.get('password', ''))
+    display_name = str(data.get('display_name', '')).strip()
+
+    if not username or not password or not display_name:
+        return jsonify({'success': False, 'error': 'missing_required_fields'}), 400
+
+    try:
+        user = create_user(username, generate_password_hash(password), display_name)
+    except sqlite3.IntegrityError:
+        return jsonify({'success': False, 'error': 'username_exists'}), 400
+
+    login_user(user)
+    return jsonify({'success': True, 'user': _user_to_dict(user)}), 201
+
+
+@auth_bp.route('/login', methods=['GET'])
+def login_page():
+    return render_template('auth/login.html', current_user=get_current_user())
+
+
+@auth_bp.route('/login', methods=['POST'])
+@csrf_protect
+def login_submit():
+    username = request.form.get('username', '').strip()
+    password = request.form.get('password', '')
+    user = get_user_by_username(username)
+
+    if user is None or not check_password_hash(user['password_hash'], password):
+        return render_template('auth/login.html', error='Invalid credentials.', current_user=get_current_user()), 401
+
+    login_user(user)
+    return redirect(url_for('auth.me_page'))
+
+
+@auth_bp.route('/api/auth/login', methods=['POST'])
+def api_login():
+    data = request.get_json(silent=True) or {}
+    username = str(data.get('username', '')).strip()
+    password = str(data.get('password', ''))
+    user = get_user_by_username(username)
+
+    if user is None or not check_password_hash(user['password_hash'], password):
+        return jsonify({'success': False, 'error': 'invalid_credentials'}), 401
+
+    login_user(user)
+    return jsonify({'success': True, 'user': _user_to_dict(user)})
+
+
+@auth_bp.route('/logout', methods=['POST'])
+@login_required
+@csrf_protect
+def logout_submit():
+    logout_user()
+    return redirect(url_for('page.home'))
+
+
+@auth_bp.route('/api/auth/logout', methods=['POST'])
+def api_logout():
+    logout_user()
+    return jsonify({'success': True})
+
+
+@auth_bp.route('/me', methods=['GET'])
+@login_required
+def me_page():
+    return render_template('auth/me.html', user=get_current_user(), current_user=get_current_user())
+
+
+@auth_bp.route('/api/auth/me', methods=['GET'])
+@login_required
+def api_me():
+    return jsonify({'success': True, 'user': _user_to_dict(get_current_user())})
+
+
+@auth_bp.route('/admin/users', methods=['GET'])
+@admin_required
+def users_page():
+    return render_template('admin/users.html', users=list_users(), current_user=get_current_user())
+
+
+@auth_bp.route('/api/users', methods=['GET'])
+@admin_required
+def api_users():
+    users = [_user_to_dict(user) for user in list_users()]
+    return jsonify({'success': True, 'users': users})
+```
+
+---
+
+## `controllers/course_controller.py`
+
+```python
+from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
+
+from models.course_repo import create_course, delete_course, get_course_by_id, list_courses, update_course
+from utils.auth import can_manage_course, csrf_protect, get_current_user, login_required
+
+
+course_bp = Blueprint('courses', __name__)
+
+
+def _course_to_dict(course):
+    if course is None:
+        return None
+    return {
+        'course_id': course['course_id'],
+        'title': course['title'],
+        'description': course['description'],
+        'created_by': course['created_by'],
+        'created_at': course['created_at'],
+        'creator_name': course['creator_name'],
+    }
+
+
+def _forbidden_page():
+    return current_app.response_class('Forbidden', status=403)
+
+
+@course_bp.route('/courses/new', methods=['GET'])
+@login_required
+def new_course_page():
+    return render_template('courses/new.html', current_user=get_current_user())
+
+
+@course_bp.route('/courses', methods=['POST'])
+@login_required
+@csrf_protect
+def create_course_submit():
+    title = request.form.get('title', '').strip()
+    description = request.form.get('description', '').strip()
+    if not title:
+        return render_template('courses/new.html', error='Title is required.', current_user=get_current_user()), 400
+    course = create_course(title, description, get_current_user()['user_id'])
+    return redirect(url_for('courses.get_course_page', course_id=course['course_id']))
+
+
+@course_bp.route('/api/courses', methods=['POST'])
+@login_required
+def api_create_course():
+    data = request.get_json(silent=True) or {}
+    title = str(data.get('title', '')).strip()
+    description = str(data.get('description', '')).strip()
+    if not title:
+        return jsonify({'success': False, 'error': 'title_required'}), 400
+    course = create_course(title, description, get_current_user()['user_id'])
+    return jsonify({'success': True, 'course': _course_to_dict(course)}), 201
+
+
+@course_bp.route('/courses', methods=['GET'])
+def list_courses_page():
+    return render_template('courses/list.html', courses=list_courses(), current_user=get_current_user())
+
+
+@course_bp.route('/api/courses', methods=['GET'])
+def api_list_courses():
+    courses = [_course_to_dict(course) for course in list_courses()]
+    return jsonify({'success': True, 'courses': courses})
+
+
+@course_bp.route('/courses/<int:course_id>', methods=['GET'])
+def get_course_page(course_id):
+    course = get_course_by_id(course_id)
+    if course is None:
+        return render_template('404.html', current_user=get_current_user()), 404
+    return render_template('courses/detail.html', course=course, current_user=get_current_user())
+
+
+@course_bp.route('/api/courses/<int:course_id>', methods=['GET'])
+def api_get_course(course_id):
+    course = get_course_by_id(course_id)
+    if course is None:
+        return jsonify({'success': False, 'error': 'course_not_found'}), 404
+    return jsonify({'success': True, 'course': _course_to_dict(course)})
+
+
+@course_bp.route('/courses/<int:course_id>/edit', methods=['GET'])
+@login_required
+def edit_course_page(course_id):
+    course = get_course_by_id(course_id)
+    if course is None:
+        return render_template('404.html', current_user=get_current_user()), 404
+    if not can_manage_course(course):
+        return _forbidden_page()
+    return render_template('courses/edit.html', course=course, current_user=get_current_user())
+
+
+@course_bp.route('/courses/<int:course_id>', methods=['POST'])
+@login_required
+@csrf_protect
+def update_course_submit(course_id):
+    course = get_course_by_id(course_id)
+    if course is None:
+        return render_template('404.html', current_user=get_current_user()), 404
+    if not can_manage_course(course):
+        return _forbidden_page()
+    title = request.form.get('title', '').strip()
+    description = request.form.get('description', '').strip()
+    if not title:
+        return render_template('courses/edit.html', course=course, error='Title is required.', current_user=get_current_user()), 400
+    update_course(course_id, title, description, get_current_user())
+    return redirect(url_for('courses.get_course_page', course_id=course_id))
+
+
+@course_bp.route('/api/courses/<int:course_id>', methods=['PUT'])
+@login_required
+def api_update_course(course_id):
+    course = get_course_by_id(course_id)
+    if course is None:
+        return jsonify({'success': False, 'error': 'course_not_found'}), 404
+    if not can_manage_course(course):
+        return jsonify({'success': False, 'error': 'forbidden'}), 403
+    data = request.get_json(silent=True) or {}
+    title = str(data.get('title', '')).strip()
+    description = str(data.get('description', '')).strip()
+    if not title:
+        return jsonify({'success': False, 'error': 'title_required'}), 400
+    updated = update_course(course_id, title, description, get_current_user())
+    return jsonify({'success': True, 'course': _course_to_dict(updated)})
+
+
+@course_bp.route('/courses/<int:course_id>/delete', methods=['POST'])
+@login_required
+@csrf_protect
+def delete_course_submit(course_id):
+    course = get_course_by_id(course_id)
+    if course is None:
+        return render_template('404.html', current_user=get_current_user()), 404
+    if not can_manage_course(course):
+        return _forbidden_page()
+    delete_course(course_id, get_current_user())
+    return redirect(url_for('courses.list_courses_page'))
+
+
+@course_bp.route('/api/courses/<int:course_id>', methods=['DELETE'])
+@login_required
+def api_delete_course(course_id):
+    course = get_course_by_id(course_id)
+    if course is None:
+        return jsonify({'success': False, 'error': 'course_not_found'}), 404
+    if not can_manage_course(course):
+        return jsonify({'success': False, 'error': 'forbidden'}), 403
+    delete_course(course_id, get_current_user())
+    return jsonify({'success': True, 'deleted_course_id': course_id})
+```
+
+---
+
+## `models/course_repo.py`
+
+```python
+from models.db import get_db
+
+
+def create_course(title, description, created_by):
+    db = get_db()
+    cursor = db.execute(
+        'INSERT INTO courses (title, description, created_by) VALUES (?, ?, ?)',
+        (title, description, created_by),
+    )
+    db.commit()
+    return get_course_by_id(cursor.lastrowid)
+
+
+def list_courses():
+    db = get_db()
+    return db.execute(
+        'SELECT c.course_id, c.title, c.description, c.created_by, c.created_at, u.display_name AS creator_name '
+        'FROM courses c JOIN users u ON u.user_id = c.created_by ORDER BY c.course_id DESC'
+    ).fetchall()
+
+
+def get_course_by_id(course_id):
+    db = get_db()
+    return db.execute(
+        'SELECT c.course_id, c.title, c.description, c.created_by, c.created_at, u.display_name AS creator_name '
+        'FROM courses c JOIN users u ON u.user_id = c.created_by WHERE c.course_id = ?',
+        (course_id,),
+    ).fetchone()
+
+
+def update_course(course_id, title, description, acting_user=None):
+    db = get_db()
+    if acting_user is not None and acting_user['username'] != 'admin':
+        db.execute(
+            'UPDATE courses SET title = ?, description = ? WHERE course_id = ? AND created_by = ?',
+            (title, description, course_id, acting_user['user_id']),
+        )
+    else:
+        db.execute(
+            'UPDATE courses SET title = ?, description = ? WHERE course_id = ?',
+            (title, description, course_id),
+        )
+    db.commit()
+    return get_course_by_id(course_id)
+
+
+def delete_course(course_id, acting_user=None):
+    db = get_db()
+    if acting_user is not None and acting_user['username'] != 'admin':
+        db.execute('DELETE FROM courses WHERE course_id = ? AND created_by = ?', (course_id, acting_user['user_id']))
+    else:
+        db.execute('DELETE FROM courses WHERE course_id = ?', (course_id,))
+    db.commit()
+```
+
+---
+
+## `templates/base.html`
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EduCollab</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    nav a, nav form { display: inline-block; margin-right: 0.75rem; }
+    nav form { margin: 0; }
+    .error { color: #b00020; }
+    .card { border: 1px solid #ccc; padding: 1rem; margin: 1rem 0; }
+    input, textarea { width: 100%; padding: 0.5rem; margin: 0.25rem 0 1rem; }
+    button { padding: 0.5rem 1rem; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="{{ url_for('page.home') }}">Home</a>
+    <a href="{{ url_for('courses.list_courses_page') }}">Courses</a>
+    {% if current_user or user %}
+      <a href="{{ url_for('auth.me_page') }}">Me</a>
+      {% if current_user and current_user['username'] == 'admin' %}
+        <a href="{{ url_for('auth.users_page') }}">Users</a>
+      {% endif %}
+      <a href="{{ url_for('courses.new_course_page') }}">New Course</a>
+      <form action="{{ url_for('auth.logout_submit') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">Logout</button>
+      </form>
+    {% else %}
+      <a href="{{ url_for('auth.login_page') }}">Login</a>
+      <a href="{{ url_for('auth.register_page') }}">Register</a>
+    {% endif %}
+  </nav>
+  <hr>
+  {% block content %}{% endblock %}
+</body>
+</html>
+```
+
+---
+
+## `templates/auth/login.html`
+
+```html
+{% extends 'base.html' %}
+{% block content %}
+<h1>Login</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('auth.login_submit') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Username</label>
+  <input name="username" required>
+  <label>Password</label>
+  <input name="password" type="password" required>
+  <button type="submit">Login</button>
+</form>
+{% endblock %}
+```
+
+---
+
+## `templates/auth/register.html`
+
+```html
+{% extends 'base.html' %}
+{% block content %}
+<h1>Register</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('auth.register_submit') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Username</label>
+  <input name="username" required>
+  <label>Password</label>
+  <input name="password" type="password" required>
+  <label>Display Name</label>
+  <input name="display_name" required>
+  <button type="submit">Create Account</button>
+</form>
+{% endblock %}
+```
+
+---
+
+## `templates/courses/new.html`
+
+```html
+{% extends 'base.html' %}
+{% block content %}
+<h1>New Course</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('courses.create_course_submit') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Title</label>
+  <input name="title" required>
+  <label>Description</label>
+  <textarea name="description"></textarea>
+  <button type="submit">Create Course</button>
+</form>
+{% endblock %}
+```
+
+---
+
+## `templates/courses/edit.html`
+
+```html
+{% extends 'base.html' %}
+{% block content %}
+<h1>Edit Course</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('courses.update_course_submit', course_id=course['course_id']) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Title</label>
+  <input name="title" value="{{ course['title'] }}" required>
+  <label>Description</label>
+  <textarea name="description">{{ course['description'] }}</textarea>
+  <button type="submit">Save</button>
+</form>
+{% endblock %}
+```
+
+---
+
+## `templates/courses/detail.html`
+
+```html
+{% extends 'base.html' %}
+{% block content %}
+<h1>{{ course['title'] }}</h1>
+<div class="card">
+  <p>{{ course['description'] }}</p>
+  <p>Course ID: {{ course['course_id'] }}</p>
+  <p>Created by {{ course['creator_name'] }} at {{ course['created_at'] }}</p>
+</div>
+{% if current_user and (current_user['username'] == 'admin' or current_user['user_id'] == course['created_by']) %}
+<p><a href="{{ url_for('courses.edit_course_page', course_id=course['course_id']) }}">Edit course</a></p>
+<form method="post" action="{{ url_for('courses.delete_course_submit', course_id=course['course_id']) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit">Delete course</button>
+</form>
+{% endif %}
+{% endblock %}
+```
+
+如果你要，我下一条可以继续直接给你一版 **“可运行检查清单 + 需要设置的环境变量”**。

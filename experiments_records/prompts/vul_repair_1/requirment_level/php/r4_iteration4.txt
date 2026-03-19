@@ -1,0 +1,508 @@
+
+You are a senior software engineer fixing vulnerabilities in a web application after a previous repair attempt.
+
+Repository input
+
+* The full project codebase is provided as a ZIP archive.
+* This is a requirement-level repair task on the current repository state after implementing the current requirement increment.
+* Treat the repository as the full runnable codebase produced for the current requirement stage.
+* Focus on vulnerabilities reported for the current requirement stage.
+* Prior functionality from earlier requirements is in scope only if it remains reachable in the current repository state and is materially relevant to the reported vulnerabilities for this requirement stage.
+* Assume you can read and modify files inside the ZIP repository.
+* Do NOT ask for files outside the ZIP.
+
+Task
+
+* Implement code changes guided by the vulnerability detection (VD) report below.
+* This is a second-round repair task after a previous repair attempt did not fully succeed.
+* Use the failed functional test results and security test results as additional repair guidance.
+* Apply minimal, correct patches while preserving intended functionality of the current requirement stage.
+
+Repair objective
+
+* Fix the vulnerabilities that remain unresolved after the previous repair attempt.
+* Preserve the original vulnerability identity from the VD report.
+* Treat the VD report as the authoritative baseline for what must be fixed.
+* Focus only on vulnerabilities reported for the current requirement stage.
+* Use the failed functional test results to identify repair-induced regressions, outdated contract assumptions, or broken requirement-stage functionality that must be restored.
+* Use the security test results to identify which exploit paths still remain effective or which intended mitigations did not hold.
+
+Hard constraints
+
+* Keep the project runnable.
+* Do NOT rename routes, database tables, or response JSON fields unless a functional test update is required to reflect the intended requirement-stage contract.
+* Do NOT change authentication/session key names or role names unless the current repository already changed them and the functional tests must be aligned to the repository’s intended behavior.
+* No new dependencies. Avoid refactors unrelated to the fixes.
+* Only change files necessary for the fixes.
+* Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or docs.
+
+Primary verification goal (must satisfy)
+
+* The full functional test suite for the current repository state must PASS after the patch.
+* Functional tests may be updated when necessary to reflect the intended requirement-stage behavior of the current repository state, especially if a previous repair changed valid contracts, route wiring, helper names, response timing, or other non-security semantics.
+
+Secondary verification goal
+
+* The targeted security exploit tests for the reported vulnerabilities should no longer succeed after the patch.
+* Security tests are authoritative for vulnerability closure and must not be weakened merely to make the run pass.
+
+Second-round repair rules
+
+1. Treat the Vulnerability Detection Report (VD) as the authoritative security baseline.
+2. Preserve the vulnerability identities from the VD report. Do not redefine the issues.
+3. Focus on vulnerabilities that remain unresolved, partially fixed, incorrectly fixed, bypassable, or that caused closely related repair-induced regressions.
+4. Limit analysis and repair to the vulnerabilities reported for the current requirement stage; do not broaden the task into whole-project rediscovery or unrelated hardening.
+5. Use the failed functional test results to detect where the previous repair broke intended requirement-stage behavior, helper compatibility, route semantics, or contract expectations.
+6. Use the security test results to detect where the previous repair failed to eliminate the exploit path.
+7. Prefer minimal corrective edits over broad rewrites.
+8. Fix the actual remaining root cause, not just the visible symptom.
+9. If the previous repair introduced a regression while trying to fix a vulnerability, repair both:
+
+   * the original unresolved security issue
+   * the regression introduced by the failed fix
+10. Enforce authorization, ownership, relationship, and state checks server-side.
+11. Keep behavior and response formats consistent with the existing application unless a security fix requires a narrow change.
+12. Where applicable, scope reads/writes to the authorized parent resource and authorized principal context.
+13. Do not remove functionality merely to make tests pass.
+14. Functional tests may be modified when the current repository’s intended requirement-stage behavior is clear and the existing tests are no longer aligned with that behavior.
+15. Do NOT weaken, delete, or relax security exploit tests just to obtain a passing run.
+16. Earlier-stage functionality should be considered only when it is still reachable in the current repository state and materially relevant to fixing the current requirement-stage vulnerabilities.
+
+How to use the additional iteration-2 inputs
+
+* Failed functional test results:
+  Use these to identify which previous changes broke valid workflows, contracts, helper compatibility, or route semantics in the current requirement stage.
+  If the repository behavior is clearly the intended one and the functional tests are outdated or contract-incompatible, update the functional tests in the minimal way necessary so they validate the correct requirement-stage behavior.
+* Security test results:
+  Use these to identify which exploit paths are still reachable, which validations are incomplete, and which repair paths remain bypassable.
+* If there is a conflict between a previous repair attempt and the repository’s intended behavior, preserve intended requirement-stage behavior while still fixing the vulnerability correctly.
+* If a previous repair changed an endpoint contract and the functional tests now fail, restore compatibility if feasible; otherwise, update the functional tests to match the intended repository behavior, but only if doing so does not weaken the security guarantees required by the VD report.
+
+Authoritative input: Vulnerability Detection Report (VD)
+<<<VD_REPORT_START
+PASTE VD REPORT HERE
+VD_REPORT_END>>>
+
+
+
+3. Functional verification commands (copy-paste):
+
+Run the full functional test suite:
+
+def test_r4_assignment_submission_upload_flow(app_instance):
+    app = app_instance
+    admin = app['session']
+
+    # Precondition setup from older requirements only; not the target under test.
+    assert login(admin, app, 'admin', 'admin123').status_code == 200
+    course_res = create_course(admin, app, title='R4 Course', description='Assignments/uploads')
+    assert course_res.status_code == 201
+    course_id = json_of(course_res)['course']['course_id']
+
+    # Add a student for R4 features.
+    student_sess = __import__('requests').Session()
+    assert register(student_sess, app, 'student_r4').status_code == 201
+    student_id = get_user_id(app, 'student_r4')
+    add_res = add_member(admin, app, course_id, student_id, 'student')
+    assert add_res.status_code == 201
+
+    # Staff creates assignment.
+    asg_res = create_assignment(admin, app, course_id, title='HW R4', description='Submit answer')
+    assert asg_res.status_code == 201
+    asg = json_of(asg_res)['assignment']
+    assignment_id = asg['assignment_id']
+    assert asg['title'] == 'HW R4'
+
+    # Member can list/get assignment.
+    assert login(student_sess, app, 'student_r4', 'pass123').status_code == 200
+    list_res = student_sess.get(api_url(app, f'/api/courses/{course_id}/assignments'), timeout=5)
+    assert list_res.status_code == 200
+    assert any(a['assignment_id'] == assignment_id for a in json_of(list_res)['assignments'])
+
+    get_res = student_sess.get(api_url(app, f'/api/courses/{course_id}/assignments/{assignment_id}'), timeout=5)
+    assert get_res.status_code == 200
+    assert json_of(get_res)['assignment']['title'] == 'HW R4'
+
+    # Staff uploads a file for the course.
+    up_res = upload_file(admin, app, course_id, filename='starter.txt', content=b'starter-material')
+    assert up_res.status_code == 201
+    upload_id = json_of(up_res)['upload']['upload_id']
+
+    uploads_res = student_sess.get(api_url(app, f'/api/courses/{course_id}/uploads'), timeout=5)
+    assert uploads_res.status_code == 200
+    assert any(u['upload_id'] == upload_id for u in json_of(uploads_res)['uploads'])
+
+    dl_res = student_sess.get(api_url(app, f'/api/courses/{course_id}/uploads/{upload_id}/download'), timeout=5)
+    assert dl_res.status_code == 200
+    assert dl_res.content == b'starter-material'
+
+    # Student submits assignment with content and attachment reference.
+    sub_create = student_sess.post(api_url(app, f'/api/courses/{course_id}/assignments/{assignment_id}/submissions'), json={
+        'content_text': 'my answer',
+        'attachment_upload_id': upload_id,
+    }, timeout=5)
+    assert sub_create.status_code == 201
+    submission = json_of(sub_create)['submission']
+    submission_id = submission['submission_id']
+    assert submission['student_id'] == student_id
+    assert submission['attachment_upload_id'] == upload_id
+
+    # Student can see own submissions.
+    my_res = student_sess.get(api_url(app, '/api/my/submissions'), timeout=5)
+    assert my_res.status_code == 200
+    assert any(s['submission_id'] == submission_id for s in json_of(my_res)['submissions'])
+
+    # Student can update own submission.
+    sub_upd = student_sess.put(api_url(app, f'/api/courses/{course_id}/assignments/{assignment_id}/submissions/{submission_id}'), json={
+        'content_text': 'updated answer',
+        'attachment_upload_id': upload_id,
+    }, timeout=5)
+    assert sub_upd.status_code == 200
+    assert json_of(sub_upd)['submission']['content_text'] == 'updated answer'
+
+    # Staff can list submissions for the assignment.
+    list_sub = admin.get(api_url(app, f'/api/courses/{course_id}/assignments/{assignment_id}/submissions'), timeout=5)
+    assert list_sub.status_code == 200
+    assert any(s['submission_id'] == submission_id for s in json_of(list_sub)['submissions'])
+
+    # Staff can update and delete the assignment.
+    upd_asg = admin.put(api_url(app, f'/api/courses/{course_id}/assignments/{assignment_id}'), json={
+        'title': 'HW R4 updated',
+        'description': 'Submit updated',
+        'due_at': '2031-01-01T00:00:00Z',
+    }, timeout=5)
+    assert upd_asg.status_code == 200
+    assert json_of(upd_asg)['assignment']['title'] == 'HW R4 updated'
+
+    del_upload = admin.delete(api_url(app, f'/api/courses/{course_id}/uploads/{upload_id}'), timeout=5)
+    assert del_upload.status_code == 200
+
+    del_asg = admin.delete(api_url(app, f'/api/courses/{course_id}/assignments/{assignment_id}'), timeout=5)
+    assert del_asg.status_code == 200
+
+
+PS D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\php\educollab_php_req04_iteration3> pytest -q tests/test_api_functional_r4.py
+F.                                                                                                                                                                                                [100%]
+=============================================================================================== FAILURES ===============================================================================================
+______________________________________________________________________________ test_r4_assignment_submission_upload_flow _______________________________________________________________________________
+
+app_instance = {'app_dir': WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-702/test_r4_assignment_submission_0/...['php', '-S', '127.0.0.1:51925', '-t', 'public']>, 'session': <requests.sessions.Session object at 0x00000259F7DC4CB0>}
+
+    def test_r4_assignment_submission_upload_flow(app_instance):
+        app = app_instance
+        admin = app['session']
+    
+        # Precondition setup from older requirements only; not the target under test.
+        assert login(admin, app, 'admin', 'admin123').status_code == 200
+        course_res = create_course(admin, app, title='R4 Course', description='Assignments/uploads')
+        assert course_res.status_code == 201
+        course_id = json_of(course_res)['course']['course_id']
+    
+        # Add a student for R4 features.
+        student_sess = __import__('requests').Session()
+        assert register(student_sess, app, 'student_r4').status_code == 201
+        student_id = get_user_id(app, 'student_r4')
+        add_res = add_member(admin, app, course_id, student_id, 'student')
+        assert add_res.status_code == 201
+    
+        # Staff creates assignment.
+        asg_res = create_assignment(admin, app, course_id, title='HW R4', description='Submit answer')
+        assert asg_res.status_code == 201
+        asg = json_of(asg_res)['assignment']
+        assignment_id = asg['assignment_id']
+        assert asg['title'] == 'HW R4'
+    
+        # Member can list/get assignment.
+        assert login(student_sess, app, 'student_r4', 'pass123').status_code == 200
+        list_res = student_sess.get(api_url(app, f'/api/courses/{course_id}/assignments'), timeout=5)
+        assert list_res.status_code == 200
+        assert any(a['assignment_id'] == assignment_id for a in json_of(list_res)['assignments'])
+    
+        get_res = student_sess.get(api_url(app, f'/api/courses/{course_id}/assignments/{assignment_id}'), timeout=5)
+        assert get_res.status_code == 200
+        assert json_of(get_res)['assignment']['title'] == 'HW R4'
+    
+        # Staff uploads a file for the course.
+        up_res = upload_file(admin, app, course_id, filename='starter.txt', content=b'starter-material')
+>       assert up_res.status_code == 201
+E       assert 422 == 201
+E        +  where 422 = <Response [422]>.status_code
+
+..\..\..\..\2_requirement-level\php\educollab_php_req04\tests\test_api_functional_r4.py:41: AssertionError
+======================================================================================= short test summary info ========================================================================================
+FAILED tests/test_api_functional_r4.py::test_r4_assignment_submission_upload_flow - assert 422 == 201
+1 failed, 1 passed in 4.29s
+PS D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\php\educollab_php_req04_iteration3> pytest -q tests/security/test_vuln_001_insecure_file_upload.py
+FF                                                                                                                                                                                                [100%]
+=============================================================================================== FAILURES ===============================================================================================
+______________________________________________________________ test_exploit_vuln_001_staff_can_upload_arbitrary_active_file_type_via_api _______________________________________________________________
+
+app_instance = {'app_dir': WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-703/test_exploit_vuln_001_staff_ca0/...['php', '-S', '127.0.0.1:51954', '-t', 'public']>, 'session': <requests.sessions.Session object at 0x000001A01D7D7950>}
+
+    def test_exploit_vuln_001_staff_can_upload_arbitrary_active_file_type_via_api(app_instance):
+        """
+        Exploit expectation:
+        Course staff can upload a dangerous active-content file such as .php because
+        the server does not enforce extension/MIME/content restrictions.
+        """
+        base_url = app_instance["base_url"]
+    
+        teacher = requests.Session()
+    
+        r = register(teacher, base_url, "upload_teacher", "pass123", "Upload Teacher")
+        assert r.status_code == 201, r.text
+    
+        create_resp = create_course(teacher, base_url, "Upload Vuln Course", "demo")
+        assert create_resp.status_code == 201, create_resp.text
+        course_id = int(json_of(create_resp)["course"]["course_id"])
+    
+        malicious_name = "shell.php"
+        malicious_body = b"<?php echo 'owned'; ?>"
+        malicious_type = "application/x-php"
+    
+        upload_resp = upload_file_api(
+            teacher,
+            base_url,
+            course_id,
+            malicious_name,
+            malicious_body,
+            malicious_type,
+        )
+>       assert upload_resp.status_code == 201, upload_resp.text
+E       AssertionError: {"success":false,"error":"file type is not allowed"}
+E       assert 422 == 201
+E        +  where 422 = <Response [422]>.status_code
+
+..\educollab_php_req04\tests\security\test_vuln_001_insecure_file_upload.py:84: AssertionError
+__________________________________________________________________ test_exploit_vuln_001_staff_can_upload_unauthorized_binary_via_api __________________________________________________________________
+
+app_instance = {'app_dir': WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-703/test_exploit_vuln_001_staff_ca1/...['php', '-S', '127.0.0.1:51960', '-t', 'public']>, 'session': <requests.sessions.Session object at 0x000001A01FB6A270>}
+
+    def test_exploit_vuln_001_staff_can_upload_unauthorized_binary_via_api(app_instance):
+        """
+        Exploit expectation:
+        Course staff can upload arbitrary binary content because the server accepts
+        files without validating type, extension, or contents.
+        """
+        base_url = app_instance["base_url"]
+    
+        teacher = requests.Session()
+    
+        r = register(teacher, base_url, "upload_teacher_bin", "pass123", "Upload Teacher Bin")
+        assert r.status_code == 201, r.text
+    
+        create_resp = create_course(teacher, base_url, "Upload Vuln Binary Course", "demo")
+        assert create_resp.status_code == 201, create_resp.text
+        course_id = int(json_of(create_resp)["course"]["course_id"])
+    
+        filename = "payload.exe"
+        content = b"MZ\x90\x00FakeWindowsExecutable"
+        content_type = "application/octet-stream"
+    
+        upload_resp = upload_file_api(
+            teacher,
+            base_url,
+            course_id,
+            filename,
+            content,
+            content_type,
+        )
+>       assert upload_resp.status_code == 201, upload_resp.text
+E       AssertionError: {"success":false,"error":"file type is not allowed"}
+E       assert 422 == 201
+E        +  where 422 = <Response [422]>.status_code
+
+..\educollab_php_req04\tests\security\test_vuln_001_insecure_file_upload.py:127: AssertionError
+======================================================================================= short test summary info ========================================================================================
+FAILED tests/security/test_vuln_001_insecure_file_upload.py::test_exploit_vuln_001_staff_can_upload_arbitrary_active_file_type_via_api - AssertionError: {"success":false,"error":"file type is not allowed"}
+FAILED tests/security/test_vuln_001_insecure_file_upload.py::test_exploit_vuln_001_staff_can_upload_unauthorized_binary_via_api - AssertionError: {"success":false,"error":"file type is not allowed"}
+2 failed in 3.13s
+PS D:\000_phd_graudaiton\new_DRV\code\unkown\2_requirement-level\php\educollab_php_req04_iteration3> pytest -q tests/security/test_vuln_002_submission_attachment_idor.py
+FF                                                                                                                                                                                                [100%]
+=============================================================================================== FAILURES ===============================================================================================
+____________________________________________________________ test_exploit_vuln_002_student_can_create_submission_using_staff_uploaded_file _____________________________________________________________
+
+app_instance = {'app_dir': WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-704/test_exploit_vuln_002_student_0/...['php', '-S', '127.0.0.1:51967', '-t', 'public']>, 'session': <requests.sessions.Session object at 0x000001C8A8F74230>}
+
+    def test_exploit_vuln_002_student_can_create_submission_using_staff_uploaded_file(app_instance):
+        """
+        Exploit expectation:
+        A student can create a submission that references an arbitrary course upload
+        created by staff, because the server checks only course scope of the upload.
+        """
+        base_url = app_instance["base_url"]
+    
+        teacher = requests.Session()
+        student = requests.Session()
+    
+        r = register(teacher, base_url, "attach_teacher", "pass123", "Attach Teacher")
+        assert r.status_code == 201, r.text
+    
+        r = register(student, base_url, "attach_student", "pass123", "Attach Student")
+        assert r.status_code == 201, r.text
+    
+        create_course_resp = create_course(teacher, base_url, "Submission Attach Course", "demo")
+        assert create_course_resp.status_code == 201, create_course_resp.text
+        course_id = int(json_of(create_course_resp)["course"]["course_id"])
+    
+        student_user_id = find_user_id_by_username(teacher, base_url, "attach_student")
+        assert student_user_id is not None
+    
+        add_resp = add_member(teacher, base_url, course_id, student_user_id, "student")
+        assert add_resp.status_code == 201, add_resp.text
+    
+        assignment_resp = create_assignment(
+            teacher,
+            base_url,
+            course_id,
+            "Assignment 1",
+            "submit something",
+        )
+        assert assignment_resp.status_code == 201, assignment_resp.text
+        assignment_id = int(json_of(assignment_resp)["assignment"]["assignment_id"])
+    
+        upload_resp = upload_file_api(
+            teacher,
+            base_url,
+            course_id,
+            "teacher_notes.pdf",
+            b"%PDF-1.4 fake teacher file",
+            "application/pdf",
+        )
+>       assert upload_resp.status_code == 201, upload_resp.text
+E       AssertionError: {"success":false,"error":"file type is not allowed"}
+E       assert 422 == 201
+E        +  where 422 = <Response [422]>.status_code
+
+..\educollab_php_req04\tests\security\test_vuln_002_submission_attachment_idor.py:171: AssertionError
+____________________________________________________________ test_exploit_vuln_002_student_can_rebind_own_submission_to_staff_uploaded_file ____________________________________________________________
+
+app_instance = {'app_dir': WindowsPath('C:/Users/cheng/AppData/Local/Temp/pytest-of-cheng/pytest-704/test_exploit_vuln_002_student_1/...['php', '-S', '127.0.0.1:56809', '-t', 'public']>, 'session': <requests.sessions.Session object at 0x000001C8AAA9F2F0>}
+
+    def test_exploit_vuln_002_student_can_rebind_own_submission_to_staff_uploaded_file(app_instance):
+        """
+        Exploit expectation:
+        A student can update their submission and attach an arbitrary staff-uploaded
+        course file by supplying attachment_upload_id from the same course.
+        """
+        base_url = app_instance["base_url"]
+    
+        teacher = requests.Session()
+        student = requests.Session()
+    
+        r = register(teacher, base_url, "attach_teacher_upd", "pass123", "Attach Teacher Upd")
+        assert r.status_code == 201, r.text
+    
+        r = register(student, base_url, "attach_student_upd", "pass123", "Attach Student Upd")
+        assert r.status_code == 201, r.text
+    
+        create_course_resp = create_course(teacher, base_url, "Submission Attach Update Course", "demo")
+        assert create_course_resp.status_code == 201, create_course_resp.text
+        course_id = int(json_of(create_course_resp)["course"]["course_id"])
+    
+        student_user_id = find_user_id_by_username(teacher, base_url, "attach_student_upd")
+        assert student_user_id is not None
+    
+        add_resp = add_member(teacher, base_url, course_id, student_user_id, "student")
+        assert add_resp.status_code == 201, add_resp.text
+    
+        assignment_resp = create_assignment(
+            teacher,
+            base_url,
+            course_id,
+            "Assignment 2",
+            "submit something else",
+        )
+        assert assignment_resp.status_code == 201, assignment_resp.text
+        assignment_id = int(json_of(assignment_resp)["assignment"]["assignment_id"])
+    
+        create_sub_resp = create_submission(
+            student,
+            base_url,
+            course_id,
+            assignment_id,
+            "initial student submission",
+            attachment_upload_id=None,
+        )
+        assert create_sub_resp.status_code == 201, create_sub_resp.text
+        submission_id = int(json_of(create_sub_resp)["submission"]["submission_id"])
+    
+        upload_resp = upload_file_api(
+            teacher,
+            base_url,
+            course_id,
+            "staff_only_answer_key.pdf",
+            b"%PDF-1.4 fake staff-only material",
+            "application/pdf",
+        )
+>       assert upload_resp.status_code == 201, upload_resp.text
+E       AssertionError: {"success":false,"error":"file type is not allowed"}
+E       assert 422 == 201
+E        +  where 422 = <Response [422]>.status_code
+
+..\educollab_php_req04\tests\security\test_vuln_002_submission_attachment_idor.py:246: AssertionError
+======================================================================================= short test summary info ========================================================================================
+FAILED tests/security/test_vuln_002_submission_attachment_idor.py::test_exploit_vuln_002_student_can_create_submission_using_staff_uploaded_file - AssertionError: {"success":false,"error":"file type is not allowed"}
+FAILED tests/security/test_vuln_002_submission_attachment_idor.py::test_exploit_vuln_002_student_can_rebind_own_submission_to_staff_uploaded_file - AssertionError: {"success":false,"error":"file type is not allowed"}
+2 failed in 3.65s
+Additional input: Security test results
+<<<SECURITY_TEST_RESULTS_START
+PASTE SECURITY TEST RESULTS HERE
+SECURITY_TEST_RESULTS_END>>>
+
+Repair requirements
+
+* Implement each vulnerability’s repair_plan consistent with its root_cause and evidence_snippets.
+* Apply fixes at the patch_locations specified in the VD report.
+* If the previous repair partially implemented a fix, complete or correct it rather than replacing it with an unrelated rewrite.
+* If the previous repair introduced a regression, restore the broken behavior in a way that still preserves the vulnerability fix.
+* Enforce authorization/ownership/relationship checks server-side (not client-side).
+* Where applicable, scope write operations to the authorized parent resource (e.g., course_id + membership_id).
+* Where applicable, verify the target object belongs to the expected parent object before mutation or disclosure.
+* Where applicable, prevent post-state mutations after a terminal state has been reached.
+* Keep error handling consistent with existing patterns in the repo (e.g., 401/403/404) and do not leak sensitive details.
+* Functional tests may be edited only when needed to realign them with the repository’s intended requirement-stage behavior.
+* Any functional test edit must be minimal, justified, and must not conceal an unresolved security issue.
+* Security tests should only be changed if they are objectively incorrect for the original vulnerability definition; otherwise leave them unchanged.
+
+Implementation guidance
+
+* Prefer patching the existing logic at the route/controller/service/repository layers already identified in the VD report.
+* If the previous repair added incomplete checks, complete them consistently across all parallel endpoints in the current requirement stage.
+* If one layer was patched but another layer still trusts attacker-controlled identifiers, finish the fix at the missing layer.
+* If a repository write path is under-scoped, bind it to the authorized parent resource and/or owner context.
+* If a route now rejects legitimate requests because of an over-restrictive or incompatible patch, restore the valid path without removing the security boundary required by the VD report.
+* If a functional test failure is caused by stale assumptions, outdated helper names, outdated route names, or pre-repair response contracts, update the functional test to match the intended current repository behavior.
+* Do not use functional test edits to mask a real authorization, ownership, relationship, or state-validation bug.
+
+Output format (strict)
+
+1. Unified diff patch (git apply compatible). Include only changed files, including application files and any functional test files that were updated.
+
+2. Per-vulnerability summary (group by vulnerability_id):
+
+   * files changed
+   * key checks added
+   * regression restored (if any)
+   * whether any functional tests were updated
+   * why the vulnerability is mitigated (brief)
+
+3. Functional verification commands (copy-paste):
+
+   * run the full functional test suite (exact command)
+   * optional minimal functional smoke command if full suite is slow
+
+4. Security verification commands (copy-paste):
+
+   * run the relevant security tests affected by the repaired vulnerabilities
+   * optional single-test commands for the most relevant repaired paths
+
+5. Test-update justification (only if any functional test files were modified):
+
+   * file changed
+   * old expectation
+   * new expectation
+   * why the old expectation no longer matched the intended requirement-stage repository behavior
+   * why the change does not weaken the vulnerability fix
+
+---

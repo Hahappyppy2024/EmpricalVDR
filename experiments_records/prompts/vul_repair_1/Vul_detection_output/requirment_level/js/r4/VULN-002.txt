@@ -1,0 +1,101 @@
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.1,
+  "severity_level": "high",
+  "confidence_score": 90,
+  "confidence_level": "high",
+  "summary": "Students can attach an arbitrary upload_id to their submission by supplying a different attachment_upload_id, without verifying that the upload belongs to the same course or that the student is authorized for that upload. This can leak metadata about uploads from other courses and creates cross-course object reference abuse in submission records.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/assignments/:assignment_id/submissions"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/assignments/:assignment_id/submissions/:submission_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/assignments/:assignment_id/submissions"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id/assignments/:assignment_id/submissions/:submission_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/controllers/submissionController.js",
+      "line_start": 15,
+      "line_end": 26,
+      "function_name": "createSubmission",
+      "code": "function createSubmission(req, res) {\n  const courseId = Number(req.params.course_id);\n  const assignmentId = Number(req.params.assignment_id);\n  const { content_text, attachment_upload_id } = req.body;\n  if (!assignmentRepository.findById(courseId, assignmentId)) return res.status(404).send('Assignment not found');\n  const submission = submissionRepository.createSubmission({\n    assignment_id: assignmentId,\n    course_id: courseId,\n    student_id: req.currentUser.user_id,\n    content_text,\n    attachment_upload_id: attachment_upload_id || null\n  });\n}",
+      "reason": "The controller accepts attachment_upload_id directly from the request and stores it without verifying the referenced upload belongs to the same course or is accessible to the student."
+    },
+    {
+      "file_path": "src/controllers/submissionController.js",
+      "line_start": 47,
+      "line_end": 76,
+      "function_name": "updateMySubmission / apiUpdateMySubmission",
+      "code": "const { content_text, attachment_upload_id } = req.body;\nconst submission = submissionRepository.findById(courseId, assignmentId, submissionId);\nif (!submission) return ...;\nif (submission.student_id !== req.currentUser.user_id) return ...;\nsubmissionRepository.updateSubmission(courseId, assignmentId, submissionId, { content_text, attachment_upload_id });",
+      "reason": "Ownership of the submission is checked, but attachment_upload_id is not validated against courseId or any upload authorization rule, allowing an IDOR on the referenced upload object."
+    },
+    {
+      "file_path": "src/repositories/submissionRepository.js",
+      "line_start": 12,
+      "line_end": 20,
+      "function_name": "findById",
+      "code": "SELECT s.*, u.username AS student_username, u.display_name AS student_display_name,\n       up.original_name AS attachment_original_name\nFROM submissions s\nJOIN users u ON u.user_id = s.student_id\nLEFT JOIN uploads up ON up.upload_id = s.attachment_upload_id\nWHERE s.course_id = ? AND s.assignment_id = ? AND s.submission_id = ?",
+      "reason": "The join to uploads is by upload_id only (no course_id constraint), so a submission can reference an upload from a different course and expose its metadata (e.g., original_name)."
+    },
+    {
+      "file_path": "src/views/submission_new.ejs",
+      "line_start": 5,
+      "line_end": 9,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"/courses/<%= course.course_id %>/assignments/<%= assignment.assignment_id %>/submissions\">\n  <div><label>Content</label><textarea name=\"content_text\"></textarea></div>\n  <div><label>Attachment Upload ID</label><input type=\"text\" name=\"attachment_upload_id\"></div>\n  <button type=\"submit\">Submit</button>\n</form>",
+      "reason": "The UI exposes attachment_upload_id as a raw user-controlled identifier, encouraging direct object reference by ID."
+    }
+  ],
+  "root_cause_code": 11,
+  "root_cause": "The code trusts a user-supplied attachment_upload_id across a course trust boundary and does not enforce that the referenced upload belongs to the same course and is authorized for the acting user before storing or rendering related metadata.",
+  "patch_locations": [
+    {
+      "file_path": "src/controllers/submissionController.js",
+      "line_start": 15,
+      "line_end": 76,
+      "function_name": "createSubmission / apiCreateSubmission / updateMySubmission / apiUpdateMySubmission"
+    },
+    {
+      "file_path": "src/repositories/submissionRepository.js",
+      "line_start": 1,
+      "line_end": 60,
+      "function_name": "createSubmission / findById / listByAssignment / listByStudent / updateSubmission"
+    },
+    {
+      "file_path": "src/views/submission_new.ejs",
+      "line_start": 1,
+      "line_end": 20,
+      "function_name": null
+    },
+    {
+      "file_path": "src/views/my_submissions.ejs",
+      "line_start": 1,
+      "line_end": 30,
+      "function_name": null
+    }
+  ],
+  "repair_plan": "When creating or updating a submission, validate attachment_upload_id by loading the upload record and enforcing that upload.course_id equals the submission's course_id and that the acting user is authorized to reference it (at minimum course membership; optionally ownership or staff rules). Prefer selecting uploads from a server-side list rather than accepting arbitrary IDs. In the data layer, constrain joins to uploads by both upload_id and course_id to prevent cross-course metadata leakage.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

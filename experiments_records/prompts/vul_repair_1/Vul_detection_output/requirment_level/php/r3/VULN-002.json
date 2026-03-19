@@ -1,0 +1,95 @@
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.4,
+  "severity_level": "high",
+  "confidence_score": 98,
+  "confidence_level": "high",
+  "summary": "Any authenticated member of a course can edit or delete another member's comment by supplying that comment_id under a post in the same course. This lets ordinary course members tamper with or remove other users' comments because the server enforces only course membership.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "DELETE",
+      "route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app/views/courses/posts/show.php",
+      "line_start": 34,
+      "line_end": 40,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"/courses/.../comments/<?= htmlspecialchars((string) $comment['comment_id'], ENT_QUOTES, 'UTF-8') ?>\">\n...\n<form method=\"post\" action=\"/courses/.../comments/<?= htmlspecialchars((string) $comment['comment_id'], ENT_QUOTES, 'UTF-8') ?>/delete\">",
+      "reason": "The page renders edit and delete forms for every displayed comment, exposing direct comment_id-based mutation actions to any user who can view the post."
+    },
+    {
+      "file_path": "app/controllers/CommentController.php",
+      "line_start": 74,
+      "line_end": 105,
+      "function_name": "updateHtml/updateApi/update",
+      "code": "require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);\n$this->update($courseId, $postId, $commentId, request_data());\n...\nif (!$this->commentRepo->findById($courseId, $postId, $commentId)) { return ['success' => false, 'error' => 'Comment not found']; }\n...\n$this->commentRepo->update($courseId, $postId, $commentId, $body);",
+      "reason": "The update path requires only course membership and then updates the referenced comment without verifying comment ownership or a dedicated moderator privilege."
+    },
+    {
+      "file_path": "app/controllers/CommentController.php",
+      "line_start": 108,
+      "line_end": 131,
+      "function_name": "deleteHtml/deleteApi/delete",
+      "code": "require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);\n$this->delete($courseId, $postId, $commentId);\n...\nif (!$this->commentRepo->findById($courseId, $postId, $commentId)) { return ['success' => false, 'error' => 'Comment not found']; }\n$this->commentRepo->delete($courseId, $postId, $commentId);",
+      "reason": "Deletion uses the same insufficient authorization model and allows any course member to delete the target comment."
+    },
+    {
+      "file_path": "app/repositories/CommentRepository.php",
+      "line_start": 59,
+      "line_end": 79,
+      "function_name": "update/delete",
+      "code": "UPDATE comments SET body = :body, updated_at = :updated_at\nWHERE course_id = :course_id AND post_id = :post_id AND comment_id = :comment_id\n...\nDELETE FROM comments WHERE course_id = :course_id AND post_id = :post_id AND comment_id = :comment_id",
+      "reason": "The repository write operations are scoped only by identifiers and do not constrain comment update/delete by author_id or an authorized moderation rule."
+    }
+  ],
+  "root_cause_code": 7,
+  "root_cause": "Comment mutation flows trust the user-supplied comment_id after only verifying course membership, and they omit any ownership or moderation authorization check before updating or deleting the targeted comment.",
+  "patch_locations": [
+    {
+      "file_path": "app/controllers/CommentController.php",
+      "line_start": 74,
+      "line_end": 131,
+      "function_name": "updateHtml/updateApi/update/deleteHtml/deleteApi/delete"
+    },
+    {
+      "file_path": "app/repositories/CommentRepository.php",
+      "line_start": 44,
+      "line_end": 79,
+      "function_name": "findById/update/delete"
+    },
+    {
+      "file_path": "app/views/courses/posts/show.php",
+      "line_start": 34,
+      "line_end": 40,
+      "function_name": null
+    }
+  ],
+  "repair_plan": "Before serving comment-mutation controls or executing comment update/delete, load the target comment and verify that the authenticated user is the comment author or holds an explicitly authorized moderation role in the course. Apply the same rule in HTML and API handlers, and constrain non-staff repository writes by author_id so direct comment_id tampering cannot modify another user's comment.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

@@ -1,0 +1,85 @@
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 4,
+  "vulnerability_type": "Path Traversal",
+  "cwe_id": "CWE-22",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.4,
+  "severity_level": "high",
+  "confidence_score": 93,
+  "confidence_level": "high",
+  "summary": "Course staff can exploit path traversal in the upload pipeline by embedding path separators (e.g., ../) in the original filename, causing files to be written outside the intended uploads directory. This can overwrite or create files in unintended locations and may enable further compromise depending on writable paths.",
+  "entry_points": [
+    {
+      "type": "file upload handler",
+      "method": "POST",
+      "route": "/api/courses/:course_id/uploads"
+    },
+    {
+      "type": "file upload handler",
+      "method": "POST",
+      "route": "/courses/:course_id/uploads"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 29,
+      "line_end": 39,
+      "function_name": null,
+      "code": "const upload = multer({\n  storage: multer.diskStorage({\n    destination: function (req, file, cb) {\n      cb(null, uploadDir);\n    },\n    filename: function (req, file, cb) {\n      const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}-${file.originalname}`;\n      cb(null, unique);\n    }\n  })\n});",
+      "reason": "The stored filename concatenates untrusted file.originalname without sanitizing path separators. If originalname contains '../' or path separators, diskStorage can write outside uploadDir."
+    },
+    {
+      "file_path": "src/controllers/uploadController.js",
+      "line_start": 18,
+      "line_end": 28,
+      "function_name": "createUpload",
+      "code": "const upload = uploadRepository.createUpload({\n  course_id: courseId,\n  uploaded_by: req.currentUser.user_id,\n  original_name: req.file.originalname,\n  storage_path: req.file.path\n});",
+      "reason": "The code persists req.file.path (derived from the potentially traversed filename) as the authoritative storage_path."
+    },
+    {
+      "file_path": "src/controllers/uploadController.js",
+      "line_start": 52,
+      "line_end": 57,
+      "function_name": "downloadUpload",
+      "code": "const upload = uploadRepository.findById(courseId, uploadId);\nif (!upload) return res.status(404).send('Upload not found');\nreturn res.download(path.resolve(upload.storage_path), upload.original_name);",
+      "reason": "The download path trusts the stored storage_path and resolves it, which becomes dangerous when storage_path can be written outside the intended directory."
+    },
+    {
+      "file_path": "src/controllers/uploadController.js",
+      "line_start": 68,
+      "line_end": 75,
+      "function_name": "deleteUpload",
+      "code": "const upload = uploadRepository.findById(courseId, uploadId);\nif (!upload) return res.status(404).send('Upload not found');\nif (fs.existsSync(upload.storage_path)) fs.unlinkSync(upload.storage_path);\nuploadRepository.deleteUpload(courseId, uploadId);",
+      "reason": "Deletion unlinks upload.storage_path directly; if traversal caused storage_path to point outside uploads, deletion can remove unintended files."
+    }
+  ],
+  "root_cause_code": 6,
+  "root_cause": "Untrusted filenames are used in filesystem path construction without sanitization or containment checks, and the resulting storage_path is later trusted for download and delete operations.",
+  "patch_locations": [
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 29,
+      "line_end": 39,
+      "function_name": null
+    },
+    {
+      "file_path": "src/routes/web.js",
+      "line_start": 1,
+      "line_end": 40,
+      "function_name": null
+    },
+    {
+      "file_path": "src/controllers/uploadController.js",
+      "line_start": 18,
+      "line_end": 79,
+      "function_name": "createUpload / apiCreateUpload / downloadUpload / apiDownloadUpload / deleteUpload / apiDeleteUpload"
+    }
+  ],
+  "repair_plan": "Generate server-side storage filenames independently of file.originalname (e.g., UUID) and do not allow any path separators in the stored filename. Normalize and validate the resolved destination path to ensure it remains inside the intended uploads directory before writing. Store only a safe relative filename (not an arbitrary path) in the database, and for download/delete operations, rebuild the absolute path by joining the known uploads directory with the stored safe filename.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

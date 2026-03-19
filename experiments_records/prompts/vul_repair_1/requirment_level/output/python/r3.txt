@@ -1,0 +1,537 @@
+1. Unified diff patch (git apply compatible)
+
+```diff
+--- a/controllers/post_controller.py
++++ b/controllers/post_controller.py
+@@ -1,4 +1,6 @@
+-from flask import Blueprint, jsonify, redirect, render_template, request, url_for
++import secrets
++
++from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
+ 
+ from models.comment_repo import (
+     create_comment,
+@@ -17,12 +19,78 @@
+     search_posts,
+     update_post,
+ )
+-from utils.auth import get_current_user, login_required, require_course_member
++from utils.auth import get_course_membership, get_current_user, is_api_request, login_required, require_course_member
+ 
+ 
+ post_bp = Blueprint('posts', __name__)
+ 
+ 
++_CONTENT_MODERATOR_ROLES = {'teacher', 'admin', 'assistant', 'senior-assistant'}
++_CSRF_TOKEN_KEY = 'csrf_token'
++
++
++def _get_or_create_csrf_token():
++    token = session.get(_CSRF_TOKEN_KEY)
++    if not token:
++        token = secrets.token_urlsafe(32)
++        session[_CSRF_TOKEN_KEY] = token
++    return token
++
++
++def _csrf_error_response():
++    if is_api_request():
++        return jsonify({'success': False, 'error': 'invalid_csrf_token'}), 403
++    return 'Forbidden', 403
++
++
++def _validate_csrf():
++    expected = session.get(_CSRF_TOKEN_KEY)
++    provided = request.form.get('csrf_token', '')
++    if not expected or not provided or provided != expected:
++        return _csrf_error_response()
++    return None
++
++
++def _can_manage_post(post, membership=None, user=None):
++    if post is None:
++        return False
++    if user is None:
++        user = get_current_user()
++    if user is None:
++        return False
++    if post['author_id'] == user['user_id']:
++        return True
++    if membership is None:
++        membership = get_course_membership(post['course_id'], user['user_id'])
++    return membership is not None and membership['role_in_course'] in _CONTENT_MODERATOR_ROLES
++
++
++def _can_manage_comment(comment, membership=None, user=None):
++    if comment is None:
++        return False
++    if user is None:
++        user = get_current_user()
++    if user is None:
++        return False
++    if comment['author_id'] == user['user_id']:
++        return True
++    if membership is None:
++        membership = get_course_membership(comment['course_id'], user['user_id'])
++    return membership is not None and membership['role_in_course'] in _CONTENT_MODERATOR_ROLES
++
++
++def _post_permission_denied():
++    if is_api_request():
++        return jsonify({'success': False, 'error': 'post_forbidden'}), 403
++    return 'Forbidden', 403
++
++
++def _comment_permission_denied():
++    if is_api_request():
++        return jsonify({'success': False, 'error': 'comment_forbidden'}), 403
++    return 'Forbidden', 403
++
++
+ 
+ def _post_to_dict(post):
+     if post is None:
+@@ -71,13 +139,21 @@
+     course = get_course_by_id(course_id)
+     if course is None:
+         return render_template('404.html', current_user=get_current_user()), 404
+-    return render_template('posts/new.html', course=course, current_user=get_current_user())
++    return render_template(
++        'posts/new.html',
++        course=course,
++        current_user=get_current_user(),
++        csrf_token=_get_or_create_csrf_token(),
++    )
+ 
+ 
+ @post_bp.route('/courses/<int:course_id>/posts', methods=['POST'])
+ @login_required
+ @require_course_member
+ def create_post_submit(course_id):
++    csrf_error = _validate_csrf()
++    if csrf_error is not None:
++        return csrf_error
+     course = get_course_by_id(course_id)
+     if course is None:
+         return render_template('404.html', current_user=get_current_user()), 404
+@@ -89,6 +165,7 @@
+             course=course,
+             error='Title is required.',
+             current_user=get_current_user(),
++            csrf_token=_get_or_create_csrf_token(),
+         ), 400
+     post = create_post(course_id, get_current_user()['user_id'], title, body)
+     return redirect(url_for('posts.get_post_page', course_id=course_id, post_id=post['post_id']))
+@@ -140,12 +217,21 @@
+     course, post = _load_course_and_post(course_id, post_id)
+     if course is None or post is None:
+         return render_template('404.html', current_user=get_current_user()), 404
++    membership = get_course_membership(course_id)
++    current_user = get_current_user()
+     return render_template(
+         'posts/detail.html',
+         course=course,
+         post=post,
+         comments=list_comments(course_id, post_id),
+-        current_user=get_current_user(),
++        current_user=current_user,
++        can_manage_post=_can_manage_post(post, membership=membership, user=current_user),
++        can_manage_comment_ids={
++            item['comment_id']
++            for item in list_comments(course_id, post_id)
++            if _can_manage_comment(item, membership=membership, user=current_user)
++        },
++        csrf_token=_get_or_create_csrf_token(),
+     )
+ 
+ 
+@@ -166,16 +252,31 @@
+     course, post = _load_course_and_post(course_id, post_id)
+     if course is None or post is None:
+         return render_template('404.html', current_user=get_current_user()), 404
+-    return render_template('posts/edit.html', course=course, post=post, current_user=get_current_user())
++    membership = get_course_membership(course_id)
++    if not _can_manage_post(post, membership=membership):
++        return _post_permission_denied()
++    return render_template(
++        'posts/edit.html',
++        course=course,
++        post=post,
++        current_user=get_current_user(),
++        csrf_token=_get_or_create_csrf_token(),
++    )
+ 
+ 
+ @post_bp.route('/courses/<int:course_id>/posts/<int:post_id>', methods=['POST'])
+ @login_required
+ @require_course_member
+ def update_post_submit(course_id, post_id):
++    csrf_error = _validate_csrf()
++    if csrf_error is not None:
++        return csrf_error
+     course, post = _load_course_and_post(course_id, post_id)
+     if course is None or post is None:
+         return render_template('404.html', current_user=get_current_user()), 404
++    membership = get_course_membership(course_id)
++    if not _can_manage_post(post, membership=membership):
++        return _post_permission_denied()
+     title = request.form.get('title', '').strip()
+     body = request.form.get('body', '').strip()
+     if not title:
+@@ -185,8 +286,9 @@
+             post=post,
+             error='Title is required.',
+             current_user=get_current_user(),
++            csrf_token=_get_or_create_csrf_token(),
+         ), 400
+-    update_post(course_id, post_id, title, body)
++    update_post(course_id, post_id, title, body, author_id=post['author_id'] if post['author_id'] == get_current_user()['user_id'] else None)
+     return redirect(url_for('posts.get_post_page', course_id=course_id, post_id=post_id))
+ 
+ 
+@@ -197,12 +299,15 @@
+     post = get_post_by_id(course_id, post_id)
+     if post is None:
+         return jsonify({'success': False, 'error': 'post_not_found'}), 404
++    membership = get_course_membership(course_id)
++    if not _can_manage_post(post, membership=membership):
++        return _post_permission_denied()
+     data = request.get_json(silent=True) or {}
+     title = str(data.get('title', '')).strip()
+     body = str(data.get('body', '')).strip()
+     if not title:
+         return jsonify({'success': False, 'error': 'title_required'}), 400
+-    updated = update_post(course_id, post_id, title, body)
++    updated = update_post(course_id, post_id, title, body, author_id=post['author_id'] if post['author_id'] == get_current_user()['user_id'] else None)
+     return jsonify({'success': True, 'post': _post_to_dict(updated)})
+ 
+ 
+@@ -210,10 +315,16 @@
+ @login_required
+ @require_course_member
+ def delete_post_submit(course_id, post_id):
++    csrf_error = _validate_csrf()
++    if csrf_error is not None:
++        return csrf_error
+     course, post = _load_course_and_post(course_id, post_id)
+     if course is None or post is None:
+         return render_template('404.html', current_user=get_current_user()), 404
+-    delete_post(course_id, post_id)
++    membership = get_course_membership(course_id)
++    if not _can_manage_post(post, membership=membership):
++        return _post_permission_denied()
++    delete_post(course_id, post_id, author_id=post['author_id'] if post['author_id'] == get_current_user()['user_id'] else None)
+     return redirect(url_for('posts.list_posts_page', course_id=course_id))
+ 
+ 
+@@ -224,7 +335,10 @@
+     post = get_post_by_id(course_id, post_id)
+     if post is None:
+         return jsonify({'success': False, 'error': 'post_not_found'}), 404
+-    delete_post(course_id, post_id)
++    membership = get_course_membership(course_id)
++    if not _can_manage_post(post, membership=membership):
++        return _post_permission_denied()
++    delete_post(course_id, post_id, author_id=post['author_id'] if post['author_id'] == get_current_user()['user_id'] else None)
+     return jsonify({'success': True, 'deleted_post_id': post_id})
+ 
+ 
+@@ -232,6 +346,9 @@
+ @login_required
+ @require_course_member
+ def create_comment_submit(course_id, post_id):
++    csrf_error = _validate_csrf()
++    if csrf_error is not None:
++        return csrf_error
+     course, post = _load_course_and_post(course_id, post_id)
+     if course is None or post is None:
+         return render_template('404.html', current_user=get_current_user()), 404
+@@ -285,13 +402,19 @@
+ @login_required
+ @require_course_member
+ def update_comment_submit(course_id, post_id, comment_id):
++    csrf_error = _validate_csrf()
++    if csrf_error is not None:
++        return csrf_error
+     course, post = _load_course_and_post(course_id, post_id)
+     comment = get_comment_by_id(course_id, post_id, comment_id)
+     if course is None or post is None or comment is None:
+         return render_template('404.html', current_user=get_current_user()), 404
++    membership = get_course_membership(course_id)
++    if not _can_manage_comment(comment, membership=membership):
++        return _comment_permission_denied()
+     body = request.form.get('body', '').strip()
+     if body:
+-        update_comment(course_id, post_id, comment_id, body)
++        update_comment(course_id, post_id, comment_id, body, author_id=comment['author_id'] if comment['author_id'] == get_current_user()['user_id'] else None)
+     return redirect(url_for('posts.get_post_page', course_id=course_id, post_id=post_id))
+ 
+ 
+@@ -302,11 +425,14 @@
+     comment = get_comment_by_id(course_id, post_id, comment_id)
+     if comment is None:
+         return jsonify({'success': False, 'error': 'comment_not_found'}), 404
++    membership = get_course_membership(course_id)
++    if not _can_manage_comment(comment, membership=membership):
++        return _comment_permission_denied()
+     data = request.get_json(silent=True) or {}
+     body = str(data.get('body', '')).strip()
+     if not body:
+         return jsonify({'success': False, 'error': 'body_required'}), 400
+-    updated = update_comment(course_id, post_id, comment_id, body)
++    updated = update_comment(course_id, post_id, comment_id, body, author_id=comment['author_id'] if comment['author_id'] == get_current_user()['user_id'] else None)
+     return jsonify({'success': True, 'comment': _comment_to_dict(updated)})
+ 
+ 
+@@ -314,11 +440,17 @@
+ @login_required
+ @require_course_member
+ def delete_comment_submit(course_id, post_id, comment_id):
++    csrf_error = _validate_csrf()
++    if csrf_error is not None:
++        return csrf_error
+     course, post = _load_course_and_post(course_id, post_id)
+     comment = get_comment_by_id(course_id, post_id, comment_id)
+     if course is None or post is None or comment is None:
+         return render_template('404.html', current_user=get_current_user()), 404
+-    delete_comment(course_id, post_id, comment_id)
++    membership = get_course_membership(course_id)
++    if not _can_manage_comment(comment, membership=membership):
++        return _comment_permission_denied()
++    delete_comment(course_id, post_id, comment_id, author_id=comment['author_id'] if comment['author_id'] == get_current_user()['user_id'] else None)
+     return redirect(url_for('posts.get_post_page', course_id=course_id, post_id=post_id))
+ 
+ 
+@@ -329,7 +461,10 @@
+     comment = get_comment_by_id(course_id, post_id, comment_id)
+     if comment is None:
+         return jsonify({'success': False, 'error': 'comment_not_found'}), 404
+-    delete_comment(course_id, post_id, comment_id)
++    membership = get_course_membership(course_id)
++    if not _can_manage_comment(comment, membership=membership):
++        return _comment_permission_denied()
++    delete_comment(course_id, post_id, comment_id, author_id=comment['author_id'] if comment['author_id'] == get_current_user()['user_id'] else None)
+     return jsonify({'success': True, 'deleted_comment_id': comment_id})
+--- a/models/post_repo.py
++++ b/models/post_repo.py
+@@ -36,21 +36,29 @@
+ 
+ 
+ 
+-def update_post(course_id, post_id, title, body):
++def update_post(course_id, post_id, title, body, author_id=None):
+     db = get_db()
+-    db.execute(
+-        'UPDATE posts SET title = ?, body = ?, updated_at = CURRENT_TIMESTAMP WHERE course_id = ? AND post_id = ?',
+-        (title, body, course_id, post_id),
+-    )
++    query = 'UPDATE posts SET title = ?, body = ?, updated_at = CURRENT_TIMESTAMP WHERE course_id = ? AND post_id = ?'
++    params = [title, body, course_id, post_id]
++    if author_id is not None:
++        query += ' AND author_id = ?'
++        params.append(author_id)
++    db.execute(query, tuple(params))
+     db.commit()
+     return get_post_by_id(course_id, post_id)
+ 
+ 
+ 
+-def delete_post(course_id, post_id):
++def delete_post(course_id, post_id, author_id=None):
+     db = get_db()
+-    db.execute('DELETE FROM comments WHERE course_id = ? AND post_id = ?', (course_id, post_id))
+-    db.execute('DELETE FROM posts WHERE course_id = ? AND post_id = ?', (course_id, post_id))
++    post_query = 'DELETE FROM posts WHERE course_id = ? AND post_id = ?'
++    post_params = [course_id, post_id]
++    if author_id is not None:
++        post_query += ' AND author_id = ?'
++        post_params.append(author_id)
++    db.execute(post_query, tuple(post_params))
++    if author_id is None or db.total_changes:
++        db.execute('DELETE FROM comments WHERE course_id = ? AND post_id = ?', (course_id, post_id))
+     db.commit()
+ 
+--- a/models/comment_repo.py
++++ b/models/comment_repo.py
+@@ -36,24 +36,30 @@
+ 
+ 
+ 
+-def update_comment(course_id, post_id, comment_id, body):
++def update_comment(course_id, post_id, comment_id, body, author_id=None):
+     db = get_db()
+-    db.execute(
++    query = (
+         'UPDATE comments SET body = ?, updated_at = CURRENT_TIMESTAMP '
+-        'WHERE course_id = ? AND post_id = ? AND comment_id = ?',
+-        (body, course_id, post_id, comment_id),
++        'WHERE course_id = ? AND post_id = ? AND comment_id = ?'
+     )
++    params = [body, course_id, post_id, comment_id]
++    if author_id is not None:
++        query += ' AND author_id = ?'
++        params.append(author_id)
++    db.execute(query, tuple(params))
+     db.commit()
+     return get_comment_by_id(course_id, post_id, comment_id)
+ 
+ 
+ 
+-def delete_comment(course_id, post_id, comment_id):
++def delete_comment(course_id, post_id, comment_id, author_id=None):
+     db = get_db()
+-    db.execute(
+-        'DELETE FROM comments WHERE course_id = ? AND post_id = ? AND comment_id = ?',
+-        (course_id, post_id, comment_id),
+-    )
++    query = 'DELETE FROM comments WHERE course_id = ? AND post_id = ? AND comment_id = ?'
++    params = [course_id, post_id, comment_id]
++    if author_id is not None:
++        query += ' AND author_id = ?'
++        params.append(author_id)
++    db.execute(query, tuple(params))
+     db.commit()
+ 
+--- a/templates/posts/new.html
++++ b/templates/posts/new.html
+@@ -3,6 +3,7 @@
+ <h1>New Post for {{ course['title'] }}</h1>
+ {% if error %}<p class="error">{{ error }}</p>{% endif %}
+ <form method="post" action="{{ url_for('posts.create_post_submit', course_id=course['course_id']) }}">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+   <label for="title">Title</label>
+   <input id="title" name="title" required>
+   <label for="body">Body</label>
+--- a/templates/posts/edit.html
++++ b/templates/posts/edit.html
+@@ -3,6 +3,7 @@
+ <h1>Edit Post</h1>
+ {% if error %}<p class="error">{{ error }}</p>{% endif %}
+ <form method="post" action="{{ url_for('posts.update_post_submit', course_id=course['course_id'], post_id=post['post_id']) }}">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+   <label for="title">Title</label>
+   <input id="title" name="title" value="{{ post['title'] }}" required>
+   <label for="body">Body</label>
+--- a/templates/posts/detail.html
++++ b/templates/posts/detail.html
+@@ -8,15 +8,19 @@
+ </div>
+ <p>
+   <a href="{{ url_for('posts.list_posts_page', course_id=course['course_id']) }}">Back to Posts</a> |
+-  <a href="{{ url_for('posts.edit_post_page', course_id=course['course_id'], post_id=post['post_id']) }}">Edit Post</a> |
++  {% if can_manage_post %}<a href="{{ url_for('posts.edit_post_page', course_id=course['course_id'], post_id=post['post_id']) }}">Edit Post</a> | {% endif %}
+   <a href="{{ url_for('posts.list_comments_page', course_id=course['course_id'], post_id=post['post_id']) }}">Comments Page</a>
+ </p>
++{% if can_manage_post %}
+ <form method="post" action="{{ url_for('posts.delete_post_submit', course_id=course['course_id'], post_id=post['post_id']) }}">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+   <button type="submit">Delete Post</button>
+ </form>
++{% endif %}
+ 
+ <h2>Add Comment</h2>
+ <form method="post" action="{{ url_for('posts.create_comment_submit', course_id=course['course_id'], post_id=post['post_id']) }}">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+   <label for="body">Comment</label>
+   <textarea id="body" name="body" rows="4"></textarea>
+   <button type="submit">Add Comment</button>
+@@ -27,14 +31,18 @@
+ <div class="card">
+   <p>{{ comment['body'] }}</p>
+   <p>By {{ comment['display_name'] }} at {{ comment['created_at'] }}</p>
++  {% if comment['comment_id'] in can_manage_comment_ids %}
+   <form method="post" action="{{ url_for('posts.update_comment_submit', course_id=course['course_id'], post_id=post['post_id'], comment_id=comment['comment_id']) }}">
++    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+     <label for="comment-{{ comment['comment_id'] }}">Edit comment</label>
+     <textarea id="comment-{{ comment['comment_id'] }}" name="body" rows="3">{{ comment['body'] }}</textarea>
+     <button type="submit">Update Comment</button>
+   </form>
+   <form method="post" action="{{ url_for('posts.delete_comment_submit', course_id=course['course_id'], post_id=post['post_id'], comment_id=comment['comment_id']) }}">
++    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+     <button type="submit">Delete Comment</button>
+   </form>
++  {% endif %}
+ </div>
+ {% else %}
+ <p>No comments yet.</p>
+```
+
+2. Per-vulnerability summary
+
+**VULN-001**
+
+* files changed
+
+  * `controllers/post_controller.py`
+  * `models/post_repo.py`
+  * `templates/posts/edit.html`
+  * `templates/posts/detail.html`
+* key checks added
+
+  * Post edit/delete routes now load the target post and allow mutation only if the caller is the post author or course staff (`teacher`, `admin`, `assistant`, `senior-assistant`).
+  * API edit/delete post endpoints now return `403` with `post_forbidden` when the caller is neither owner nor authorized staff.
+  * Repository writes can optionally scope update/delete by `author_id` for owner paths.
+  * UI only renders post edit/delete controls when the current user is authorized.
+* why the vulnerability is mitigated
+
+  * Supplying another user’s `post_id` is no longer enough. Server-side authorization now binds post mutation to either ownership or an explicitly allowed moderation role.
+
+**VULN-002**
+
+* files changed
+
+  * `controllers/post_controller.py`
+  * `models/comment_repo.py`
+  * `templates/posts/detail.html`
+* key checks added
+
+  * Comment update/delete routes now load the target comment and allow mutation only if the caller is the comment author or course staff.
+  * API update/delete comment endpoints now return `403` with `comment_forbidden` when unauthorized.
+  * Repository writes can optionally scope update/delete by `author_id` for owner paths.
+  * UI only renders comment edit/delete controls for comments the current user is allowed to manage.
+* why the vulnerability is mitigated
+
+  * Another member can no longer edit or delete arbitrary comments by passing `comment_id`; the server validates ownership or staff moderation authority before any write.
+
+**VULN-003**
+
+* files changed
+
+  * `controllers/post_controller.py`
+  * `templates/posts/new.html`
+  * `templates/posts/edit.html`
+  * `templates/posts/detail.html`
+* key checks added
+
+  * Added a per-session CSRF token generator in `post_controller.py`.
+  * Added hidden `csrf_token` fields to all server-rendered discussion forms for post create/update/delete and comment create/update/delete.
+  * Added server-side CSRF validation for all corresponding browser POST handlers, returning `403` on missing/invalid tokens.
+* why the vulnerability is mitigated
+
+  * Cookie-authenticated discussion form submissions now require a valid per-session token, so cross-site forged form posts are rejected server-side.
+
+3. Functional verification commands (copy-paste)
+
+Run the full functional test suite:
+
+```bash
+cd educollab_flask_req03
+pip install -r requirements.txt
+pytest -q tests/test_r3_functional.py
+```
+
+Run the functional tests relevant to the current requirement:
+
+```bash
+cd educollab_flask_req03
+pytest -q tests/test_r3_functional.py::test_r3_post_comment_search_flow tests/test_r3_functional.py::test_r3_non_member_cannot_use_post_or_comment_endpoints
+```
+
+Optional minimal functional smoke command:
+
+```bash
+cd educollab_flask_req03
+python -m py_compile controllers/post_controller.py models/post_repo.py models/comment_repo.py
+```
+
+补充一句：在当前仓库里，`pytest -q` 还会包含 `tests/test_r3_exploit.py`，这些 exploit 用例会因为漏洞已被修复而从“预期 200”变成“实际 403”，所以它们会失败，这是正常现象。

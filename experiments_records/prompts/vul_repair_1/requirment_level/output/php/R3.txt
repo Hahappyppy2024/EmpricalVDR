@@ -1,0 +1,377 @@
+1. Unified diff patch (git apply compatible). Include only changed files.
+
+[Download the patch](sandbox:/mnt/data/req03_idor.patch)
+
+```diff
+diff -ruN req03_orig/educollab_php_req01/app/controllers/CommentController.php req03/educollab_php_req01/app/controllers/CommentController.php
+--- req03_orig/educollab_php_req01/app/controllers/CommentController.php	2026-03-07 19:16:55.000000000 +0000
++++ req03/educollab_php_req01/app/controllers/CommentController.php	2026-03-12 02:02:48.942724493 +0000
+@@ -73,61 +73,81 @@
+ 
+     public function updateHtml(int $courseId, int $postId, int $commentId): void
+     {
+-        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+-        $this->update($courseId, $postId, $commentId, request_data());
++        $membership = require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
++        $userId = require_login($this->config, false);
++        $this->update($courseId, $postId, $commentId, $userId, $membership, request_data());
+         redirect_to('/courses/' . $courseId . '/posts/' . $postId);
+     }
+ 
+     public function updateApi(int $courseId, int $postId, int $commentId): void
+     {
+-        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+-        $result = $this->update($courseId, $postId, $commentId, request_data());
++        $membership = require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
++        $userId = require_login($this->config, true);
++        $result = $this->update($courseId, $postId, $commentId, $userId, $membership, request_data());
+         if (!$result['success']) {
+-            $status = in_array($result['error'], ['Post not found', 'Comment not found'], true) ? 404 : 422;
++            $status = in_array($result['error'], ['Post not found', 'Comment not found'], true) ? 404 : ($result['error'] === 'Forbidden' ? 403 : 422);
+             json_response($result, $status);
+         }
+         json_response($result, 200);
+     }
+ 
+-    private function update(int $courseId, int $postId, int $commentId, array $data): array
++    private function update(int $courseId, int $postId, int $commentId, int $userId, array $membership, array $data): array
+     {
+         if (!$this->postRepo->findById($courseId, $postId)) {
+             return ['success' => false, 'error' => 'Post not found'];
+         }
+-        if (!$this->commentRepo->findById($courseId, $postId, $commentId)) {
++        $comment = $this->commentRepo->findById($courseId, $postId, $commentId);
++        if (!$comment) {
+             return ['success' => false, 'error' => 'Comment not found'];
+         }
++        if (!can_manage_course_content($membership, $userId, (int) $comment['author_id'])) {
++            return ['success' => false, 'error' => 'Forbidden'];
++        }
+         $body = trim((string) ($data['body'] ?? ''));
+         if ($body === '') {
+             return ['success' => false, 'error' => 'body is required'];
+         }
+-        $this->commentRepo->update($courseId, $postId, $commentId, $body);
++        if (is_course_staff_role((string) $membership['role_in_course'])) {
++            $this->commentRepo->update($courseId, $postId, $commentId, $body);
++        } else {
++            $this->commentRepo->updateOwned($courseId, $postId, $commentId, $userId, $body);
++        }
+         return ['success' => true, 'comment' => $this->commentRepo->findById($courseId, $postId, $commentId)];
+     }
+ 
+     public function deleteHtml(int $courseId, int $postId, int $commentId): void
+     {
+-        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+-        $this->delete($courseId, $postId, $commentId);
++        $membership = require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
++        $userId = require_login($this->config, false);
++        $this->delete($courseId, $postId, $commentId, $userId, $membership);
+         redirect_to('/courses/' . $courseId . '/posts/' . $postId);
+     }
+ 
+     public function deleteApi(int $courseId, int $postId, int $commentId): void
+     {
+-        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+-        $result = $this->delete($courseId, $postId, $commentId);
++        $membership = require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
++        $userId = require_login($this->config, true);
++        $result = $this->delete($courseId, $postId, $commentId, $userId, $membership);
+         if (!$result['success']) {
+-            json_response($result, 404);
++            json_response($result, $result['error'] === 'Forbidden' ? 403 : 404);
+         }
+         json_response($result, 200);
+     }
+ 
+-    private function delete(int $courseId, int $postId, int $commentId): array
++    private function delete(int $courseId, int $postId, int $commentId, int $userId, array $membership): array
+     {
+-        if (!$this->commentRepo->findById($courseId, $postId, $commentId)) {
++        $comment = $this->commentRepo->findById($courseId, $postId, $commentId);
++        if (!$comment) {
+             return ['success' => false, 'error' => 'Comment not found'];
+         }
+-        $this->commentRepo->delete($courseId, $postId, $commentId);
++        if (!can_manage_course_content($membership, $userId, (int) $comment['author_id'])) {
++            return ['success' => false, 'error' => 'Forbidden'];
++        }
++        if (is_course_staff_role((string) $membership['role_in_course'])) {
++            $this->commentRepo->delete($courseId, $postId, $commentId);
++        } else {
++            $this->commentRepo->deleteOwned($courseId, $postId, $commentId, $userId);
++        }
+         return ['success' => true];
+     }
+ }
+diff -ruN req03_orig/educollab_php_req01/app/controllers/PostController.php req03/educollab_php_req01/app/controllers/PostController.php
+--- req03_orig/educollab_php_req01/app/controllers/PostController.php	2026-03-07 19:16:55.000000000 +0000
++++ req03/educollab_php_req01/app/controllers/PostController.php	2026-03-12 02:02:48.942481515 +0000
+@@ -73,13 +73,26 @@
+ 
+     public function getHtml(int $courseId, int $postId): void
+     {
+-        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
++        $membership = require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
++        $userId = require_login($this->config, false);
+         $course = $this->courseRepo->findById($courseId);
+         $post = $this->postRepo->findById($courseId, $postId);
+         if (!$post) {
+             http_response_code(404);
+         }
+-        render('courses/posts/show', ['title' => $post ? $post['title'] : 'Post Not Found', 'course' => $course, 'post' => $post, 'comments' => $post ? $this->commentRepo->listByPost($courseId, $postId) : [], 'comment_error' => null]);
++        $comments = $post ? $this->commentRepo->listByPost($courseId, $postId) : [];
++        foreach ($comments as &$comment) {
++            $comment['can_manage'] = can_manage_course_content($membership, $userId, (int) $comment['author_id']);
++        }
++        unset($comment);
++        render('courses/posts/show', [
++            'title' => $post ? $post['title'] : 'Post Not Found',
++            'course' => $course,
++            'post' => $post,
++            'comments' => $comments,
++            'comment_error' => null,
++            'can_manage_post' => $post ? can_manage_course_content($membership, $userId, (int) $post['author_id']) : false,
++        ]);
+     }
+ 
+     public function getApi(int $courseId, int $postId): void
+@@ -94,11 +107,17 @@
+ 
+     public function showEditForm(int $courseId, int $postId): void
+     {
+-        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
++        $membership = require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
++        $userId = require_login($this->config, false);
+         $post = $this->postRepo->findById($courseId, $postId);
+         if (!$post) {
+             http_response_code(404);
+-            render('courses/posts/show', ['title' => 'Post Not Found', 'course' => $this->courseRepo->findById($courseId), 'post' => null, 'comments' => [], 'comment_error' => null]);
++            render('courses/posts/show', ['title' => 'Post Not Found', 'course' => $this->courseRepo->findById($courseId), 'post' => null, 'comments' => [], 'comment_error' => null, 'can_manage_post' => false]);
++            return;
++        }
++        if (!can_manage_course_content($membership, $userId, (int) $post['author_id'])) {
++            http_response_code(403);
++            echo 'Forbidden';
+             return;
+         }
+         render('courses/posts/edit', ['title' => 'Edit Post', 'course' => $this->courseRepo->findById($courseId), 'post' => $post, 'error' => null]);
+@@ -106,8 +125,9 @@
+ 
+     public function updateHtml(int $courseId, int $postId): void
+     {
+-        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+-        $result = $this->update($courseId, $postId, request_data());
++        $membership = require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
++        $userId = require_login($this->config, false);
++        $result = $this->update($courseId, $postId, $userId, $membership, request_data());
+         if (!$result['success']) {
+             render('courses/posts/edit', ['title' => 'Edit Post', 'course' => $this->courseRepo->findById($courseId), 'post' => $this->postRepo->findById($courseId, $postId), 'error' => $result['error']]);
+             return;
+@@ -117,55 +137,74 @@
+ 
+     public function updateApi(int $courseId, int $postId): void
+     {
+-        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+-        $result = $this->update($courseId, $postId, request_data());
++        $membership = require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
++        $userId = require_login($this->config, true);
++        $result = $this->update($courseId, $postId, $userId, $membership, request_data());
+         if (!$result['success']) {
+-            $status = in_array($result['error'], ['Course not found', 'Post not found'], true) ? 404 : 422;
++            $status = in_array($result['error'], ['Course not found', 'Post not found'], true) ? 404 : ($result['error'] === 'Forbidden' ? 403 : 422);
+             json_response($result, $status);
+         }
+         json_response($result, 200);
+     }
+ 
+-    private function update(int $courseId, int $postId, array $data): array
++    private function update(int $courseId, int $postId, int $userId, array $membership, array $data): array
+     {
+         if (!$this->courseRepo->findById($courseId)) {
+             return ['success' => false, 'error' => 'Course not found'];
+         }
+-        if (!$this->postRepo->findById($courseId, $postId)) {
++        $post = $this->postRepo->findById($courseId, $postId);
++        if (!$post) {
+             return ['success' => false, 'error' => 'Post not found'];
+         }
++        if (!can_manage_course_content($membership, $userId, (int) $post['author_id'])) {
++            return ['success' => false, 'error' => 'Forbidden'];
++        }
+         $title = trim((string) ($data['title'] ?? ''));
+         $body = trim((string) ($data['body'] ?? ''));
+         if ($title === '' || $body === '') {
+             return ['success' => false, 'error' => 'title and body are required'];
+         }
+-        $this->postRepo->update($courseId, $postId, ['title' => $title, 'body' => $body]);
++        if (is_course_staff_role((string) $membership['role_in_course'])) {
++            $this->postRepo->update($courseId, $postId, ['title' => $title, 'body' => $body]);
++        } else {
++            $this->postRepo->updateOwned($courseId, $postId, $userId, ['title' => $title, 'body' => $body]);
++        }
+         return ['success' => true, 'post' => $this->postRepo->findById($courseId, $postId)];
+     }
+ 
+     public function deleteHtml(int $courseId, int $postId): void
+     {
+-        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+-        $this->delete($courseId, $postId);
++        $membership = require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
++        $userId = require_login($this->config, false);
++        $this->delete($courseId, $postId, $userId, $membership);
+         redirect_to('/courses/' . $courseId . '/posts');
+     }
+ 
+     public function deleteApi(int $courseId, int $postId): void
+     {
+-        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+-        $result = $this->delete($courseId, $postId);
++        $membership = require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
++        $userId = require_login($this->config, true);
++        $result = $this->delete($courseId, $postId, $userId, $membership);
+         if (!$result['success']) {
+-            json_response($result, 404);
++            json_response($result, $result['error'] === 'Forbidden' ? 403 : 404);
+         }
+         json_response($result, 200);
+     }
+ 
+-    private function delete(int $courseId, int $postId): array
++    private function delete(int $courseId, int $postId, int $userId, array $membership): array
+     {
+-        if (!$this->postRepo->findById($courseId, $postId)) {
++        $post = $this->postRepo->findById($courseId, $postId);
++        if (!$post) {
+             return ['success' => false, 'error' => 'Post not found'];
+         }
+-        $this->postRepo->delete($courseId, $postId);
++        if (!can_manage_course_content($membership, $userId, (int) $post['author_id'])) {
++            return ['success' => false, 'error' => 'Forbidden'];
++        }
++        if (is_course_staff_role((string) $membership['role_in_course'])) {
++            $this->postRepo->delete($courseId, $postId);
++        } else {
++            $this->postRepo->deleteOwned($courseId, $postId, $userId);
++        }
+         return ['success' => true];
+     }
+ }
+diff -ruN req03_orig/educollab_php_req01/app/core/Auth.php req03/educollab_php_req01/app/core/Auth.php
+--- req03_orig/educollab_php_req01/app/core/Auth.php	2026-03-07 19:16:55.000000000 +0000
++++ req03/educollab_php_req01/app/core/Auth.php	2026-03-12 02:02:48.942052797 +0000
+@@ -95,6 +95,18 @@
+     exit;
+ }
+ 
++function is_course_staff_role(string $role): bool
++{
++    return in_array($role, ['teacher', 'admin', 'assistant', 'senior-assistant'], true);
++}
++
++function can_manage_course_content(array $membership, int $userId, int $authorId): bool
++{
++    return $userId === $authorId || is_course_staff_role((string) ($membership['role_in_course'] ?? ''));
++}
++
+ function current_user_can_manage_course(array $config, MembershipRepository $membershipRepo, CourseRepository $courseRepo, int $courseId): bool
+ {
+     $membership = current_course_membership($config, $membershipRepo, $courseRepo, $courseId);
+@@ -102,5 +114,5 @@
+         return false;
+     }
+ 
+-    return in_array($membership['role_in_course'], ['teacher', 'admin'], true);
++    return is_course_staff_role((string) $membership['role_in_course']);
+ }
+diff -ruN req03_orig/educollab_php_req01/app/repositories/CommentRepository.php req03/educollab_php_req01/app/repositories/CommentRepository.php
+--- req03_orig/educollab_php_req01/app/repositories/CommentRepository.php	2026-03-07 19:16:55.000000000 +0000
++++ req03/educollab_php_req01/app/repositories/CommentRepository.php	2026-03-12 02:02:48.942280871 +0000
+@@ -57,6 +57,23 @@
+         return $row ?: null;
+     }
+ 
++    public function updateOwned(int $courseId, int $postId, int $commentId, int $authorId, string $body): bool
++    {
++        $stmt = $this->pdo->prepare(
++            'UPDATE comments SET body = :body, updated_at = :updated_at
++             WHERE course_id = :course_id AND post_id = :post_id AND comment_id = :comment_id AND author_id = :author_id'
++        );
++        return $stmt->execute([
++            ':body' => $body,
++            ':updated_at' => date('c'),
++            ':course_id' => $courseId,
++            ':post_id' => $postId,
+```
+
+2. Per-vulnerability summary
+
+**VULN-001**
+
+* files changed
+
+  * `app/controllers/PostController.php`
+  * `app/repositories/PostRepository.php`
+  * `app/core/Auth.php`
+  * `app/views/courses/posts/show.php`
+* key checks added
+
+  * Added shared helper logic to distinguish post author vs. course staff.
+  * Edit form, HTML update/delete, and API update/delete now require the caller to be either:
+
+    * the post author, or
+    * course staff (`teacher`, `admin`, `assistant`, `senior-assistant`).
+  * API now returns `403` for unauthorized post mutations.
+  * Non-staff writes are constrained at the repository layer with author-scoped `updateOwned(...)` and `deleteOwned(...)`.
+  * The post detail page only shows edit/delete controls when the viewer is authorized for that post.
+* why the vulnerability is mitigated
+
+  * A plain course member can no longer mutate another member’s post by supplying `post_id`; both controller authorization and repository author scoping block the attack path.
+
+**VULN-002**
+
+* files changed
+
+  * `app/controllers/CommentController.php`
+  * `app/repositories/CommentRepository.php`
+  * `app/core/Auth.php`
+  * `app/views/courses/posts/show.php`
+* key checks added
+
+  * Comment HTML/API update and delete now require comment author or course staff.
+  * API now returns `403` for unauthorized comment mutations.
+  * Non-staff writes are constrained with author-scoped `updateOwned(...)` and `deleteOwned(...)`.
+  * The post detail page now hides edit/delete comment forms unless the viewer is authorized for that specific comment.
+* why the vulnerability is mitigated
+
+  * A plain course member can no longer tamper with another member’s comment by supplying `comment_id`; unauthorized direct ID use is blocked server-side and the repository write path is author-scoped for non-staff callers.
+
+3. Functional verification commands (copy-paste)
+
+This ZIP does not include a bundled `tests/` directory, so there is no repository-local exact functional test command available from the archive alone.
+
+* run the full functional test suite
+
+```bash
+# No bundled functional test suite exists in this ZIP archive.
+```
+
+* run the functional tests relevant to the current requirement
+
+```bash
+# No bundled requirement-level functional test files exist in this ZIP archive.
+```
+
+* minimal functional smoke command if full suite is slow
+
+```bash
+cd educollab_php_req01 && find app public scripts config -name "*.php" -print0 | xargs -0 -n1 php -l
+```
+
+```bash
+cd educollab_php_req01 && php scripts/init.php
+```
+
+```bash
+cd educollab_php_req01 && php -S 127.0.0.1:8000 -t public
+```

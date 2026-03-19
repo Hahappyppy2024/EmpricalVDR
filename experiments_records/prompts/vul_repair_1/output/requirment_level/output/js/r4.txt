@@ -1,0 +1,358 @@
+```diff
+diff --git a/src/routes/api.js b/src/routes/api.js
+index b30eaa2..69812e8 100644
+--- a/src/routes/api.js
++++ b/src/routes/api.js
+@@ -26,14 +26,22 @@ const router = express.Router();
+ const uploadDir = path.join(__dirname, '..', '..', 'storage', 'uploads');
+ fs.mkdirSync(uploadDir, { recursive: true });
+ 
++function safeUploadFilename(originalname) {
++  // Generate server-side storage filename independent of untrusted user input.
++  // Preserve extension only.
++  const base = path.basename(String(originalname || ''));
++  const ext = path.extname(base).slice(0, 32); // bound length to avoid extremes
++  const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
++  return `${unique}${ext}`;
++}
++
+ const upload = multer({
+   storage: multer.diskStorage({
+     destination: function (req, file, cb) {
+       cb(null, uploadDir);
+     },
+     filename: function (req, file, cb) {
+-      const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}-${file.originalname}`;
+-      cb(null, unique);
++      cb(null, safeUploadFilename(file && file.originalname));
+     }
+   })
+ });
+diff --git a/src/routes/web.js b/src/routes/web.js
+index 51626ba..fd89e5f 100644
+--- a/src/routes/web.js
++++ b/src/routes/web.js
+@@ -26,14 +26,22 @@ const router = express.Router();
+ const uploadDir = path.join(__dirname, '..', '..', 'storage', 'uploads');
+ fs.mkdirSync(uploadDir, { recursive: true });
+ 
++function safeUploadFilename(originalname) {
++  // Generate server-side storage filename independent of untrusted user input.
++  // Preserve extension only.
++  const base = path.basename(String(originalname || ''));
++  const ext = path.extname(base).slice(0, 32); // bound length to avoid extremes
++  const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
++  return `${unique}${ext}`;
++}
++
+ const upload = multer({
+   storage: multer.diskStorage({
+     destination: function (req, file, cb) {
+       cb(null, uploadDir);
+     },
+     filename: function (req, file, cb) {
+-      const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}-${file.originalname}`;
+-      cb(null, unique);
++      cb(null, safeUploadFilename(file && file.originalname));
+     }
+   })
+ });
+diff --git a/src/controllers/uploadController.js b/src/controllers/uploadController.js
+index f3b91d6..b994b7a 100644
+--- a/src/controllers/uploadController.js
++++ b/src/controllers/uploadController.js
+@@ -2,6 +2,15 @@ const fs = require('fs');
+ const path = require('path');
+ const courseRepository = require('../repositories/courseRepository');
+ const uploadRepository = require('../repositories/uploadRepository');
+ 
++const uploadsDir = path.join(__dirname, '..', '..', 'storage', 'uploads');
++
++function resolveUploadPath(storageName) {
++  const base = path.resolve(uploadsDir);
++  const target = path.resolve(base, String(storageName || ''));
++  if (target === base || !target.startsWith(base + path.sep)) return null;
++  return target;
++}
++
+ function showUploadForm(req, res) {
+   const course = courseRepository.findById(Number(req.params.course_id));
+   if (!course) return res.status(404).send('Course not found');
+@@ -18,7 +27,8 @@ function createUpload(req, res) {
+   const upload = uploadRepository.createUpload({
+     course_id: courseId,
+     uploaded_by: req.currentUser.user_id,
+     original_name: req.file.originalname,
+-    storage_path: req.file.path
++    // Store only a safe relative filename. Absolute paths are rebuilt from uploadsDir.
++    storage_path: req.file.filename
+   });
+   return res.redirect(`/courses/${courseId}/uploads`);
+ }
+@@ -31,7 +41,7 @@ function apiCreateUpload(req, res) {
+   const upload = uploadRepository.createUpload({
+     course_id: courseId,
+     uploaded_by: req.currentUser.user_id,
+     original_name: req.file.originalname,
+-    storage_path: req.file.path
++    storage_path: req.file.filename
+   });
+   return res.status(201).json({ success: true, upload });
+ }
+@@ -52,7 +62,9 @@ function downloadUpload(req, res) {
+   const uploadId = Number(req.params.upload_id);
+   const upload = uploadRepository.findById(courseId, uploadId);
+   if (!upload) return res.status(404).send('Upload not found');
+-  return res.download(path.resolve(upload.storage_path), upload.original_name);
++  const abs = resolveUploadPath(upload.storage_path);
++  if (!abs) return res.status(404).send('Upload not found');
++  return res.download(abs, upload.original_name);
+ }
+ 
+ function apiDownloadUpload(req, res) {
+@@ -60,7 +72,9 @@ function apiDownloadUpload(req, res) {
+   const uploadId = Number(req.params.upload_id);
+   const upload = uploadRepository.findById(courseId, uploadId);
+   if (!upload) return res.status(404).json({ success: false, error: 'Upload not found' });
+-  return res.download(path.resolve(upload.storage_path), upload.original_name);
++  const abs = resolveUploadPath(upload.storage_path);
++  if (!abs) return res.status(404).json({ success: false, error: 'Upload not found' });
++  return res.download(abs, upload.original_name);
+ }
+ 
+ function deleteUpload(req, res) {
+@@ -69,7 +83,8 @@ function deleteUpload(req, res) {
+   const uploadId = Number(req.params.upload_id);
+   const upload = uploadRepository.findById(courseId, uploadId);
+   if (!upload) return res.status(404).send('Upload not found');
+-  if (fs.existsSync(upload.storage_path)) fs.unlinkSync(upload.storage_path);
++  const abs = resolveUploadPath(upload.storage_path);
++  if (abs && fs.existsSync(abs)) fs.unlinkSync(abs);
+   uploadRepository.deleteUpload(courseId, uploadId);
+   return res.redirect(`/courses/${courseId}/uploads`);
+ }
+@@ -78,7 +93,8 @@ function apiDeleteUpload(req, res) {
+   const uploadId = Number(req.params.upload_id);
+   const upload = uploadRepository.findById(courseId, uploadId);
+   if (!upload) return res.status(404).json({ success: false, error: 'Upload not found' });
+-  if (fs.existsSync(upload.storage_path)) fs.unlinkSync(upload.storage_path);
++  const abs = resolveUploadPath(upload.storage_path);
++  if (abs && fs.existsSync(abs)) fs.unlinkSync(abs);
+   uploadRepository.deleteUpload(courseId, uploadId);
+   return res.json({ success: true });
+ }
+diff --git a/src/controllers/submissionController.js b/src/controllers/submissionController.js
+index 2439f5c..686de91 100644
+--- a/src/controllers/submissionController.js
++++ b/src/controllers/submissionController.js
+@@ -2,6 +2,16 @@ const assignmentRepository = require('../repositories/assignmentRepository');
+ const courseRepository = require('../repositories/courseRepository');
+ const submissionRepository = require('../repositories/submissionRepository');
+ const membershipRepository = require('../repositories/membershipRepository');
++const uploadRepository = require('../repositories/uploadRepository');
++
++function validateAttachmentUploadId(courseId, rawId) {
++  if (rawId === undefined || rawId === null || String(rawId).trim() === '') return null;
++  const id = Number(rawId);
++  if (!Number.isInteger(id) || id <= 0) return { error: 'Invalid attachment upload id' };
++  const upload = uploadRepository.findById(courseId, id);
++  if (!upload) return { error: 'Attachment upload not found' };
++  return id;
++}
+ 
+ function showSubmit(req, res) {
+   const courseId = Number(req.params.course_id);
+@@ -16,16 +26,25 @@ function createSubmission(req, res) {
+   const courseId = Number(req.params.course_id);
+   const assignmentId = Number(req.params.assignment_id);
+   const { content_text, attachment_upload_id } = req.body;
+-  if (!assignmentRepository.findById(courseId, assignmentId)) return res.status(404).send('Assignment not found');
++  const assignment = assignmentRepository.findById(courseId, assignmentId);
++  if (!assignment) return res.status(404).send('Assignment not found');
++
++  const attachmentId = validateAttachmentUploadId(courseId, attachment_upload_id);
++  if (attachmentId && attachmentId.error) {
++    const course = courseRepository.findById(courseId);
++    return res.status(400).render('submission_new', { course, assignment, error: attachmentId.error });
++  }
+   const submission = submissionRepository.createSubmission({
+     assignment_id: assignmentId,
+     course_id: courseId,
+     student_id: req.currentUser.user_id,
+     content_text,
+-    attachment_upload_id: attachment_upload_id || null
++    attachment_upload_id: attachmentId || null
+   });
+   return res.redirect(`/my/submissions`);
+ }
+@@ -39,6 +58,12 @@ function apiCreateSubmission(req, res) {
+   if (!assignmentRepository.findById(courseId, assignmentId)) {
+     return res.status(404).json({ success: false, error: 'Assignment not found' });
+   }
++
++  const attachmentId = validateAttachmentUploadId(courseId, attachment_upload_id);
++  if (attachmentId && attachmentId.error) {
++    return res.status(400).json({ success: false, error: attachmentId.error });
++  }
+   const submission = submissionRepository.createSubmission({
+     assignment_id: assignmentId,
+     course_id: courseId,
+     student_id: req.currentUser.user_id,
+     content_text,
+-    attachment_upload_id: attachment_upload_id || null
++    attachment_upload_id: attachmentId || null
+   });
+   return res.status(201).json({ success: true, submission });
+ }
+@@ -53,7 +78,17 @@ function updateMySubmission(req, res) {
+   const { content_text, attachment_upload_id } = req.body;
+   const submission = submissionRepository.findById(courseId, assignmentId, submissionId);
+   if (!submission) return res.status(404).send('Submission not found');
+   if (submission.student_id !== req.currentUser.user_id) return res.status(403).send('Own submission required');
+-  submissionRepository.updateSubmission(courseId, assignmentId, submissionId, { content_text, attachment_upload_id });
++
++  const attachmentId = validateAttachmentUploadId(courseId, attachment_upload_id);
++  if (attachmentId && attachmentId.error) {
++    return res.status(400).send(attachmentId.error);
++  }
++  submissionRepository.updateSubmission(courseId, assignmentId, submissionId, {
++    content_text,
++    attachment_upload_id: attachmentId || null
++  });
+   return res.redirect('/my/submissions');
+ }
+@@ -69,10 +104,17 @@ function apiUpdateMySubmission(req, res) {
+   if (submission.student_id !== req.currentUser.user_id) {
+     return res.status(403).json({ success: false, error: 'Own submission required' });
+   }
++
++  const attachmentId = validateAttachmentUploadId(courseId, attachment_upload_id);
++  if (attachmentId && attachmentId.error) {
++    return res.status(400).json({ success: false, error: attachmentId.error });
++  }
+   const updated = submissionRepository.updateSubmission(courseId, assignmentId, submissionId, {
+-    content_text, attachment_upload_id
++    content_text,
++    attachment_upload_id: attachmentId || null
+   });
+   return res.json({ success: true, submission: updated });
+ }
+diff --git a/src/repositories/submissionRepository.js b/src/repositories/submissionRepository.js
+index 581297c..35c4c78 100644
+--- a/src/repositories/submissionRepository.js
++++ b/src/repositories/submissionRepository.js
+@@ -12,7 +12,7 @@ function findById(courseId, assignmentId, submissionId) {
+     SELECT s.*, u.username AS student_username, u.display_name AS student_display_name,
+            up.original_name AS attachment_original_name
+     FROM submissions s
+     JOIN users u ON u.user_id = s.student_id
+-    LEFT JOIN uploads up ON up.upload_id = s.attachment_upload_id
++    LEFT JOIN uploads up ON up.upload_id = s.attachment_upload_id AND up.course_id = s.course_id
+     WHERE s.course_id = ? AND s.assignment_id = ? AND s.submission_id = ?
+   `).get(courseId, assignmentId, submissionId);
+ }
+@@ -25,7 +25,7 @@ function listByAssignment(courseId, assignmentId) {
+     SELECT s.*, u.username AS student_username, u.display_name AS student_display_name,
+            up.original_name AS attachment_original_name
+     FROM submissions s
+     JOIN users u ON u.user_id = s.student_id
+-    LEFT JOIN uploads up ON up.upload_id = s.attachment_upload_id
++    LEFT JOIN uploads up ON up.upload_id = s.attachment_upload_id AND up.course_id = s.course_id
+     WHERE s.course_id = ? AND s.assignment_id = ?
+     ORDER BY s.submission_id DESC
+   `).all(courseId, assignmentId);
+@@ -38,7 +38,7 @@ function listByStudent(studentId) {
+     FROM submissions s
+     JOIN assignments a ON a.assignment_id = s.assignment_id
+     JOIN courses c ON c.course_id = s.course_id
+-    LEFT JOIN uploads up ON up.upload_id = s.attachment_upload_id
++    LEFT JOIN uploads up ON up.upload_id = s.attachment_upload_id AND up.course_id = s.course_id
+     WHERE s.student_id = ?
+     ORDER BY s.submission_id DESC
+   `).all(studentId);
+diff --git a/src/views/submission_new.ejs b/src/views/submission_new.ejs
+index a7d4487..3e45490 100644
+--- a/src/views/submission_new.ejs
++++ b/src/views/submission_new.ejs
+@@ -3,7 +3,11 @@
+ <% if (error) { %><p style="color:red;"><%= error %></p><% } %>
+ <form method="post" action="/courses/<%= course.course_id %>/assignments/<%= assignment.assignment_id %>/submissions">
+   <div><label>Content</label><textarea name="content_text"></textarea></div>
+-  <div><label>Attachment Upload ID</label><input type="text" name="attachment_upload_id"></div>
++  <div>
++    <label>Attachment Upload ID (must be from this course)</label>
++    <input type="number" name="attachment_upload_id" min="1" step="1" placeholder="optional">
++  </div>
+   <button type="submit">Submit</button>
+ </form>
+diff --git a/src/views/my_submissions.ejs b/src/views/my_submissions.ejs
+index 9c48bc2..08c7528 100644
+--- a/src/views/my_submissions.ejs
++++ b/src/views/my_submissions.ejs
+@@ -6,7 +6,7 @@
+       <strong><%= s.course_title %></strong> / <strong><%= s.assignment_title %></strong> — <%= s.content_text %>
+       <form method="post" action="/courses/<%= s.course_id %>/assignments/<%= s.assignment_id %>/submissions/<%= s.submission_id %>">
+         <input type="text" name="content_text" value="<%= s.content_text %>">
+-        <input type="text" name="attachment_upload_id" value="<%= s.attachment_upload_id || '' %>">
++        <input type="number" name="attachment_upload_id" min="1" step="1" value="<%= s.attachment_upload_id || '' %>" placeholder="optional">
+         <button type="submit">Update</button>
+       </form>
+     </li>
+   <% }) %>
+```
+
+## Per-vulnerability summary
+
+### VULN-001 (Path Traversal)
+
+* **Files changed**
+
+  * `src/routes/api.js`
+  * `src/routes/web.js`
+  * `src/controllers/uploadController.js`
+* **Key checks added**
+
+  * Multer now generates a server-side filename (`safeUploadFilename`) and does **not** concatenate `file.originalname` into the storage filename.
+  * Upload records now store only `req.file.filename` (relative storage name), not `req.file.path` (absolute path).
+  * Download/delete rebuild absolute paths from the known `storage/uploads` directory and enforce containment via `resolveUploadPath` (returns null if outside uploads dir).
+* **Why mitigated**
+
+  * Path separators in the user’s original filename no longer influence where the file is written.
+  * Even if a malicious/legacy `storage_path` exists in DB, download/delete refuse paths that resolve outside the uploads directory.
+
+### VULN-002 (IDOR: cross-course `attachment_upload_id`)
+
+* **Files changed**
+
+  * `src/controllers/submissionController.js`
+  * `src/repositories/submissionRepository.js`
+  * `src/views/submission_new.ejs`
+  * `src/views/my_submissions.ejs`
+* **Key checks added**
+
+  * On create/update, `attachment_upload_id` is validated server-side:
+
+    * must be a positive integer (if provided)
+    * must exist in the **same course** (`uploadRepository.findById(courseId, id)` scopes by `course_id`)
+  * SQL joins to `uploads` are constrained by both `upload_id` **and** `course_id` to prevent cross-course metadata leakage.
+* **Why mitigated**
+
+  * A submission can no longer reference an upload from another course (the controller rejects it, and the repository join won’t reveal metadata across courses even if old/bad data exists).
+
+## Functional verification commands (copy-paste)
+
+```bash
+# install deps (if needed)
+npm install
+
+# run the full functional test suite (Node test runner default)
+node --test
+
+# run functional tests relevant to the current requirement (example pattern if you scope tests by folder/name)
+node --test tests/functional --test-name-pattern "upload|submission|assignment"
+
+# optional minimal smoke (starts the app; stop with Ctrl+C)
+SESSION_SECRET="test-session-secret" node app.js
+```
+
+If the repo’s functional tests use a different entrypoint (e.g., `tests/api.functional.test.js`), replace the middle command with the exact file path you already use (e.g., `node --test tests/api.functional.test.js`).

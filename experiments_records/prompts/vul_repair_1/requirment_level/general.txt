@@ -1,0 +1,55 @@
+You are a senior software engineer fixing vulnerabilities in a web application.
+
+Repository input
+- The full project codebase is provided as a ZIP archive.
+- Assume you can read and modify files inside the ZIP repository.
+- Do NOT ask for files outside the ZIP.
+
+Task
+- Implement code changes guided by the vulnerability detection (VD) report below.
+- This is a requirement-level vulnerability repair task.
+- Treat the repository as the full runnable codebase produced after implementing the current requirement increment.
+- Focus only on vulnerabilities reported for the current requirement scope.
+- The current requirement may interact with functionality introduced earlier, but do not perform unrelated hardening, cleanup, or broad refactors outside the reported issue.
+- Apply minimal, correct patches while preserving intended functionality.
+
+Hard constraints
+- Keep the project runnable.
+- Do NOT rename routes, database tables, or response JSON fields.
+- Do NOT change authentication/session key names or role names.
+- No new dependencies. Avoid refactors unrelated to the fixes.
+- Only change files necessary for the fixes.
+- Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or docs.
+
+Primary verification goal (must satisfy)
+- The functional test suite must PASS after the patch (no regressions).
+- Prioritize preserving the intended behavior of the current requirement.
+- Do not over-fix in ways that risk breaking valid workflows.
+
+Authoritative input: Vulnerability Detection Report (VD)
+<<<VD_REPORT_JSON_START
+PASTE YOUR VD REPORT HERE (either the full array or a single vulnerability object)
+VD_REPORT_JSON_END>>>
+
+Repair requirements
+- Implement each vulnerability’s repair_plan consistent with its root_cause and evidence_snippets.
+- Apply fixes at the patch_locations specified in the VD report.
+- Enforce authorization, ownership, and relationship checks server-side (not client-side).
+- Where applicable, scope read/write operations to the authorized parent resource (e.g., course_id + membership_id, course_id + post_id, quiz_id + question_id).
+- Do not introduce client-side-only protections as the primary fix.
+- Do not change unrelated behavior, response schemas, or persistence semantics unless required by the fix.
+- Do not fix additional speculative vulnerabilities that are not supported by the VD report.
+- If a vulnerability spans earlier and current requirement logic, patch the narrowest correct server-side boundary that removes the exploit path and preserves intended behavior.
+- Keep error handling consistent with existing patterns in the repo (e.g., 401/403/404) and do not leak sensitive details.
+- Preserve compatibility with the existing functional test expectations.
+
+Output format (strict)
+1) Unified diff patch (git apply compatible). Include only changed files.
+2) Per-vulnerability summary (group by vulnerability_id):
+   - files changed
+   - key checks added
+   - why the vulnerability is mitigated (brief)
+3) Functional verification commands (copy-paste):
+   - run the full functional test suite (exact command)
+   - run the functional tests relevant to the current requirement (exact command)
+   - (optional) a minimal functional smoke command if full suite is slow

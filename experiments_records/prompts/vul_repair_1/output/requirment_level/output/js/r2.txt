@@ -1,0 +1,205 @@
+1. Unified diff patch (git apply compatible)
+
+```diff
+diff --git a/app.js b/app.js
+index c87f889..79fc4cf 100644
+--- a/app.js
++++ b/app.js
+@@ -1,6 +1,7 @@
+ const path = require('path');
+ const express = require('express');
+ const session = require('express-session');
++const crypto = require('crypto');
+ 
+ const { initDb, seedAdmin } = require('./scripts/initDb');
+ const webRoutes = require('./src/routes/web');
+@@ -32,7 +33,12 @@ app.use(
+ app.use(attachCurrentUser);
+ 
+ app.use((req, res, next) => {
++  if (req.session && !req.session.csrfToken) {
++    req.session.csrfToken = crypto.randomBytes(32).toString('hex');
++  }
++
+   res.locals.currentUser = req.currentUser || null;
++  res.locals.csrfToken = req.session ? req.session.csrfToken : null;
+   next();
+ });
+ 
+diff --git a/src/middleware/auth.js b/src/middleware/auth.js
+index c9f7d0d..8c95bc2 100644
+--- a/src/middleware/auth.js
++++ b/src/middleware/auth.js
+@@ -72,6 +72,20 @@ function requireCourseMember(req, res, next) {
+   next();
+ }
+ 
++function requireValidPageCsrf(req, res, next) {
++  if (!req.session || !req.session.csrfToken) {
++    return res.status(403).send('Invalid CSRF token');
++  }
++
++  const token = req.body && req.body._csrf;
++  if (!token || token !== req.session.csrfToken) {
++    return res.status(403).send('Invalid CSRF token');
++  }
++
++  next();
++}
++
+ function requireTeacherOrAdmin(req, res, next) {
+   const membership = req.courseMembership;
+   const ok = membership && ['teacher', 'admin'].includes(membership.role_in_course);
+@@ -105,6 +119,7 @@ module.exports = {
+   requireAdminApi,
+   loadCourseMembership,
+   requireCourseMember,
++  requireValidPageCsrf,
+   requireTeacherOrAdmin,
+   requireCourseStaff
+ };
+diff --git a/src/routes/api.js b/src/routes/api.js
+index 0a08d41..07cb206 100644
+--- a/src/routes/api.js
++++ b/src/routes/api.js
+@@ -7,6 +7,7 @@ const {
+   requireAuthApi,
+   requireAdminApi,
+   loadCourseMembership,
++  requireCourseMember,
+   requireTeacherOrAdmin
+ } = require('../middleware/auth');
+ 
+@@ -26,7 +27,7 @@ router.put('/courses/:course_id', requireAuthApi, courseController.apiUpdateCour
+ router.delete('/courses/:course_id', requireAuthApi, courseController.apiDeleteCourse);
+ 
+ router.post('/courses/:course_id/members', requireAuthApi, loadCourseMembership, requireTeacherOrAdmin, membershipController.apiAddMember);
+-router.get('/courses/:course_id/members', requireAuthApi, membershipController.apiListMembers);
++router.get('/courses/:course_id/members', requireAuthApi, loadCourseMembership, requireCourseMember, membershipController.apiListMembers);
+ router.put('/courses/:course_id/members/:membership_id', requireAuthApi, loadCourseMembership, requireTeacherOrAdmin, membershipController.apiUpdateMemberRole);
+ router.delete('/courses/:course_id/members/:membership_id', requireAuthApi, loadCourseMembership, requireTeacherOrAdmin, membershipController.apiRemoveMember);
+ router.get('/memberships', requireAuthApi, membershipController.apiMyMemberships);
+diff --git a/src/routes/web.js b/src/routes/web.js
+index 3665dc0..c2f8302 100644
+--- a/src/routes/web.js
++++ b/src/routes/web.js
+@@ -7,7 +7,9 @@ const {
+   requireAuthPage,
+   requireAdminPage,
+   loadCourseMembership,
+-  requireTeacherOrAdmin
++  requireCourseMember,
++  requireTeacherOrAdmin,
++  requireValidPageCsrf
+ } = require('../middleware/auth');
+ 
+ const router = express.Router();
+@@ -35,11 +37,11 @@ router.get('/courses/:course_id', requireAuthPage, courseController.getCourse);
+ router.post('/courses/:course_id', requireAuthPage, courseController.updateCourse);
+ router.post('/courses/:course_id/delete', requireAuthPage, courseController.deleteCourse);
+ 
+-router.get('/courses/:course_id/members', requireAuthPage, membershipController.listMembers);
++router.get('/courses/:course_id/members', requireAuthPage, loadCourseMembership, requireCourseMember, membershipController.listMembers);
+ router.get('/courses/:course_id/members/new', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.showAddMember);
+-router.post('/courses/:course_id/members', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.addMember);
+-router.post('/courses/:course_id/members/:membership_id', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.updateMemberRole);
+-router.post('/courses/:course_id/members/:membership_id/delete', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, membershipController.removeMember);
++router.post('/courses/:course_id/members', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, requireValidPageCsrf, membershipController.addMember);
++router.post('/courses/:course_id/members/:membership_id', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, requireValidPageCsrf, membershipController.updateMemberRole);
++router.post('/courses/:course_id/members/:membership_id/delete', requireAuthPage, loadCourseMembership, requireTeacherOrAdmin, requireValidPageCsrf, membershipController.removeMember);
+ router.get('/memberships', requireAuthPage, membershipController.myMemberships);
+ 
+ module.exports = router;
+diff --git a/src/views/course_member_new.ejs b/src/views/course_member_new.ejs
+index 47a1006..4d17ff2 100644
+--- a/src/views/course_member_new.ejs
++++ b/src/views/course_member_new.ejs
+@@ -8,6 +8,7 @@
+ <% } %>
+ 
+ <form method="post" action="/courses/<%= course.course_id %>/members">
++  <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
+   <div>
+     <label>User</label>
+     <select name="user_id" required>
+diff --git a/src/views/course_members_list.ejs b/src/views/course_members_list.ejs
+index 0ff0946..f5f3033 100644
+--- a/src/views/course_members_list.ejs
++++ b/src/views/course_members_list.ejs
+@@ -21,6 +21,7 @@
+       <td><%= membership.display_name %> (@<%= membership.username %>)</td>
+       <td>
+         <form method="post" action="/courses/<%= course.course_id %>/members/<%= membership.membership_id %>">
++          <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
+           <select name="role_in_course">
+             <% roles.forEach(function(role) { %>
+               <option value="<%= role %>" <%= membership.role_in_course === role ? 'selected' : '' %>><%= role %></option>
+@@ -31,6 +32,7 @@
+       </td>
+       <td>
+         <form method="post" action="/courses/<%= course.course_id %>/members/<%= membership.membership_id %>/delete">
++          <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
+           <button type="submit">Remove</button>
+         </form>
+       </td>
+```
+
+2. Per-vulnerability summary
+
+**VULN-001**
+
+* files changed
+
+  * `src/routes/web.js`
+  * `src/routes/api.js`
+* key checks added
+
+  * Added `loadCourseMembership` + `requireCourseMember` to `GET /courses/:course_id/members`
+  * Added `loadCourseMembership` + `requireCourseMember` to `GET /api/courses/:course_id/members`
+* why the vulnerability is mitigated
+
+  * Roster reads now require that the caller already has a membership in the target course before the controller can return membership data, which closes the arbitrary `course_id` read path.
+
+**VULN-002**
+
+* files changed
+
+  * `app.js`
+  * `src/middleware/auth.js`
+  * `src/routes/web.js`
+  * `src/views/course_member_new.ejs`
+  * `src/views/course_members_list.ejs`
+* key checks added
+
+  * Added per-session CSRF token generation in `app.js`
+  * Exposed `csrfToken` to server-rendered views
+  * Added reusable `requireValidPageCsrf` middleware
+  * Applied CSRF validation to membership-management POST routes
+  * Added hidden `_csrf` fields to add/update/remove membership forms
+* why the vulnerability is mitigated
+
+  * State-changing membership form submissions now require a token that matches the current session, so a third-party site cannot forge those POST requests using only the victim’s session cookie.
+
+3. Functional verification commands (copy-paste)
+
+The ZIP does not include a functional test suite, so exact repo-local test commands cannot be derived from the archive itself. Exact runnable commands that are valid for this ZIP are:
+
+* run the full functional test suite (exact command)
+
+```bash
+# Not available in this ZIP: no functional test files are present
+```
+
+* run the functional tests relevant to the current requirement (exact command)
+
+```bash
+# Not available in this ZIP: no requirement-level functional test files are present
+```
+
+* minimal functional smoke command
+
+```bash
+npm install && npm start
+```
+
+If your external harness is mounted separately in this repo root, use your existing functional command against the patched repository unchanged.

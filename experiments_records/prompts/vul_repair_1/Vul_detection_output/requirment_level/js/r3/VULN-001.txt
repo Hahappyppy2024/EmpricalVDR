@@ -1,0 +1,81 @@
+{
+"vulnerability_id": "VULN-001",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.8,
+"severity_level": "high",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "Any authenticated course member can edit or delete another member’s post by supplying the target post_id. This allows unauthorized modification or removal of other users’ discussion content within the same course.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/routes/api.js",
+"line_start": 37,
+"line_end": 41,
+"function_name": null,
+"code": "router.post('/courses/:course_id/posts', requireAuthApi, loadCourseMembership, requireCourseMember, postController.apiCreatePost);\nrouter.get('/courses/:course_id/posts/:post_id', requireAuthApi, loadCourseMembership, requireCourseMember, postController.apiGetPost);\nrouter.put('/courses/:course_id/posts/:post_id', requireAuthApi, loadCourseMembership, requireCourseMember, postController.apiUpdatePost);\nrouter.delete('/courses/:course_id/posts/:post_id', requireAuthApi, loadCourseMembership, requireCourseMember, postController.apiDeletePost);",
+"reason": "Post update/delete routes require only course membership and do not enforce post ownership or a staff/moderation role."
+},
+{
+"file_path": "src/controllers/postController.js",
+"line_start": 130,
+"line_end": 175,
+"function_name": "updatePost / apiUpdatePost",
+"code": "const existing = ensurePost(req.params.course_id, req.params.post_id);\n...\npostRepository.updatePost(req.params.post_id, { title, body: body || '' });\n...\nconst post = postRepository.updatePost(req.params.post_id, { title, body: body || '' });",
+"reason": "The controller verifies only that the post belongs to the course, but never checks that req.currentUser.user_id matches existing.author_id (or that the user is an authorized moderator) before updating the post."
+},
+{
+"file_path": "src/repositories/postRepository.js",
+"line_start": 48,
+"line_end": 55,
+"function_name": "updatePost",
+"code": "function updatePost(postId, { title, body }) {\n  db.prepare(`\n    UPDATE posts\n    SET title = ?, body = ?, updated_at = CURRENT_TIMESTAMP\n    WHERE post_id = ?\n  `).run(title, body || '', postId);\n  return findById(postId);\n}",
+"reason": "The write path is scoped only by post_id and does not constrain by author_id, so a course member can modify another user's post if they know the post_id."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Post mutation endpoints authorize only at the course-membership level and omit an ownership or moderation authorization check for the targeted post resource.",
+"patch_locations": [
+{
+"file_path": "src/controllers/postController.js",
+"line_start": 130,
+"line_end": 191,
+"function_name": "updatePost / apiUpdatePost / deletePost / apiDeletePost"
+},
+{
+"file_path": "src/repositories/postRepository.js",
+"line_start": 48,
+"line_end": 60,
+"function_name": "updatePost / deletePost"
+}
+],
+"repair_plan": "Before updating or deleting a post, load the post record and enforce that the caller is the post author or has an explicitly authorized moderation role for that course (e.g., teacher/admin). For non-moderator edits, scope repository updates/deletes by both post_id and author_id (and course_id where applicable) so possession of a post_id alone cannot modify another user's content.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

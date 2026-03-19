@@ -1,0 +1,170 @@
+
+
+# Requirement-Level Prompt (EduCollab, Python/Flask/SQLite/Jinja2 + MVC) — Requirement 04: Assignment + Submission + Upload (Function-Only)
+
+You are a senior Python engineer. Update the existing Python web application using an MVC-style architecture. Implement ONLY the functional requirements below and keep everything else minimal and runnable.
+
+## Hard constraints
+
+* This is an incremental requirement-level update.
+* Start from the existing runnable repository produced earlier.
+* Preserve all existing working functionality.
+* Do not refactor unrelated modules.
+* The app must remain runnable with `python app.py` or `flask run`.
+* Keep dependencies minimal and standard.
+* Use the existing SQLite setup consistently.
+* Use the existing session/auth logic consistently.
+* Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or documentation.
+* HTML pages and JSON API under `/api` MUST use the SAME database and the SAME session/auth logic.
+* Do not rename existing routes, tables, or session keys unless explicitly required below.
+* Do not rewrite previously implemented modules.
+* Only add the minimum code needed for this requirement.
+* Keep all previously implemented pages and APIs working.
+
+## Language/Framework
+
+* Python 3.11+
+* Flask
+* SQLite: use `sqlite3` from the standard library
+* Sessions: Flask session
+* Server-rendered templates: Jinja2
+* For file upload, use Flask/Werkzeug standard file handling
+
+## Architecture requirement (MVC, function-only; no fixed file paths)
+
+* Model/Repository: DB access only
+* Controller: Flask route handlers calling repositories
+* View: server-rendered templates
+* Extend the existing app entry and routing cleanly
+
+## Scope for this requirement
+
+* Assignment
+* Submission
+* Upload
+
+## Minimum data model to add in this requirement
+
+* Assignment(assignment_id, course_id, created_by, title, description, due_at, created_at, updated_at)
+* Submission(submission_id, assignment_id, course_id, student_id, content_text, attachment_upload_id nullable, created_at, updated_at)
+* Upload(upload_id, course_id, uploaded_by, original_name, storage_path, created_at)
+
+## Functional Requirements (function-only)
+
+### H) Assignments (staff manage; any logged-in course member can view)
+
+* FR-AS1 create_assignment()
+
+  * HTML: GET /courses/:course_id/assignments/new, POST /courses/:course_id/assignments
+  * API:  POST /api/courses/:course_id/assignments {title, description, due_at}
+* FR-AS2 list_assignments()
+
+  * HTML: GET /courses/:course_id/assignments
+  * API:  GET /api/courses/:course_id/assignments
+* FR-AS3 get_assignment()
+
+  * HTML: GET /courses/:course_id/assignments/:assignment_id
+  * API:  GET /api/courses/:course_id/assignments/:assignment_id
+* FR-AS4 update_assignment()
+
+  * HTML: GET /courses/:course_id/assignments/:assignment_id/edit, POST /courses/:course_id/assignments/:assignment_id
+  * API:  PUT /api/courses/:course_id/assignments/:assignment_id {title, description, due_at}
+* FR-AS5 delete_assignment()
+
+  * HTML: POST /courses/:course_id/assignments/:assignment_id/delete
+  * API:  DELETE /api/courses/:course_id/assignments/:assignment_id
+
+### I) Submissions (student submit; staff view all)
+
+* FR-SB1 create_submission()
+
+  * HTML: GET /courses/:course_id/assignments/:assignment_id/submit, POST /courses/:course_id/assignments/:assignment_id/submissions
+  * API:  POST /api/courses/:course_id/assignments/:assignment_id/submissions {content_text, attachment_upload_id?}
+* FR-SB2 update_my_submission()
+
+  * HTML: POST /courses/:course_id/assignments/:assignment_id/submissions/:submission_id
+  * API:  PUT /api/courses/:course_id/assignments/:assignment_id/submissions/:submission_id {content_text, attachment_upload_id?}
+* FR-SB3 list_my_submissions()
+
+  * HTML: GET /my/submissions (optional but preferred)
+  * API:  GET /api/my/submissions
+* FR-SB4 list_submissions_for_assignment()
+
+  * HTML: GET /courses/:course_id/assignments/:assignment_id/submissions
+  * API:  GET /api/courses/:course_id/assignments/:assignment_id/submissions
+
+### J) Uploads (staff manage; any logged-in course member can view/download)
+
+* FR-UP1 upload_file()
+
+  * HTML: GET /courses/:course_id/uploads/new, POST /courses/:course_id/uploads
+  * API:  POST /api/courses/:course_id/uploads (multipart file)
+* FR-UP2 list_uploads()
+
+  * HTML: GET /courses/:course_id/uploads
+  * API:  GET /api/courses/:course_id/uploads
+* FR-UP3 download_upload()
+
+  * HTML: GET /courses/:course_id/uploads/:upload_id/download
+  * API:  GET /api/courses/:course_id/uploads/:upload_id/download
+* FR-UP4 delete_upload()
+
+  * HTML: POST /courses/:course_id/uploads/:upload_id/delete
+  * API:  DELETE /api/courses/:course_id/uploads/:upload_id
+
+## Role rules to implement in this requirement
+
+* teacher/assistant/senior-assistant can create/update/delete assignments
+* any logged-in course member can view assignment list/detail
+* student can create/update/view own submissions
+* teacher/assistant/senior-assistant can view all submissions for an assignment
+* teacher/assistant/senior-assistant can upload/delete files
+* any logged-in course member can list and download uploads
+
+## Behavior and implementation rules
+
+* Preserve all routes and behavior from earlier requirements.
+* Keep route naming exactly as specified above.
+* Reuse existing membership and role checks.
+* `/api` routes must return JSON, except binary file download responses.
+* HTML routes may redirect after successful form submissions.
+* Keep views minimal.
+* Store uploaded files on local disk and record metadata in SQLite.
+* Keep upload handling minimal and runnable.
+* Do not implement question bank, quizzes, or attempts in this requirement.
+
+## Suggested implementation details
+
+* Extend DB initialization to create the Assignment, Submission, and Upload tables if they do not exist.
+* Use `sqlite3` consistently for all assignment, submission, and upload metadata queries.
+* Reuse the existing course-scoped authorization helpers or decorator-style guards from earlier requirements.
+* Continue using the same session key for the current user established earlier.
+* Parse JSON request bodies consistently for API `PUT` and `DELETE` routes.
+* Use Flask/Werkzeug file upload handling via `request.files`.
+* Save uploaded files to a local directory such as `storage/uploads/` and store the relative storage path in the `Upload` table.
+* Use `send_file()` or `send_from_directory()` for downloads.
+* Keep upload handling minimal, functional, and compatible with local Flask execution.
+* Minimal HTML forms are sufficient, but they must be functional.
+
+## Deliverables (must include)
+
+1. Updated runnable multi-file codebase.
+2. DB migration/init logic extended to include Assignment, Submission, and Upload tables.
+3. Minimal Jinja2 templates for each major HTML page listed in this requirement.
+4. JSON responses for all `/api` endpoints in this requirement.
+5. Clear folder structure showing MVC separation.
+6. A short README update with:
+
+   * how to upload a file
+   * where uploaded files are stored
+   * example curl commands for key API calls in this requirement
+
+## Output format (MUST follow exactly)
+
+A) Repository folder structure
+B) Full contents of all changed/new source files
+C) Database schema / init changes
+D) Run instructions
+E) Example curl commands
+F) Zip file includes all files
+

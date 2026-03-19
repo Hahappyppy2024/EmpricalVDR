@@ -1,0 +1,71 @@
+{
+  "vulnerability_id": "VULN-006",
+  "vulnerability_type_code": 5,
+  "vulnerability_type": "Insecure File Upload",
+  "cwe_id": "CWE-434",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.4,
+  "severity_level": "high",
+  "confidence_score": 95,
+  "confidence_level": "high",
+  "summary": "Course staff can upload arbitrary file types, including HTML or JavaScript-bearing content, and those files are then served from the application's origin. This enables stored active-content delivery and can lead to same-origin XSS against users who open the uploaded file.",
+  "entry_points": [
+    {
+      "type": "file upload handler",
+      "method": "POST",
+      "route": "/api/courses/:course_id/uploads"
+    },
+    {
+      "type": "file upload handler",
+      "method": "POST",
+      "route": "/courses/:course_id/uploads"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/controllers/uploadController.js",
+      "line_start": 9,
+      "line_end": 17,
+      "function_name": null,
+      "code": "const storage = multer.diskStorage({\n  destination: (req, file, cb) => cb(null, storageDir),\n  filename: (req, file, cb) => {\n    const safe = `${Date.now()}-${Math.random().toString(16).slice(2)}-${file.originalname}`;\n    cb(null, safe);\n  }\n});\n\nconst uploader = multer({ storage });",
+      "reason": "The upload handler has no file type allowlist, no content validation, and preserves the original filename extension in the stored file."
+    },
+    {
+      "file_path": "src/controllers/uploadController.js",
+      "line_start": 23,
+      "line_end": 35,
+      "function_name": "uploadFile",
+      "code": "if (!req.file) {\n  ...\n}\nconst rec = uploadRepo.createUpload({\n  course_id,\n  uploaded_by: me.user_id,\n  original_name: req.file.originalname,\n  storage_path: req.file.filename\n});",
+      "reason": "Any uploaded file accepted by multer is stored and registered without server-side restrictions on active content."
+    },
+    {
+      "file_path": "app.js",
+      "line_start": 34,
+      "line_end": 35,
+      "function_name": null,
+      "code": "app.use('/uploads', express.static(path.join(__dirname, 'data', 'uploads')));",
+      "reason": "Uploaded files are served directly from the application origin, turning unrestricted file upload into active-content delivery."
+    }
+  ],
+  "root_cause_code": 1,
+  "root_cause": "The upload pipeline accepts untrusted file content without validating allowed types or neutralizing active content, then exposes the uploaded bytes directly to browsers from the application origin.",
+  "patch_locations": [
+    {
+      "file_path": "src/controllers/uploadController.js",
+      "line_start": 9,
+      "line_end": 35,
+      "function_name": "uploader / uploadFile"
+    },
+    {
+      "file_path": "app.js",
+      "line_start": 34,
+      "line_end": 35,
+      "function_name": null
+    }
+  ],
+  "repair_plan": "Restrict uploads to an explicit allowlist of safe file types needed by the application, validate both MIME type and server-side content signature, normalize stored filenames so active extensions are not preserved when unnecessary, and serve uploaded files through a controlled download endpoint with safe Content-Type and Content-Disposition headers rather than direct static hosting.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

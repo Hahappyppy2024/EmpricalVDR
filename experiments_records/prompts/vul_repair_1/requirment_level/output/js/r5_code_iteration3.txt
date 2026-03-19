@@ -1,0 +1,913 @@
+报错原因已经定位了：
+
+* 之前把 `GET /api/courses/:course_id/questions` 和 `GET /api/courses/:course_id/questions/:question_id` 直接改成了 **staff-only**
+* 但你的 functional test 仍然要求 **course member 可以读题目/quiz 内容**，只是**不能看到 answer_json**
+
+所以正确修法不是“整个端点 403”，而是：
+
+* **题库 list/detail 仍允许 course member 访问**
+* 对 **非 staff** 返回 **student-safe projection**，去掉 `answer_json`
+* quiz detail 也同样对非 staff 去掉 `answer_json`
+* 提交答案时继续做 `question_id ∈ quiz_questions` 校验
+
+下面给你的是**修正后的完整文件全文**。把这些文件完整覆盖即可。
+
+---
+
+## 1) `src/controllers/questionController.js`
+
+```javascript
+const courseRepository = require('../repositories/courseRepository');
+const questionRepository = require('../repositories/questionRepository');
+const membershipRepository = require('../repositories/membershipRepository');
+
+function canViewAnswers(courseId, userId) {
+  const membership = membershipRepository.findByCourseAndUser(courseId, userId);
+  const role = membership && membership.role_in_course;
+  return ['teacher', 'admin', 'assistant', 'senior-assistant'].includes(role);
+}
+
+function showNewQuestion(req, res) {
+  const course = courseRepository.findById(Number(req.params.course_id));
+  if (!course) return res.status(404).send('Course not found');
+  res.render('question_new', { course, error: null });
+}
+
+function createQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const course = courseRepository.findById(courseId);
+  if (!course) return res.status(404).send('Course not found');
+  const { qtype, prompt, options_json, answer_json } = req.body;
+  if (!qtype || !prompt) return res.status(400).render('question_new', { course, error: 'qtype and prompt are required.' });
+  questionRepository.createQuestion({ course_id: courseId, created_by: req.currentUser.user_id, qtype, prompt, options_json, answer_json });
+  return res.redirect(`/courses/${courseId}/questions`);
+}
+
+function apiCreateQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const { qtype, prompt, options_json, answer_json } = req.body;
+  if (!qtype || !prompt) return res.status(400).json({ success: false, error: 'qtype and prompt are required' });
+  const question = questionRepository.createQuestion({ course_id: courseId, created_by: req.currentUser.user_id, qtype, prompt, options_json, answer_json });
+  return res.status(201).json({ success: true, question });
+}
+
+function listQuestions(req, res) {
+  const courseId = Number(req.params.course_id);
+  const course = courseRepository.findById(courseId);
+  if (!course) return res.status(404).send('Course not found');
+  const questions = canViewAnswers(courseId, req.currentUser.user_id)
+    ? questionRepository.listByCourse(courseId)
+    : questionRepository.listByCourseSafe(courseId);
+  res.render('questions_list', { course, questions });
+}
+
+function apiListQuestions(req, res) {
+  const courseId = Number(req.params.course_id);
+  const questions = canViewAnswers(courseId, req.currentUser.user_id)
+    ? questionRepository.listByCourse(courseId)
+    : questionRepository.listByCourseSafe(courseId);
+  res.json({ success: true, questions });
+}
+
+function getQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const questionId = Number(req.params.question_id);
+  const course = courseRepository.findById(courseId);
+  const question = canViewAnswers(courseId, req.currentUser.user_id)
+    ? questionRepository.findById(courseId, questionId)
+    : questionRepository.findByIdSafe(courseId, questionId);
+  if (!course || !question) return res.status(404).send('Question not found');
+  res.render('question_show', {
+    course,
+    question,
+    canViewAnswerJson: canViewAnswers(courseId, req.currentUser.user_id)
+  });
+}
+
+function apiGetQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const questionId = Number(req.params.question_id);
+  const question = canViewAnswers(courseId, req.currentUser.user_id)
+    ? questionRepository.findById(courseId, questionId)
+    : questionRepository.findByIdSafe(courseId, questionId);
+  if (!question) return res.status(404).json({ success: false, error: 'Question not found' });
+  res.json({ success: true, question });
+}
+
+function showEditQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const questionId = Number(req.params.question_id);
+  const course = courseRepository.findById(courseId);
+  const question = questionRepository.findById(courseId, questionId);
+  if (!course || !question) return res.status(404).send('Question not found');
+  res.render('question_edit', { course, question, error: null });
+}
+
+function updateQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const questionId = Number(req.params.question_id);
+  const course = courseRepository.findById(courseId);
+  const existing = questionRepository.findById(courseId, questionId);
+  if (!course || !existing) return res.status(404).send('Question not found');
+  const { qtype, prompt, options_json, answer_json } = req.body;
+  if (!qtype || !prompt) return res.status(400).render('question_edit', { course, question: existing, error: 'qtype and prompt are required.' });
+  questionRepository.updateQuestion(courseId, questionId, { qtype, prompt, options_json, answer_json });
+  return res.redirect(`/courses/${courseId}/questions/${questionId}`);
+}
+
+function apiUpdateQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const questionId = Number(req.params.question_id);
+  const existing = questionRepository.findById(courseId, questionId);
+  if (!existing) return res.status(404).json({ success: false, error: 'Question not found' });
+  const { qtype, prompt, options_json, answer_json } = req.body;
+  if (!qtype || !prompt) return res.status(400).json({ success: false, error: 'qtype and prompt are required' });
+  const question = questionRepository.updateQuestion(courseId, questionId, { qtype, prompt, options_json, answer_json });
+  return res.json({ success: true, question });
+}
+
+function deleteQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const questionId = Number(req.params.question_id);
+  if (!questionRepository.findById(courseId, questionId)) return res.status(404).send('Question not found');
+  questionRepository.deleteQuestion(courseId, questionId);
+  return res.redirect(`/courses/${courseId}/questions`);
+}
+
+function apiDeleteQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const questionId = Number(req.params.question_id);
+  if (!questionRepository.findById(courseId, questionId)) return res.status(404).json({ success: false, error: 'Question not found' });
+  questionRepository.deleteQuestion(courseId, questionId);
+  return res.json({ success: true });
+}
+
+module.exports = {
+  showNewQuestion, createQuestion, apiCreateQuestion,
+  listQuestions, apiListQuestions,
+  getQuestion, apiGetQuestion,
+  showEditQuestion, updateQuestion, apiUpdateQuestion,
+  deleteQuestion, apiDeleteQuestion
+};
+```
+
+---
+
+## 2) `src/repositories/questionRepository.js`
+
+```javascript
+const { db } = require('../db');
+
+function createQuestion({ course_id, created_by, qtype, prompt, options_json, answer_json }) {
+  const result = db.prepare(`
+    INSERT INTO questions (course_id, created_by, qtype, prompt, options_json, answer_json)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(course_id, created_by, qtype, prompt, options_json || null, answer_json || null);
+  return findById(course_id, result.lastInsertRowid);
+}
+
+function listByCourse(courseId) {
+  return db.prepare(`
+    SELECT q.*, u.username AS creator_username, u.display_name AS creator_display_name
+    FROM questions q
+    JOIN users u ON u.user_id = q.created_by
+    WHERE q.course_id = ?
+    ORDER BY q.question_id DESC
+  `).all(courseId);
+}
+
+function findById(courseId, questionId) {
+  return db.prepare(`
+    SELECT q.*, u.username AS creator_username, u.display_name AS creator_display_name
+    FROM questions q
+    JOIN users u ON u.user_id = q.created_by
+    WHERE q.course_id = ? AND q.question_id = ?
+  `).get(courseId, questionId);
+}
+
+function sanitizeQuestion(question) {
+  if (!question) return question;
+  const { answer_json, ...safeQuestion } = question;
+  return safeQuestion;
+}
+
+function listByCourseSafe(courseId) {
+  return listByCourse(courseId).map(sanitizeQuestion);
+}
+
+function findByIdSafe(courseId, questionId) {
+  return sanitizeQuestion(findById(courseId, questionId));
+}
+
+function updateQuestion(courseId, questionId, { qtype, prompt, options_json, answer_json }) {
+  db.prepare(`
+    UPDATE questions
+    SET qtype = ?, prompt = ?, options_json = ?, answer_json = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE course_id = ? AND question_id = ?
+  `).run(qtype, prompt, options_json || null, answer_json || null, courseId, questionId);
+  return findById(courseId, questionId);
+}
+
+function deleteQuestion(courseId, questionId) {
+  return db.prepare(`DELETE FROM questions WHERE course_id = ? AND question_id = ?`).run(courseId, questionId);
+}
+
+module.exports = {
+  createQuestion, listByCourse, findById,
+  listByCourseSafe, findByIdSafe, sanitizeQuestion,
+  updateQuestion, deleteQuestion
+};
+```
+
+---
+
+## 3) `src/repositories/quizRepository.js`
+
+```javascript
+const { db } = require('../db');
+
+function createQuiz({ course_id, created_by, title, description, open_at, due_at }) {
+  const result = db.prepare(`
+    INSERT INTO quizzes (course_id, created_by, title, description, open_at, due_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(course_id, created_by, title, description || '', open_at || null, due_at || null);
+  return findById(course_id, result.lastInsertRowid);
+}
+
+function listByCourse(courseId) {
+  return db.prepare(`
+    SELECT q.*, u.username AS creator_username, u.display_name AS creator_display_name
+    FROM quizzes q
+    JOIN users u ON u.user_id = q.created_by
+    WHERE q.course_id = ?
+    ORDER BY q.quiz_id DESC
+  `).all(courseId);
+}
+
+function findById(courseId, quizId) {
+  return db.prepare(`
+    SELECT q.*, u.username AS creator_username, u.display_name AS creator_display_name
+    FROM quizzes q
+    JOIN users u ON u.user_id = q.created_by
+    WHERE q.course_id = ? AND q.quiz_id = ?
+  `).get(courseId, quizId);
+}
+
+function updateQuiz(courseId, quizId, { title, description, open_at, due_at }) {
+  db.prepare(`
+    UPDATE quizzes
+    SET title = ?, description = ?, open_at = ?, due_at = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE course_id = ? AND quiz_id = ?
+  `).run(title, description || '', open_at || null, due_at || null, courseId, quizId);
+  return findById(courseId, quizId);
+}
+
+function deleteQuiz(courseId, quizId) {
+  return db.prepare(`DELETE FROM quizzes WHERE course_id = ? AND quiz_id = ?`).run(courseId, quizId);
+}
+
+function addQuizQuestion(quizId, questionId, points, position) {
+  db.prepare(`
+    INSERT INTO quiz_questions (quiz_id, question_id, points, position)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(quiz_id, question_id) DO UPDATE SET points = excluded.points, position = excluded.position
+  `).run(quizId, questionId, points || 1, position || 1);
+  return listQuizQuestions(quizId);
+}
+
+function removeQuizQuestion(quizId, questionId) {
+  return db.prepare(`DELETE FROM quiz_questions WHERE quiz_id = ? AND question_id = ?`).run(quizId, questionId);
+}
+
+function listQuizQuestions(quizId) {
+  return db.prepare(`
+    SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,
+           q.course_id, q.qtype, q.prompt, q.options_json, q.answer_json,
+           q.created_at, q.updated_at
+    FROM quiz_questions qq
+    JOIN questions q ON q.question_id = qq.question_id
+    WHERE qq.quiz_id = ?
+    ORDER BY qq.position ASC, qq.question_id ASC
+  `).all(quizId);
+}
+
+function listQuizQuestionsSafe(quizId) {
+  return db.prepare(`
+    SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,
+           q.course_id, q.qtype, q.prompt, q.options_json,
+           q.created_at, q.updated_at
+    FROM quiz_questions qq
+    JOIN questions q ON q.question_id = qq.question_id
+    WHERE qq.quiz_id = ?
+    ORDER BY qq.position ASC, qq.question_id ASC
+  `).all(quizId);
+}
+
+function createAttempt({ quiz_id, course_id, student_id }) {
+  const result = db.prepare(`
+    INSERT INTO quiz_attempts (quiz_id, course_id, student_id)
+    VALUES (?, ?, ?)
+  `).run(quiz_id, course_id, student_id);
+  return findAttemptById(course_id, quiz_id, result.lastInsertRowid);
+}
+
+function findAttemptById(courseId, quizId, attemptId) {
+  return db.prepare(`
+    SELECT qa.*, u.username AS student_username, u.display_name AS student_display_name
+    FROM quiz_attempts qa
+    JOIN users u ON u.user_id = qa.student_id
+    WHERE qa.course_id = ? AND qa.quiz_id = ? AND qa.attempt_id = ?
+  `).get(courseId, quizId, attemptId);
+}
+
+function isQuestionInQuiz(quizId, questionId) {
+  const row = db.prepare(`
+    SELECT 1
+    FROM quiz_questions
+    WHERE quiz_id = ? AND question_id = ?
+  `).get(quizId, questionId);
+  return !!row;
+}
+
+function saveAnswer({ attempt_id, question_id, answer_json }) {
+  db.prepare(`
+    INSERT INTO quiz_answers (attempt_id, question_id, answer_json)
+    VALUES (?, ?, ?)
+    ON CONFLICT(attempt_id, question_id) DO UPDATE SET answer_json = excluded.answer_json, created_at = CURRENT_TIMESTAMP
+  `).run(attempt_id, question_id, answer_json);
+  return listAnswersByAttempt(attempt_id);
+}
+
+function listAnswersByAttempt(attemptId) {
+  return db.prepare(`
+    SELECT * FROM quiz_answers WHERE attempt_id = ? ORDER BY answer_id ASC
+  `).all(attemptId);
+}
+
+function submitAttempt(courseId, quizId, attemptId) {
+  db.prepare(`
+    UPDATE quiz_attempts SET submitted_at = CURRENT_TIMESTAMP
+    WHERE course_id = ? AND quiz_id = ? AND attempt_id = ?
+  `).run(courseId, quizId, attemptId);
+  return findAttemptById(courseId, quizId, attemptId);
+}
+
+function listAttemptsByStudent(studentId) {
+  return db.prepare(`
+    SELECT qa.*, q.title AS quiz_title, q.description AS quiz_description, c.title AS course_title
+    FROM quiz_attempts qa
+    JOIN quizzes q ON q.quiz_id = qa.quiz_id
+    JOIN courses c ON c.course_id = qa.course_id
+    WHERE qa.student_id = ?
+    ORDER BY qa.attempt_id DESC
+  `).all(studentId);
+}
+
+module.exports = {
+  createQuiz, listByCourse, findById, updateQuiz, deleteQuiz,
+  addQuizQuestion, removeQuizQuestion, listQuizQuestions, listQuizQuestionsSafe, isQuestionInQuiz,
+  createAttempt, findAttemptById, saveAnswer, listAnswersByAttempt,
+  submitAttempt, listAttemptsByStudent
+};
+```
+
+---
+
+## 4) `src/controllers/quizController.js`
+
+```javascript
+const courseRepository = require('../repositories/courseRepository');
+const quizRepository = require('../repositories/quizRepository');
+const questionRepository = require('../repositories/questionRepository');
+const membershipRepository = require('../repositories/membershipRepository');
+
+function showNewQuiz(req, res) {
+  const course = courseRepository.findById(Number(req.params.course_id));
+  if (!course) return res.status(404).send('Course not found');
+  res.render('quiz_new', { course, error: null });
+}
+
+function createQuiz(req, res) {
+  const courseId = Number(req.params.course_id);
+  const course = courseRepository.findById(courseId);
+  if (!course) return res.status(404).send('Course not found');
+  const { title, description, open_at, due_at } = req.body;
+  if (!title) return res.status(400).render('quiz_new', { course, error: 'title is required.' });
+  const quiz = quizRepository.createQuiz({ course_id: courseId, created_by: req.currentUser.user_id, title, description, open_at, due_at });
+  return res.redirect(`/courses/${courseId}/quizzes/${quiz.quiz_id}`);
+}
+
+function apiCreateQuiz(req, res) {
+  const courseId = Number(req.params.course_id);
+  const { title, description, open_at, due_at } = req.body;
+  if (!title) return res.status(400).json({ success: false, error: 'title is required' });
+  const quiz = quizRepository.createQuiz({ course_id: courseId, created_by: req.currentUser.user_id, title, description, open_at, due_at });
+  return res.status(201).json({ success: true, quiz });
+}
+
+function listQuizzes(req, res) {
+  const courseId = Number(req.params.course_id);
+  const course = courseRepository.findById(courseId);
+  if (!course) return res.status(404).send('Course not found');
+  res.render('quizzes_list', { course, quizzes: quizRepository.listByCourse(courseId) });
+}
+
+function apiListQuizzes(req, res) {
+  res.json({ success: true, quizzes: quizRepository.listByCourse(Number(req.params.course_id)) });
+}
+
+function getQuiz(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const course = courseRepository.findById(courseId);
+  const quiz = quizRepository.findById(courseId, quizId);
+  if (!course || !quiz) return res.status(404).send('Quiz not found');
+  const membership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id);
+  const role = membership && membership.role_in_course;
+  const canViewAnswers = ['teacher', 'admin', 'assistant', 'senior-assistant'].includes(role);
+  const quizQuestions = canViewAnswers ? quizRepository.listQuizQuestions(quizId) : quizRepository.listQuizQuestionsSafe(quizId);
+  res.render('quiz_show', { course, quiz, quizQuestions });
+}
+
+function apiGetQuiz(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const quiz = quizRepository.findById(courseId, quizId);
+  if (!quiz) return res.status(404).json({ success: false, error: 'Quiz not found' });
+  const membership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id);
+  const role = membership && membership.role_in_course;
+  const canViewAnswers = ['teacher', 'admin', 'assistant', 'senior-assistant'].includes(role);
+  const quizQuestions = canViewAnswers ? quizRepository.listQuizQuestions(quizId) : quizRepository.listQuizQuestionsSafe(quizId);
+  res.json({ success: true, quiz, quiz_questions: quizQuestions });
+}
+
+function showEditQuiz(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const course = courseRepository.findById(courseId);
+  const quiz = quizRepository.findById(courseId, quizId);
+  if (!course || !quiz) return res.status(404).send('Quiz not found');
+  res.render('quiz_edit', { course, quiz, error: null });
+}
+
+function updateQuiz(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const course = courseRepository.findById(courseId);
+  const existing = quizRepository.findById(courseId, quizId);
+  if (!course || !existing) return res.status(404).send('Quiz not found');
+  const { title, description, open_at, due_at } = req.body;
+  if (!title) return res.status(400).render('quiz_edit', { course, quiz: existing, error: 'title is required.' });
+  quizRepository.updateQuiz(courseId, quizId, { title, description, open_at, due_at });
+  return res.redirect(`/courses/${courseId}/quizzes/${quizId}`);
+}
+
+function apiUpdateQuiz(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const existing = quizRepository.findById(courseId, quizId);
+  if (!existing) return res.status(404).json({ success: false, error: 'Quiz not found' });
+  const { title, description, open_at, due_at } = req.body;
+  if (!title) return res.status(400).json({ success: false, error: 'title is required' });
+  const quiz = quizRepository.updateQuiz(courseId, quizId, { title, description, open_at, due_at });
+  return res.json({ success: true, quiz });
+}
+
+function deleteQuiz(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  if (!quizRepository.findById(courseId, quizId)) return res.status(404).send('Quiz not found');
+  quizRepository.deleteQuiz(courseId, quizId);
+  return res.redirect(`/courses/${courseId}/quizzes`);
+}
+
+function apiDeleteQuiz(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  if (!quizRepository.findById(courseId, quizId)) return res.status(404).json({ success: false, error: 'Quiz not found' });
+  quizRepository.deleteQuiz(courseId, quizId);
+  return res.json({ success: true });
+}
+
+function showConfigureQuizQuestions(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const course = courseRepository.findById(courseId);
+  const quiz = quizRepository.findById(courseId, quizId);
+  if (!course || !quiz) return res.status(404).send('Quiz not found');
+  res.render('quiz_questions_config', {
+    course,
+    quiz,
+    availableQuestions: questionRepository.listByCourse(courseId),
+    quizQuestions: quizRepository.listQuizQuestions(quizId)
+  });
+}
+
+function configureQuizQuestions(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const { question_id, points, position } = req.body;
+  if (!quizRepository.findById(courseId, quizId)) return res.status(404).send('Quiz not found');
+  if (!questionRepository.findById(courseId, Number(question_id))) return res.status(404).send('Question not found');
+  quizRepository.addQuizQuestion(quizId, Number(question_id), Number(points || 1), Number(position || 1));
+  return res.redirect(`/courses/${courseId}/quizzes/${quizId}/questions`);
+}
+
+function apiConfigureQuizQuestions(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const { question_id, points, position } = req.body;
+  if (!quizRepository.findById(courseId, quizId)) return res.status(404).json({ success: false, error: 'Quiz not found' });
+  if (!questionRepository.findById(courseId, Number(question_id))) return res.status(404).json({ success: false, error: 'Question not found' });
+  const quizQuestions = quizRepository.addQuizQuestion(quizId, Number(question_id), Number(points || 1), Number(position || 1));
+  return res.status(201).json({ success: true, quiz_questions: quizQuestions });
+}
+
+function apiRemoveQuizQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const questionId = Number(req.params.question_id);
+  if (!quizRepository.findById(courseId, quizId)) return res.status(404).json({ success: false, error: 'Quiz not found' });
+  quizRepository.removeQuizQuestion(quizId, questionId);
+  return res.json({ success: true });
+}
+
+function startAttempt(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const quiz = quizRepository.findById(courseId, quizId);
+  if (!quiz) return res.status(404).send('Quiz not found');
+  const membership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id);
+  const role = membership && membership.role_in_course;
+  if (role !== 'student') return res.status(403).send('Student role required');
+  const attempt = quizRepository.createAttempt({ quiz_id: quizId, course_id: courseId, student_id: req.currentUser.user_id });
+  return res.redirect(`/my/quizzes`);
+}
+
+function apiStartAttempt(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const quiz = quizRepository.findById(courseId, quizId);
+  if (!quiz) return res.status(404).json({ success: false, error: 'Quiz not found' });
+  const membership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id);
+  const role = membership && membership.role_in_course;
+  if (role !== 'student') return res.status(403).json({ success: false, error: 'Student role required' });
+  const attempt = quizRepository.createAttempt({ quiz_id: quizId, course_id: courseId, student_id: req.currentUser.user_id });
+  return res.status(201).json({ success: true, attempt });
+}
+
+function answerQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const attemptId = Number(req.params.attempt_id);
+  const { question_id, answer_json } = req.body;
+  const attempt = quizRepository.findAttemptById(courseId, quizId, attemptId);
+  if (!attempt) return res.status(404).send('Attempt not found');
+  if (attempt.student_id !== req.currentUser.user_id) return res.status(403).send('Own attempt required');
+  if (attempt.submitted_at) return res.status(400).send('Attempt already submitted');
+  const questionId = Number(question_id);
+  if (!questionId || !quizRepository.isQuestionInQuiz(quizId, questionId)) return res.status(404).send('Question not found');
+  quizRepository.saveAnswer({ attempt_id: attemptId, question_id: questionId, answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });
+  return res.redirect('/my/quizzes');
+}
+
+function apiAnswerQuestion(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const attemptId = Number(req.params.attempt_id);
+  const { question_id, answer_json } = req.body;
+  const attempt = quizRepository.findAttemptById(courseId, quizId, attemptId);
+  if (!attempt) return res.status(404).json({ success: false, error: 'Attempt not found' });
+  if (attempt.student_id !== req.currentUser.user_id) return res.status(403).json({ success: false, error: 'Own attempt required' });
+  if (attempt.submitted_at) return res.status(400).json({ success: false, error: 'Attempt already submitted' });
+  if (!question_id || answer_json === undefined) return res.status(400).json({ success: false, error: 'question_id and answer_json are required' });
+  const questionId = Number(question_id);
+  if (!questionId || !quizRepository.isQuestionInQuiz(quizId, questionId)) return res.status(404).json({ success: false, error: 'Question not found' });
+  const answers = quizRepository.saveAnswer({ attempt_id: attemptId, question_id: questionId, answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });
+  return res.status(201).json({ success: true, answers });
+}
+
+function submitAttempt(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const attemptId = Number(req.params.attempt_id);
+  const attempt = quizRepository.findAttemptById(courseId, quizId, attemptId);
+  if (!attempt) return res.status(404).send('Attempt not found');
+  if (attempt.student_id !== req.currentUser.user_id) return res.status(403).send('Own attempt required');
+  quizRepository.submitAttempt(courseId, quizId, attemptId);
+  return res.redirect('/my/quizzes');
+}
+
+function apiSubmitAttempt(req, res) {
+  const courseId = Number(req.params.course_id);
+  const quizId = Number(req.params.quiz_id);
+  const attemptId = Number(req.params.attempt_id);
+  const attempt = quizRepository.findAttemptById(courseId, quizId, attemptId);
+  if (!attempt) return res.status(404).json({ success: false, error: 'Attempt not found' });
+  if (attempt.student_id !== req.currentUser.user_id) return res.status(403).json({ success: false, error: 'Own attempt required' });
+  const updated = quizRepository.submitAttempt(courseId, quizId, attemptId);
+  return res.json({ success: true, attempt: updated });
+}
+
+function viewMyAttempts(req, res) {
+  res.render('my_quizzes', { attempts: quizRepository.listAttemptsByStudent(req.currentUser.user_id) });
+}
+
+function apiViewMyAttempts(req, res) {
+  res.json({ success: true, attempts: quizRepository.listAttemptsByStudent(req.currentUser.user_id) });
+}
+
+module.exports = {
+  showNewQuiz, createQuiz, apiCreateQuiz,
+  listQuizzes, apiListQuizzes,
+  getQuiz, apiGetQuiz,
+  showEditQuiz, updateQuiz, apiUpdateQuiz,
+  deleteQuiz, apiDeleteQuiz,
+  showConfigureQuizQuestions, configureQuizQuestions, apiConfigureQuizQuestions, apiRemoveQuizQuestion,
+  startAttempt, apiStartAttempt,
+  answerQuestion, apiAnswerQuestion,
+  submitAttempt, apiSubmitAttempt,
+  viewMyAttempts, apiViewMyAttempts
+};
+```
+
+---
+
+## 5) `src/routes/web.js`
+
+```javascript
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+
+const authController = require('../controllers/authController');
+const userController = require('../controllers/userController');
+const courseController = require('../controllers/courseController');
+const membershipController = require('../controllers/membershipController');
+const postController = require('../controllers/postController');
+const commentController = require('../controllers/commentController');
+const assignmentController = require('../controllers/assignmentController');
+const submissionController = require('../controllers/submissionController');
+const uploadController = require('../controllers/uploadController');
+const questionController = require('../controllers/questionController');
+const quizController = require('../controllers/quizController');
+
+const {
+  requireAuthPage,
+  requireAdminPage,
+  requireCourseMember,
+  requireTeacherOrAdmin,
+  requireCourseStaff
+} = require('../middleware/auth');
+
+const router = express.Router();
+
+const uploadDir = path.join(__dirname, '..', '..', 'storage', 'uploads');
+fs.mkdirSync(uploadDir, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: function (req, file, cb) {
+      cb(null, uploadDir);
+    },
+    filename: function (req, file, cb) {
+      const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}-${file.originalname}`;
+      cb(null, unique);
+    }
+  })
+});
+
+router.get('/', (req, res) => res.render('index'));
+
+router.get('/register', authController.showRegister);
+router.post('/register', authController.register);
+router.get('/login', authController.showLogin);
+router.post('/login', authController.login);
+router.post('/logout', authController.logout);
+router.get('/me', authController.me);
+
+router.get('/admin/users', requireAuthPage, requireAdminPage, userController.listUsersPage);
+
+router.get('/courses/new', requireAuthPage, courseController.showNewCourse);
+router.post('/courses', requireAuthPage, courseController.createCourse);
+router.get('/courses', requireAuthPage, courseController.listCourses);
+router.get('/courses/:course_id', requireAuthPage, courseController.getCourse);
+router.get('/courses/:course_id/edit', requireAuthPage, courseController.showEditCourse);
+router.post('/courses/:course_id', requireAuthPage, courseController.updateCourse);
+router.post('/courses/:course_id/delete', requireAuthPage, courseController.deleteCourse);
+
+router.get('/courses/:course_id/members/new', requireTeacherOrAdmin, membershipController.showAddMember);
+router.post('/courses/:course_id/members', requireTeacherOrAdmin, membershipController.addMember);
+router.get('/courses/:course_id/members', requireCourseMember, membershipController.listMembers);
+router.post('/courses/:course_id/members/:membership_id', requireTeacherOrAdmin, membershipController.updateMemberRole);
+router.post('/courses/:course_id/members/:membership_id/delete', requireTeacherOrAdmin, membershipController.removeMember);
+router.get('/memberships', requireAuthPage, membershipController.myMemberships);
+
+router.get('/courses/:course_id/posts/new', requireCourseMember, postController.showNewPost);
+router.post('/courses/:course_id/posts', requireCourseMember, postController.createPost);
+router.get('/courses/:course_id/posts', requireCourseMember, postController.listPosts);
+router.get('/courses/:course_id/posts/:post_id', requireCourseMember, postController.getPost);
+router.get('/courses/:course_id/posts/:post_id/edit', requireCourseMember, postController.showEditPost);
+router.post('/courses/:course_id/posts/:post_id', requireCourseMember, postController.updatePost);
+router.post('/courses/:course_id/posts/:post_id/delete', requireCourseMember, postController.deletePost);
+
+router.post('/courses/:course_id/posts/:post_id/comments', requireCourseMember, commentController.createComment);
+router.get('/courses/:course_id/posts/:post_id/comments', requireCourseMember, commentController.listComments);
+router.post('/courses/:course_id/posts/:post_id/comments/:comment_id', requireCourseMember, commentController.updateComment);
+router.post('/courses/:course_id/posts/:post_id/comments/:comment_id/delete', requireCourseMember, commentController.deleteComment);
+
+router.get('/courses/:course_id/search', requireCourseMember, postController.searchPosts);
+router.get('/courses/:course_id/search/comments', requireCourseMember, commentController.searchComments);
+
+router.get('/courses/:course_id/assignments/new', requireCourseStaff, assignmentController.showNewAssignment);
+router.post('/courses/:course_id/assignments', requireCourseStaff, assignmentController.createAssignment);
+router.get('/courses/:course_id/assignments', requireCourseMember, assignmentController.listAssignments);
+router.get('/courses/:course_id/assignments/:assignment_id', requireCourseMember, assignmentController.getAssignment);
+router.get('/courses/:course_id/assignments/:assignment_id/edit', requireCourseStaff, assignmentController.showEditAssignment);
+router.post('/courses/:course_id/assignments/:assignment_id', requireCourseStaff, assignmentController.updateAssignment);
+router.post('/courses/:course_id/assignments/:assignment_id/delete', requireCourseStaff, assignmentController.deleteAssignment);
+
+router.get('/courses/:course_id/assignments/:assignment_id/submit', requireCourseMember, submissionController.showSubmit);
+router.post('/courses/:course_id/assignments/:assignment_id/submissions', requireCourseMember, submissionController.createSubmission);
+router.post('/courses/:course_id/assignments/:assignment_id/submissions/:submission_id', requireCourseMember, submissionController.updateMySubmission);
+router.get('/my/submissions', requireAuthPage, submissionController.listMySubmissions);
+router.get('/courses/:course_id/assignments/:assignment_id/submissions', requireCourseMember, submissionController.listSubmissionsForAssignment);
+
+router.get('/courses/:course_id/uploads/new', requireCourseStaff, uploadController.showUploadForm);
+router.post('/courses/:course_id/uploads', requireCourseStaff, upload.single('file'), uploadController.createUpload);
+router.get('/courses/:course_id/uploads', requireCourseMember, uploadController.listUploads);
+router.get('/courses/:course_id/uploads/:upload_id/download', requireCourseMember, uploadController.downloadUpload);
+router.post('/courses/:course_id/uploads/:upload_id/delete', requireCourseStaff, uploadController.deleteUpload);
+
+router.get('/courses/:course_id/questions/new', requireCourseStaff, questionController.showNewQuestion);
+router.post('/courses/:course_id/questions', requireCourseStaff, questionController.createQuestion);
+router.get('/courses/:course_id/questions', requireCourseMember, questionController.listQuestions);
+router.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.getQuestion);
+router.get('/courses/:course_id/questions/:question_id/edit', requireCourseStaff, questionController.showEditQuestion);
+router.post('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.updateQuestion);
+router.post('/courses/:course_id/questions/:question_id/delete', requireCourseStaff, questionController.deleteQuestion);
+
+router.get('/courses/:course_id/quizzes/new', requireCourseStaff, quizController.showNewQuiz);
+router.post('/courses/:course_id/quizzes', requireCourseStaff, quizController.createQuiz);
+router.get('/courses/:course_id/quizzes', requireCourseMember, quizController.listQuizzes);
+router.get('/courses/:course_id/quizzes/:quiz_id', requireCourseMember, quizController.getQuiz);
+router.get('/courses/:course_id/quizzes/:quiz_id/edit', requireCourseStaff, quizController.showEditQuiz);
+router.post('/courses/:course_id/quizzes/:quiz_id', requireCourseStaff, quizController.updateQuiz);
+router.post('/courses/:course_id/quizzes/:quiz_id/delete', requireCourseStaff, quizController.deleteQuiz);
+router.get('/courses/:course_id/quizzes/:quiz_id/questions', requireCourseStaff, quizController.showConfigureQuizQuestions);
+router.post('/courses/:course_id/quizzes/:quiz_id/questions', requireCourseStaff, quizController.configureQuizQuestions);
+
+router.post('/courses/:course_id/quizzes/:quiz_id/start', requireCourseMember, quizController.startAttempt);
+router.post('/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers', requireCourseMember, quizController.answerQuestion);
+router.post('/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit', requireCourseMember, quizController.submitAttempt);
+router.get('/my/quizzes', requireAuthPage, quizController.viewMyAttempts);
+
+module.exports = router;
+```
+
+---
+
+## 6) `src/routes/api.js`
+
+```javascript
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+
+const authController = require('../controllers/authController');
+const userController = require('../controllers/userController');
+const courseController = require('../controllers/courseController');
+const membershipController = require('../controllers/membershipController');
+const postController = require('../controllers/postController');
+const commentController = require('../controllers/commentController');
+const assignmentController = require('../controllers/assignmentController');
+const submissionController = require('../controllers/submissionController');
+const uploadController = require('../controllers/uploadController');
+const questionController = require('../controllers/questionController');
+const quizController = require('../controllers/quizController');
+
+const {
+  requireAuthApi,
+  requireAdminApi,
+  requireCourseMember,
+  requireTeacherOrAdmin,
+  requireCourseStaff
+} = require('../middleware/auth');
+
+const router = express.Router();
+
+const uploadDir = path.join(__dirname, '..', '..', 'storage', 'uploads');
+fs.mkdirSync(uploadDir, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: function (req, file, cb) {
+      cb(null, uploadDir);
+    },
+    filename: function (req, file, cb) {
+      const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}-${file.originalname}`;
+      cb(null, unique);
+    }
+  })
+});
+
+router.post('/auth/register', authController.apiRegister);
+router.post('/auth/login', authController.apiLogin);
+router.post('/auth/logout', authController.apiLogout);
+router.get('/auth/me', authController.apiMe);
+
+router.get('/users', requireAuthApi, requireAdminApi, userController.listUsersApi);
+
+router.post('/courses', requireAuthApi, courseController.apiCreateCourse);
+router.get('/courses', requireAuthApi, courseController.apiListCourses);
+router.get('/courses/:course_id', requireAuthApi, courseController.apiGetCourse);
+router.put('/courses/:course_id', requireAuthApi, courseController.apiUpdateCourse);
+router.delete('/courses/:course_id', requireAuthApi, courseController.apiDeleteCourse);
+
+router.post('/courses/:course_id/members', requireTeacherOrAdmin, membershipController.apiAddMember);
+router.get('/courses/:course_id/members', requireCourseMember, membershipController.apiListMembers);
+router.put('/courses/:course_id/members/:membership_id', requireTeacherOrAdmin, membershipController.apiUpdateMemberRole);
+router.delete('/courses/:course_id/members/:membership_id', requireTeacherOrAdmin, membershipController.apiRemoveMember);
+router.get('/memberships', requireAuthApi, membershipController.apiMyMemberships);
+
+router.post('/courses/:course_id/posts', requireCourseMember, postController.apiCreatePost);
+router.get('/courses/:course_id/posts', requireCourseMember, postController.apiListPosts);
+router.get('/courses/:course_id/posts/:post_id', requireCourseMember, postController.apiGetPost);
+router.put('/courses/:course_id/posts/:post_id', requireCourseMember, postController.apiUpdatePost);
+router.delete('/courses/:course_id/posts/:post_id', requireCourseMember, postController.apiDeletePost);
+
+router.post('/courses/:course_id/posts/:post_id/comments', requireCourseMember, commentController.apiCreateComment);
+router.get('/courses/:course_id/posts/:post_id/comments', requireCourseMember, commentController.apiListComments);
+router.put('/courses/:course_id/posts/:post_id/comments/:comment_id', requireCourseMember, commentController.apiUpdateComment);
+router.delete('/courses/:course_id/posts/:post_id/comments/:comment_id', requireCourseMember, commentController.apiDeleteComment);
+
+router.get('/courses/:course_id/search/posts', requireCourseMember, postController.apiSearchPosts);
+router.get('/courses/:course_id/search/comments', requireCourseMember, commentController.apiSearchComments);
+
+router.post('/courses/:course_id/assignments', requireCourseStaff, assignmentController.apiCreateAssignment);
+router.get('/courses/:course_id/assignments', requireCourseMember, assignmentController.apiListAssignments);
+router.get('/courses/:course_id/assignments/:assignment_id', requireCourseMember, assignmentController.apiGetAssignment);
+router.put('/courses/:course_id/assignments/:assignment_id', requireCourseStaff, assignmentController.apiUpdateAssignment);
+router.delete('/courses/:course_id/assignments/:assignment_id', requireCourseStaff, assignmentController.apiDeleteAssignment);
+
+router.post('/courses/:course_id/assignments/:assignment_id/submissions', requireCourseMember, submissionController.apiCreateSubmission);
+router.put('/courses/:course_id/assignments/:assignment_id/submissions/:submission_id', requireCourseMember, submissionController.apiUpdateMySubmission);
+router.get('/my/submissions', requireAuthApi, submissionController.apiListMySubmissions);
+router.get('/courses/:course_id/assignments/:assignment_id/submissions', requireCourseMember, submissionController.apiListSubmissionsForAssignment);
+
+router.post('/courses/:course_id/uploads', requireCourseStaff, upload.single('file'), uploadController.apiCreateUpload);
+router.get('/courses/:course_id/uploads', requireCourseMember, uploadController.apiListUploads);
+router.get('/courses/:course_id/uploads/:upload_id/download', requireCourseMember, uploadController.apiDownloadUpload);
+router.delete('/courses/:course_id/uploads/:upload_id', requireCourseStaff, uploadController.apiDeleteUpload);
+
+router.post('/courses/:course_id/questions', requireCourseStaff, questionController.apiCreateQuestion);
+router.get('/courses/:course_id/questions', requireCourseMember, questionController.apiListQuestions);
+router.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.apiGetQuestion);
+router.put('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiUpdateQuestion);
+router.delete('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiDeleteQuestion);
+
+router.post('/courses/:course_id/quizzes', requireCourseStaff, quizController.apiCreateQuiz);
+router.get('/courses/:course_id/quizzes', requireCourseMember, quizController.apiListQuizzes);
+router.get('/courses/:course_id/quizzes/:quiz_id', requireCourseMember, quizController.apiGetQuiz);
+router.put('/courses/:course_id/quizzes/:quiz_id', requireCourseStaff, quizController.apiUpdateQuiz);
+router.delete('/courses/:course_id/quizzes/:quiz_id', requireCourseStaff, quizController.apiDeleteQuiz);
+router.post('/courses/:course_id/quizzes/:quiz_id/questions', requireCourseStaff, quizController.apiConfigureQuizQuestions);
+router.delete('/courses/:course_id/quizzes/:quiz_id/questions/:question_id', requireCourseStaff, quizController.apiRemoveQuizQuestion);
+
+router.post('/courses/:course_id/quizzes/:quiz_id/attempts/start', requireCourseMember, quizController.apiStartAttempt);
+router.post('/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers', requireCourseMember, quizController.apiAnswerQuestion);
+router.post('/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit', requireCourseMember, quizController.apiSubmitAttempt);
+router.get('/my/quizzes/attempts', requireAuthApi, quizController.apiViewMyAttempts);
+
+module.exports = router;
+```
+
+---
+
+## 7) `src/views/question_show.ejs`
+
+```ejs
+<%- include('partials/header') %>
+<h1>Question #<%= question.question_id %></h1>
+<p><strong>Type:</strong> <%= question.qtype %></p>
+<p><strong>Prompt:</strong> <%= question.prompt %></p>
+<p><strong>Options JSON:</strong> <%= question.options_json || '' %></p>
+<% if (canViewAnswerJson) { %>
+  <p><strong>Answer JSON:</strong> <%= question.answer_json || '' %></p>
+<% } %>
+<p><a href="/courses/<%= course.course_id %>/questions/<%= question.question_id %>/edit">Edit</a></p>
+<form method="post" action="/courses/<%= course.course_id %>/questions/<%= question.question_id %>/delete"><button type="submit">Delete</button></form>
+<%- include('partials/footer') %>
+```
+
+---
+
+然后重新跑这个：
+
+```powershell
+node --test tests/api.quiz.functional.test.js
+```
+
+如果还有报错，把新的报错贴给我，我直接继续帮你改到能过。

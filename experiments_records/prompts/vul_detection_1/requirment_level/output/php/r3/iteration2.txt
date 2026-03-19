@@ -1,0 +1,203 @@
+、[
+{
+"vulnerability_id": "VULN-001",
+"current_status": "incorrectly_fixed",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.1,
+"severity_level": "high",
+"confidence_score": 80,
+"confidence_level": "high",
+"summary": "The previous repair blocks ordinary students from editing or deleting another user's post, but it still lets any authenticated course member holding the newly trusted assistant or senior-assistant roles mutate another author's post by supplying the target post_id. The remaining risk is that post ownership is still bypassable for non-authors because the repair converted these roles into implicit global moderators for all course posts.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/posts/:post_id/edit"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app/core/Auth.php",
+"line_start": 145,
+"line_end": 152,
+"function_name": "is_course_staff_role/can_manage_course_content",
+"code": "function is_course_staff_role(string $role): bool\n{\n    return in_array($role, ['teacher', 'admin', 'assistant', 'senior-assistant'], true);\n}\n\nfunction can_manage_course_content(array $membership, int $userId, int $authorId): bool\n{\n    return $userId === $authorId || is_course_staff_role((string) ($membership['role_in_course'] ?? ''));\n}",
+"reason": "The repair changed the authorization rule from ownership-only to ownership-or-any-listed staff role, and it hard-codes assistant and senior-assistant as fully authorized to manage another author's content."
+},
+{
+"file_path": "app/controllers/PostController.php",
+"line_start": 177,
+"line_end": 193,
+"function_name": "update",
+"code": "$post = $this->postRepo->findById($courseId, $postId);\nif (!$post) {\n    return ['success' => false, 'error' => 'Post not found'];\n}\nif (!can_manage_course_content($membership, $userId, (int) $post['author_id'])) {\n    return ['success' => false, 'error' => 'Forbidden'];\n}\n...\nif (is_course_staff_role((string) $membership['role_in_course'])) {\n    $this->postRepo->update($courseId, $postId, ['title' => $title, 'body' => $body]);\n} else {\n    $this->postRepo->updateOwned($courseId, $postId, $userId, ['title' => $title, 'body' => $body]);\n}",
+"reason": "Once the caller carries one of the hard-coded staff roles, the controller deliberately switches to the unrestricted repository write path and no longer binds the mutation to the post author."
+},
+{
+"file_path": "app/controllers/PostController.php",
+"line_start": 219,
+"line_end": 229,
+"function_name": "delete",
+"code": "$post = $this->postRepo->findById($courseId, $postId);\nif (!$post) {\n    return ['success' => false, 'error' => 'Post not found'];\n}\nif (!can_manage_course_content($membership, $userId, (int) $post['author_id'])) {\n    return ['success' => false, 'error' => 'Forbidden'];\n}\nif (is_course_staff_role((string) $membership['role_in_course'])) {\n    $this->postRepo->delete($courseId, $postId);\n} else {\n    $this->postRepo->deleteOwned($courseId, $postId, $userId);\n}",
+"reason": "The same authorization expansion applies to deletion, so a non-author with an assistant-class role can still remove another user's post via direct post_id targeting."
+},
+{
+"file_path": "app/repositories/MembershipRepository.php",
+"line_start": 7,
+"line_end": 20,
+"function_name": "allowedRoles/isValidRole",
+"code": "private const ALLOWED_ROLES = ['admin', 'teacher', 'student', 'assistant', 'senior-assistant'];\n...\npublic function isValidRole(string $role): bool\n{\n    return in_array($role, self::ALLOWED_ROLES, true);\n}",
+"reason": "The repository accepts assistant and senior-assistant as assignable course roles, so the broadened authorization rule is reachable in the live course membership model rather than being dead code."
+}
+],
+"root_cause_code": 2,
+"root_cause": "The repair replaced the missing ownership check with an over-broad authorization helper that treats assistant and senior-assistant memberships as sufficient to edit or delete any post in the course, leaving direct post_id mutation available to non-authors in those roles.",
+"patch_locations": [
+{
+"file_path": "app/core/Auth.php",
+"line_start": 145,
+"line_end": 152,
+"function_name": "is_course_staff_role/can_manage_course_content"
+},
+{
+"file_path": "app/controllers/PostController.php",
+"line_start": 129,
+"line_end": 229,
+"function_name": "showEditForm/updateHtml/updateApi/update/deleteHtml/deleteApi/delete"
+},
+{
+"file_path": "app/repositories/MembershipRepository.php",
+"line_start": 7,
+"line_end": 20,
+"function_name": "allowedRoles/isValidRole"
+}
+],
+"repair_plan": "Restrict non-author post mutation to the post author unless there is a separately defined and explicitly intended moderation role for this requirement stage. If elevated moderation is intended, enforce it with a narrowly scoped helper tied to that exact role model and keep the author-scoped repository path for all other members.",
+"repair_failure_root_cause": "The previous repair addressed the obvious student-to-student abuse path but generalized the exception too far by granting assistant and senior-assistant members blanket post-management power. That change removed the original ownership failure for some callers while leaving the same post_id-based unauthorized mutation pattern reachable for non-author members in the newly trusted roles.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"current_status": "incorrectly_fixed",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.0,
+"severity_level": "high",
+"confidence_score": 80,
+"confidence_level": "high",
+"summary": "The previous repair prevents ordinary students from modifying another user's comment, but it still allows authenticated course members in the newly trusted assistant or senior-assistant roles to update or delete another author's comment by supplying comment_id. The comment ownership boundary therefore remains unresolved for non-author members who inherit the repair's expanded moderator logic.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app/core/Auth.php",
+"line_start": 145,
+"line_end": 152,
+"function_name": "is_course_staff_role/can_manage_course_content",
+"code": "function is_course_staff_role(string $role): bool\n{\n    return in_array($role, ['teacher', 'admin', 'assistant', 'senior-assistant'], true);\n}\n\nfunction can_manage_course_content(array $membership, int $userId, int $authorId): bool\n{\n    return $userId === $authorId || is_course_staff_role((string) ($membership['role_in_course'] ?? ''));\n}",
+"reason": "The shared helper authorizes any listed staff role, including assistant and senior-assistant, to bypass comment ownership."
+},
+{
+"file_path": "app/controllers/CommentController.php",
+"line_start": 96,
+"line_end": 110,
+"function_name": "update",
+"code": "$comment = $this->commentRepo->findById($courseId, $postId, $commentId);\nif (!$comment) {\n    return ['success' => false, 'error' => 'Comment not found'];\n}\nif (!can_manage_course_content($membership, $userId, (int) $comment['author_id'])) {\n    return ['success' => false, 'error' => 'Forbidden'];\n}\n...\nif (is_course_staff_role((string) $membership['role_in_course'])) {\n    $this->commentRepo->update($courseId, $postId, $commentId, $body);\n} else {\n    $this->commentRepo->updateOwned($courseId, $postId, $commentId, $userId, $body);\n}",
+"reason": "For comments, the controller still routes any caller with a hard-coded staff role to the unrestricted write path, so comment_id targeting remains effective for non-authors in those roles."
+},
+{
+"file_path": "app/controllers/CommentController.php",
+"line_start": 137,
+"line_end": 147,
+"function_name": "delete",
+"code": "$comment = $this->commentRepo->findById($courseId, $postId, $commentId);\nif (!$comment) {\n    return ['success' => false, 'error' => 'Comment not found'];\n}\nif (!can_manage_course_content($membership, $userId, (int) $comment['author_id'])) {\n    return ['success' => false, 'error' => 'Forbidden'];\n}\nif (is_course_staff_role((string) $membership['role_in_course'])) {\n    $this->commentRepo->delete($courseId, $postId, $commentId);\n} else {\n    $this->commentRepo->deleteOwned($courseId, $postId, $commentId, $userId);\n}",
+"reason": "Deletion retains the same over-broad exception, so the repair did not fully re-bind comment deletion to the author or a narrowly defined moderator role."
+},
+{
+"file_path": "app/repositories/MembershipRepository.php",
+"line_start": 7,
+"line_end": 20,
+"function_name": "allowedRoles/isValidRole",
+"code": "private const ALLOWED_ROLES = ['admin', 'teacher', 'student', 'assistant', 'senior-assistant'];\n...\npublic function isValidRole(string $role): bool\n{\n    return in_array($role, self::ALLOWED_ROLES, true);\n}",
+"reason": "Because assistant and senior-assistant are valid persisted membership roles, the broadened comment-moderation exception is operational and not merely theoretical."
+}
+],
+"root_cause_code": 2,
+"root_cause": "The repair uses the same over-broad authorization helper for comment mutation, so assistant and senior-assistant members can still exercise another user's comment_id even though they are not the comment author.",
+"patch_locations": [
+{
+"file_path": "app/core/Auth.php",
+"line_start": 145,
+"line_end": 152,
+"function_name": "is_course_staff_role/can_manage_course_content"
+},
+{
+"file_path": "app/controllers/CommentController.php",
+"line_start": 70,
+"line_end": 149,
+"function_name": "updateHtml/updateApi/update/deleteHtml/deleteApi/delete"
+},
+{
+"file_path": "app/repositories/MembershipRepository.php",
+"line_start": 7,
+"line_end": 20,
+"function_name": "allowedRoles/isValidRole"
+}
+],
+"repair_plan": "Keep author-scoped comment mutation as the default and narrow any non-author exception to an explicitly intended moderator role for this requirement stage. If assistants are not meant to moderate comments, remove them from the helper; if they are, document and enforce that moderator capability consistently instead of relying on a broad staff shortcut.",
+"repair_failure_root_cause": "The previous repair fixed the direct student-to-student comment tampering path but did so by introducing a permissive shared helper that treats assistant-class memberships as global comment moderators. That leaves the same comment_id-based unauthorized mutation primitive reachable for non-author members under the repair's expanded role trust model.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+}
+]

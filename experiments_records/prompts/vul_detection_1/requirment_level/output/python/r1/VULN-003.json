@@ -1,0 +1,63 @@
+{
+  "vulnerability_id": "VULN-003",
+  "vulnerability_type_code": 3,
+  "vulnerability_type": "Broken Access Control",
+  "cwe_id": "CWE-862",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.8,
+  "severity_level": "medium",
+  "confidence_score": 97,
+  "confidence_level": "high",
+  "summary": "Any authenticated user can access the user-listing endpoints that appear administrative. This exposes all registered usernames, display names, user IDs, and account creation timestamps without any administrator role check.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/admin/users"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/users"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "controllers/auth_controller.py",
+      "line_start": 122,
+      "line_end": 132,
+      "function_name": "users_page / api_users",
+      "code": "@auth_bp.route('/admin/users', methods=['GET'])\n@login_required\ndef users_page():\n    return render_template('admin/users.html', users=list_users(), current_user=get_current_user())\n\n\n@auth_bp.route('/api/users', methods=['GET'])\n@login_required\ndef api_users():\n    users = [_user_to_dict(user) for user in list_users()]\n    return jsonify({'success': True, 'users': users})",
+      "reason": "Both endpoints require only authentication and do not enforce any administrator or privileged-role authorization check."
+    },
+    {
+      "file_path": "models/user_repo.py",
+      "line_start": 30,
+      "line_end": 34,
+      "function_name": "list_users",
+      "code": "def list_users():\n    db = get_db()\n    return db.execute(\n        'SELECT user_id, username, display_name, created_at FROM users ORDER BY user_id ASC'\n    ).fetchall()",
+      "reason": "The repository returns a full account listing, so the missing role check in the controller directly exposes all user records to any logged-in account."
+    }
+  ],
+  "root_cause_code": 2,
+  "root_cause": "Administrative user enumeration functionality is guarded only by a generic login check and not by a dedicated authorization rule for privileged users.",
+  "patch_locations": [
+    {
+      "file_path": "controllers/auth_controller.py",
+      "line_start": 122,
+      "line_end": 132,
+      "function_name": "users_page / api_users"
+    },
+    {
+      "file_path": "models/user_repo.py",
+      "line_start": 30,
+      "line_end": 34,
+      "function_name": "list_users"
+    }
+  ],
+  "repair_plan": "Restrict these endpoints to explicitly authorized administrators. Add a server-side role check before calling list_users, return 403 for non-admin users, and keep any non-admin directory functionality limited to the minimum fields and scope actually required.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

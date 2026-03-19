@@ -1,0 +1,123 @@
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 10,
+  "vulnerability_type": "Session Weakness",
+  "cwe_id": "CWE-384",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.6,
+  "severity_level": "medium",
+  "confidence_score": 95,
+  "confidence_level": "high",
+  "summary": "The application does not regenerate the session identifier after successful registration or login. An attacker who can pre-set or obtain a victim's anonymous session ID can keep using that same session after the victim authenticates, enabling session fixation.",
+  "entry_points": [
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/register"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/login"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/api/auth/register"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/api/auth/login"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "public/index.php",
+      "line_start": 6,
+      "line_end": 6,
+      "function_name": null,
+      "code": "session_start();",
+      "reason": "The application starts a session before authentication, so pre-authentication session identifiers persist unless explicitly rotated."
+    },
+    {
+      "file_path": "app/core/Auth.php",
+      "line_start": 27,
+      "line_end": 30,
+      "function_name": "login_user",
+      "code": "function login_user(array $config, int $userId): void\n{\n    $_SESSION[$config['session_user_key']] = $userId;\n}",
+      "reason": "The login helper binds the authenticated user to the existing session but never calls session_regenerate_id(true)."
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 21,
+      "line_end": 31,
+      "function_name": "registerHtml",
+      "code": "$result = $this->register($data); ... login_user($this->config, $result['user']['user_id']); redirect_to('/me');",
+      "reason": "HTML registration authenticates the new user into the current session without rotating the session identifier."
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 34,
+      "line_end": 41,
+      "function_name": "registerApi",
+      "code": "$result = $this->register(request_data()); ... login_user($this->config, $result['user']['user_id']); json_response($result, 201);",
+      "reason": "API registration has the same missing session-ID rotation."
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 73,
+      "line_end": 82,
+      "function_name": "loginHtml",
+      "code": "$result = $this->login(request_data()); ... login_user($this->config, $result['user']['user_id']); redirect_to('/me');",
+      "reason": "HTML login reuses the existing session ID after authentication."
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 85,
+      "line_end": 93,
+      "function_name": "loginApi",
+      "code": "$result = $this->login(request_data()); ... login_user($this->config, $result['user']['user_id']); json_response($result, 200);",
+      "reason": "API login also authenticates the user into the existing session without regenerating the session ID."
+    }
+  ],
+  "root_cause_code": 8,
+  "root_cause": "Authentication state is attached to a pre-existing session and the code never rotates the session identifier when the user transitions from unauthenticated to authenticated.",
+  "patch_locations": [
+    {
+      "file_path": "app/core/Auth.php",
+      "line_start": 27,
+      "line_end": 30,
+      "function_name": "login_user"
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 21,
+      "line_end": 31,
+      "function_name": "registerHtml"
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 34,
+      "line_end": 41,
+      "function_name": "registerApi"
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 73,
+      "line_end": 82,
+      "function_name": "loginHtml"
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 85,
+      "line_end": 93,
+      "function_name": "loginApi"
+    }
+  ],
+  "repair_plan": "Regenerate the session ID immediately after every successful login and registration before storing the authenticated user ID in the session. Also invalidate the old session during logout and review cookie settings so authenticated sessions are issued with secure, HttpOnly, and appropriate SameSite protections.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

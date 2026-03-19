@@ -1,0 +1,616 @@
+当然可以。下面是**所有被修改的文件**的**完整内容**（逐个文件给出），你直接复制覆盖到项目对应路径即可。
+
+---
+
+## 1) `src/routes/api.js`（完整）
+
+```js
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+
+const authController = require('../controllers/authController');
+const userController = require('../controllers/userController');
+const courseController = require('../controllers/courseController');
+const membershipController = require('../controllers/membershipController');
+const postController = require('../controllers/postController');
+const commentController = require('../controllers/commentController');
+const assignmentController = require('../controllers/assignmentController');
+const submissionController = require('../controllers/submissionController');
+const uploadController = require('../controllers/uploadController');
+
+const {
+  requireAuthApi,
+  requireAdminApi,
+  requireCourseMember,
+  requireTeacherOrAdmin,
+  requireCourseStaff
+} = require('../middleware/auth');
+
+const router = express.Router();
+
+const uploadDir = path.join(__dirname, '..', '..', 'storage', 'uploads');
+fs.mkdirSync(uploadDir, { recursive: true });
+
+function safeUploadFilename(originalname) {
+  // Generate a storage filename independent of untrusted user input.
+  // Preserve extension only.
+  const base = path.basename(String(originalname || ''));
+  const ext = path.extname(base).slice(0, 32);
+  const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${unique}${ext}`;
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: function (req, file, cb) {
+      cb(null, uploadDir);
+    },
+    filename: function (req, file, cb) {
+      cb(null, safeUploadFilename(file && file.originalname));
+    }
+  })
+});
+
+router.post('/auth/register', authController.apiRegister);
+router.post('/auth/login', authController.apiLogin);
+router.post('/auth/logout', authController.apiLogout);
+router.get('/auth/me', authController.apiMe);
+
+router.get('/users', requireAuthApi, requireAdminApi, userController.listUsersApi);
+
+router.post('/courses', requireAuthApi, courseController.apiCreateCourse);
+router.get('/courses', requireAuthApi, courseController.apiListCourses);
+router.get('/courses/:course_id', requireAuthApi, courseController.apiGetCourse);
+router.put('/courses/:course_id', requireAuthApi, courseController.apiUpdateCourse);
+router.delete('/courses/:course_id', requireAuthApi, courseController.apiDeleteCourse);
+
+router.post('/courses/:course_id/members', requireTeacherOrAdmin, membershipController.apiAddMember);
+router.get('/courses/:course_id/members', requireCourseMember, membershipController.apiListMembers);
+router.put('/courses/:course_id/members/:membership_id', requireTeacherOrAdmin, membershipController.apiUpdateMemberRole);
+router.delete('/courses/:course_id/members/:membership_id', requireTeacherOrAdmin, membershipController.apiRemoveMember);
+router.get('/memberships', requireAuthApi, membershipController.apiMyMemberships);
+
+router.post('/courses/:course_id/posts', requireCourseMember, postController.apiCreatePost);
+router.get('/courses/:course_id/posts', requireCourseMember, postController.apiListPosts);
+router.get('/courses/:course_id/posts/:post_id', requireCourseMember, postController.apiGetPost);
+router.put('/courses/:course_id/posts/:post_id', requireCourseMember, postController.apiUpdatePost);
+router.delete('/courses/:course_id/posts/:post_id', requireCourseMember, postController.apiDeletePost);
+
+router.post('/courses/:course_id/posts/:post_id/comments', requireCourseMember, commentController.apiCreateComment);
+router.get('/courses/:course_id/posts/:post_id/comments', requireCourseMember, commentController.apiListComments);
+router.put('/courses/:course_id/posts/:post_id/comments/:comment_id', requireCourseMember, commentController.apiUpdateComment);
+router.delete('/courses/:course_id/posts/:post_id/comments/:comment_id', requireCourseMember, commentController.apiDeleteComment);
+
+router.get('/courses/:course_id/search/posts', requireCourseMember, postController.apiSearchPosts);
+router.get('/courses/:course_id/search/comments', requireCourseMember, commentController.apiSearchComments);
+
+router.post('/courses/:course_id/assignments', requireCourseStaff, assignmentController.apiCreateAssignment);
+router.get('/courses/:course_id/assignments', requireCourseMember, assignmentController.apiListAssignments);
+router.get('/courses/:course_id/assignments/:assignment_id', requireCourseMember, assignmentController.apiGetAssignment);
+router.put('/courses/:course_id/assignments/:assignment_id', requireCourseStaff, assignmentController.apiUpdateAssignment);
+router.delete('/courses/:course_id/assignments/:assignment_id', requireCourseStaff, assignmentController.apiDeleteAssignment);
+
+router.post('/courses/:course_id/assignments/:assignment_id/submissions', requireCourseMember, submissionController.apiCreateSubmission);
+router.put('/courses/:course_id/assignments/:assignment_id/submissions/:submission_id', requireCourseMember, submissionController.apiUpdateMySubmission);
+router.get('/my/submissions', requireAuthApi, submissionController.apiListMySubmissions);
+router.get('/courses/:course_id/assignments/:assignment_id/submissions', requireCourseMember, submissionController.apiListSubmissionsForAssignment);
+
+router.post('/courses/:course_id/uploads', requireCourseStaff, upload.single('file'), uploadController.apiCreateUpload);
+router.get('/courses/:course_id/uploads', requireCourseMember, uploadController.apiListUploads);
+router.get('/courses/:course_id/uploads/:upload_id/download', requireCourseMember, uploadController.apiDownloadUpload);
+router.delete('/courses/:course_id/uploads/:upload_id', requireCourseStaff, uploadController.apiDeleteUpload);
+
+module.exports = router;
+```
+
+---
+
+## 2) `src/routes/web.js`（完整）
+
+```js
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+
+const authController = require('../controllers/authController');
+const userController = require('../controllers/userController');
+const courseController = require('../controllers/courseController');
+const membershipController = require('../controllers/membershipController');
+const postController = require('../controllers/postController');
+const commentController = require('../controllers/commentController');
+const assignmentController = require('../controllers/assignmentController');
+const submissionController = require('../controllers/submissionController');
+const uploadController = require('../controllers/uploadController');
+
+const {
+  requireAuthPage,
+  requireAdminPage,
+  requireCourseMember,
+  requireTeacherOrAdmin,
+  requireCourseStaff
+} = require('../middleware/auth');
+
+const router = express.Router();
+
+const uploadDir = path.join(__dirname, '..', '..', 'storage', 'uploads');
+fs.mkdirSync(uploadDir, { recursive: true });
+
+function safeUploadFilename(originalname) {
+  // Generate a storage filename independent of untrusted user input.
+  // Preserve extension only.
+  const base = path.basename(String(originalname || ''));
+  const ext = path.extname(base).slice(0, 32);
+  const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${unique}${ext}`;
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: function (req, file, cb) {
+      cb(null, uploadDir);
+    },
+    filename: function (req, file, cb) {
+      cb(null, safeUploadFilename(file && file.originalname));
+    }
+  })
+});
+
+router.get('/', (req, res) => res.render('index'));
+
+router.get('/register', authController.showRegister);
+router.post('/register', authController.register);
+router.get('/login', authController.showLogin);
+router.post('/login', authController.login);
+router.post('/logout', authController.logout);
+router.get('/me', authController.me);
+
+router.get('/admin/users', requireAuthPage, requireAdminPage, userController.listUsersPage);
+
+router.get('/courses/new', requireAuthPage, courseController.showNewCourse);
+router.post('/courses', requireAuthPage, courseController.createCourse);
+router.get('/courses', requireAuthPage, courseController.listCourses);
+router.get('/courses/:course_id', requireAuthPage, courseController.getCourse);
+router.get('/courses/:course_id/edit', requireAuthPage, courseController.showEditCourse);
+router.post('/courses/:course_id', requireAuthPage, courseController.updateCourse);
+router.post('/courses/:course_id/delete', requireAuthPage, courseController.deleteCourse);
+
+router.get('/courses/:course_id/members/new', requireTeacherOrAdmin, membershipController.showAddMember);
+router.post('/courses/:course_id/members', requireTeacherOrAdmin, membershipController.addMember);
+router.get('/courses/:course_id/members', requireCourseMember, membershipController.listMembers);
+router.post('/courses/:course_id/members/:membership_id', requireTeacherOrAdmin, membershipController.updateMemberRole);
+router.post('/courses/:course_id/members/:membership_id/delete', requireTeacherOrAdmin, membershipController.removeMember);
+router.get('/memberships', requireAuthPage, membershipController.myMemberships);
+
+router.get('/courses/:course_id/posts/new', requireCourseMember, postController.showNewPost);
+router.post('/courses/:course_id/posts', requireCourseMember, postController.createPost);
+router.get('/courses/:course_id/posts', requireCourseMember, postController.listPosts);
+router.get('/courses/:course_id/posts/:post_id', requireCourseMember, postController.getPost);
+router.get('/courses/:course_id/posts/:post_id/edit', requireCourseMember, postController.showEditPost);
+router.post('/courses/:course_id/posts/:post_id', requireCourseMember, postController.updatePost);
+router.post('/courses/:course_id/posts/:post_id/delete', requireCourseMember, postController.deletePost);
+
+router.post('/courses/:course_id/posts/:post_id/comments', requireCourseMember, commentController.createComment);
+router.get('/courses/:course_id/posts/:post_id/comments', requireCourseMember, commentController.listComments);
+router.post('/courses/:course_id/posts/:post_id/comments/:comment_id', requireCourseMember, commentController.updateComment);
+router.post('/courses/:course_id/posts/:post_id/comments/:comment_id/delete', requireCourseMember, commentController.deleteComment);
+
+router.get('/courses/:course_id/search', requireCourseMember, postController.searchPosts);
+router.get('/courses/:course_id/search/comments', requireCourseMember, commentController.searchComments);
+
+router.get('/courses/:course_id/assignments/new', requireCourseStaff, assignmentController.showNewAssignment);
+router.post('/courses/:course_id/assignments', requireCourseStaff, assignmentController.createAssignment);
+router.get('/courses/:course_id/assignments', requireCourseMember, assignmentController.listAssignments);
+router.get('/courses/:course_id/assignments/:assignment_id', requireCourseMember, assignmentController.getAssignment);
+router.get('/courses/:course_id/assignments/:assignment_id/edit', requireCourseStaff, assignmentController.showEditAssignment);
+router.post('/courses/:course_id/assignments/:assignment_id', requireCourseStaff, assignmentController.updateAssignment);
+router.post('/courses/:course_id/assignments/:assignment_id/delete', requireCourseStaff, assignmentController.deleteAssignment);
+
+router.get('/courses/:course_id/assignments/:assignment_id/submit', requireCourseMember, submissionController.showSubmit);
+router.post('/courses/:course_id/assignments/:assignment_id/submissions', requireCourseMember, submissionController.createSubmission);
+router.post('/courses/:course_id/assignments/:assignment_id/submissions/:submission_id', requireCourseMember, submissionController.updateMySubmission);
+router.get('/my/submissions', requireAuthPage, submissionController.listMySubmissions);
+router.get('/courses/:course_id/assignments/:assignment_id/submissions', requireCourseMember, submissionController.listSubmissionsForAssignment);
+
+router.get('/courses/:course_id/uploads/new', requireCourseStaff, uploadController.showUploadForm);
+router.post('/courses/:course_id/uploads', requireCourseStaff, upload.single('file'), uploadController.createUpload);
+router.get('/courses/:course_id/uploads', requireCourseMember, uploadController.listUploads);
+router.get('/courses/:course_id/uploads/:upload_id/download', requireCourseMember, uploadController.downloadUpload);
+router.post('/courses/:course_id/uploads/:upload_id/delete', requireCourseStaff, uploadController.deleteUpload);
+
+module.exports = router;
+```
+
+---
+
+## 3) `src/controllers/uploadController.js`（完整）
+
+```js
+const fs = require('fs');
+const path = require('path');
+const courseRepository = require('../repositories/courseRepository');
+const uploadRepository = require('../repositories/uploadRepository');
+
+const uploadsDir = path.join(__dirname, '..', '..', 'storage', 'uploads');
+
+function resolveUploadPath(storageName) {
+  const base = path.resolve(uploadsDir);
+  const target = path.resolve(base, String(storageName || ''));
+  if (target === base || !target.startsWith(base + path.sep)) return null;
+  return target;
+}
+
+function showUploadForm(req, res) {
+  const course = courseRepository.findById(Number(req.params.course_id));
+  if (!course) return res.status(404).send('Course not found');
+  res.render('upload_new', { course, error: null });
+}
+
+function createUpload(req, res) {
+  const courseId = Number(req.params.course_id);
+  const course = courseRepository.findById(courseId);
+  if (!course) return res.status(404).send('Course not found');
+  if (!req.file) {
+    return res.status(400).render('upload_new', { course, error: 'file is required' });
+  }
+  const upload = uploadRepository.createUpload({
+    course_id: courseId,
+    uploaded_by: req.currentUser.user_id,
+    original_name: req.file.originalname,
+    // Store only a safe relative filename. Absolute paths are rebuilt from uploadsDir.
+    storage_path: req.file.filename
+  });
+  return res.redirect(`/courses/${courseId}/uploads`);
+}
+
+function apiCreateUpload(req, res) {
+  const courseId = Number(req.params.course_id);
+  if (!req.file) {
+    return res.status(400).json({ success: false, error: 'file is required' });
+  }
+  const upload = uploadRepository.createUpload({
+    course_id: courseId,
+    uploaded_by: req.currentUser.user_id,
+    original_name: req.file.originalname,
+    storage_path: req.file.filename
+  });
+  return res.status(201).json({ success: true, upload });
+}
+
+function listUploads(req, res) {
+  const course = courseRepository.findById(Number(req.params.course_id));
+  if (!course) return res.status(404).send('Course not found');
+  res.render('uploads_list', { course, uploads: uploadRepository.listByCourse(course.course_id) });
+}
+
+function apiListUploads(req, res) {
+  res.json({ success: true, uploads: uploadRepository.listByCourse(Number(req.params.course_id)) });
+}
+
+function downloadUpload(req, res) {
+  const courseId = Number(req.params.course_id);
+  const uploadId = Number(req.params.upload_id);
+  const upload = uploadRepository.findById(courseId, uploadId);
+  if (!upload) return res.status(404).send('Upload not found');
+  const abs = resolveUploadPath(upload.storage_path);
+  if (!abs) return res.status(404).send('Upload not found');
+  return res.download(abs, upload.original_name);
+}
+
+function apiDownloadUpload(req, res) {
+  const courseId = Number(req.params.course_id);
+  const uploadId = Number(req.params.upload_id);
+  const upload = uploadRepository.findById(courseId, uploadId);
+  if (!upload) return res.status(404).json({ success: false, error: 'Upload not found' });
+  const abs = resolveUploadPath(upload.storage_path);
+  if (!abs) return res.status(404).json({ success: false, error: 'Upload not found' });
+  return res.download(abs, upload.original_name);
+}
+
+function deleteUpload(req, res) {
+  const courseId = Number(req.params.course_id);
+  const uploadId = Number(req.params.upload_id);
+  const upload = uploadRepository.findById(courseId, uploadId);
+  if (!upload) return res.status(404).send('Upload not found');
+  const abs = resolveUploadPath(upload.storage_path);
+  if (abs && fs.existsSync(abs)) fs.unlinkSync(abs);
+  uploadRepository.deleteUpload(courseId, uploadId);
+  return res.redirect(`/courses/${courseId}/uploads`);
+}
+
+function apiDeleteUpload(req, res) {
+  const courseId = Number(req.params.course_id);
+  const uploadId = Number(req.params.upload_id);
+  const upload = uploadRepository.findById(courseId, uploadId);
+  if (!upload) return res.status(404).json({ success: false, error: 'Upload not found' });
+  const abs = resolveUploadPath(upload.storage_path);
+  if (abs && fs.existsSync(abs)) fs.unlinkSync(abs);
+  uploadRepository.deleteUpload(courseId, uploadId);
+  return res.json({ success: true });
+}
+
+module.exports = {
+  showUploadForm, createUpload, apiCreateUpload,
+  listUploads, apiListUploads,
+  downloadUpload, apiDownloadUpload,
+  deleteUpload, apiDeleteUpload
+};
+```
+
+---
+
+## 4) `src/controllers/submissionController.js`（完整）
+
+```js
+const assignmentRepository = require('../repositories/assignmentRepository');
+const courseRepository = require('../repositories/courseRepository');
+const submissionRepository = require('../repositories/submissionRepository');
+const membershipRepository = require('../repositories/membershipRepository');
+const uploadRepository = require('../repositories/uploadRepository');
+
+function validateAttachmentUploadId(courseId, rawId) {
+  if (rawId === undefined || rawId === null || String(rawId).trim() === '') return null;
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id <= 0) return { error: 'Invalid attachment upload id' };
+  const upload = uploadRepository.findById(courseId, id);
+  if (!upload) return { error: 'Attachment upload not found' };
+  return id;
+}
+
+function showSubmit(req, res) {
+  const courseId = Number(req.params.course_id);
+  const assignmentId = Number(req.params.assignment_id);
+  const course = courseRepository.findById(courseId);
+  const assignment = assignmentRepository.findById(courseId, assignmentId);
+  if (!course || !assignment) return res.status(404).send('Assignment not found');
+  res.render('submission_new', { course, assignment, error: null });
+}
+
+function createSubmission(req, res) {
+  const courseId = Number(req.params.course_id);
+  const assignmentId = Number(req.params.assignment_id);
+  const { content_text, attachment_upload_id } = req.body;
+  const assignment = assignmentRepository.findById(courseId, assignmentId);
+  if (!assignment) return res.status(404).send('Assignment not found');
+
+  const attachmentId = validateAttachmentUploadId(courseId, attachment_upload_id);
+  if (attachmentId && attachmentId.error) {
+    const course = courseRepository.findById(courseId);
+    return res.status(400).render('submission_new', { course, assignment, error: attachmentId.error });
+  }
+  const submission = submissionRepository.createSubmission({
+    assignment_id: assignmentId,
+    course_id: courseId,
+    student_id: req.currentUser.user_id,
+    content_text,
+    attachment_upload_id: attachmentId || null
+  });
+  return res.redirect(`/my/submissions`);
+}
+
+function apiCreateSubmission(req, res) {
+  const courseId = Number(req.params.course_id);
+  const assignmentId = Number(req.params.assignment_id);
+  const { content_text, attachment_upload_id } = req.body;
+  if (!assignmentRepository.findById(courseId, assignmentId)) {
+    return res.status(404).json({ success: false, error: 'Assignment not found' });
+  }
+
+  const attachmentId = validateAttachmentUploadId(courseId, attachment_upload_id);
+  if (attachmentId && attachmentId.error) {
+    return res.status(400).json({ success: false, error: attachmentId.error });
+  }
+  const submission = submissionRepository.createSubmission({
+    assignment_id: assignmentId,
+    course_id: courseId,
+    student_id: req.currentUser.user_id,
+    content_text,
+    attachment_upload_id: attachmentId || null
+  });
+  return res.status(201).json({ success: true, submission });
+}
+
+function updateMySubmission(req, res) {
+  const courseId = Number(req.params.course_id);
+  const assignmentId = Number(req.params.assignment_id);
+  const submissionId = Number(req.params.submission_id);
+  const { content_text, attachment_upload_id } = req.body;
+  const submission = submissionRepository.findById(courseId, assignmentId, submissionId);
+  if (!submission) return res.status(404).send('Submission not found');
+  if (submission.student_id !== req.currentUser.user_id) return res.status(403).send('Own submission required');
+
+  const attachmentId = validateAttachmentUploadId(courseId, attachment_upload_id);
+  if (attachmentId && attachmentId.error) {
+    return res.status(400).send(attachmentId.error);
+  }
+  submissionRepository.updateSubmission(courseId, assignmentId, submissionId, {
+    content_text,
+    attachment_upload_id: attachmentId || null
+  });
+  return res.redirect('/my/submissions');
+}
+
+function apiUpdateMySubmission(req, res) {
+  const courseId = Number(req.params.course_id);
+  const assignmentId = Number(req.params.assignment_id);
+  const submissionId = Number(req.params.submission_id);
+  const { content_text, attachment_upload_id } = req.body;
+  const submission = submissionRepository.findById(courseId, assignmentId, submissionId);
+  if (!submission) return res.status(404).json({ success: false, error: 'Submission not found' });
+  if (submission.student_id !== req.currentUser.user_id) {
+    return res.status(403).json({ success: false, error: 'Own submission required' });
+  }
+
+  const attachmentId = validateAttachmentUploadId(courseId, attachment_upload_id);
+  if (attachmentId && attachmentId.error) {
+    return res.status(400).json({ success: false, error: attachmentId.error });
+  }
+  const updated = submissionRepository.updateSubmission(courseId, assignmentId, submissionId, {
+    content_text,
+    attachment_upload_id: attachmentId || null
+  });
+  return res.json({ success: true, submission: updated });
+}
+
+function listMySubmissions(req, res) {
+  res.render('my_submissions', {
+    submissions: submissionRepository.listByStudent(req.currentUser.user_id)
+  });
+}
+
+function apiListMySubmissions(req, res) {
+  res.json({
+    success: true,
+    submissions: submissionRepository.listByStudent(req.currentUser.user_id)
+  });
+}
+
+function listSubmissionsForAssignment(req, res) {
+  const courseId = Number(req.params.course_id);
+  const assignmentId = Number(req.params.assignment_id);
+  const course = courseRepository.findById(courseId);
+  const assignment = assignmentRepository.findById(courseId, assignmentId);
+  if (!course || !assignment) return res.status(404).send('Assignment not found');
+  const membership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id);
+  const role = membership && membership.role_in_course;
+  if (!role || !['teacher', 'admin', 'assistant', 'senior-assistant'].includes(role)) {
+    return res.status(403).send('Course staff role required');
+  }
+  res.render('assignment_submissions_list', {
+    course,
+    assignment,
+    submissions: submissionRepository.listByAssignment(courseId, assignmentId)
+  });
+}
+
+function apiListSubmissionsForAssignment(req, res) {
+  const courseId = Number(req.params.course_id);
+  const assignmentId = Number(req.params.assignment_id);
+  const membership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id);
+  const role = membership && membership.role_in_course;
+  if (!role || !['teacher', 'admin', 'assistant', 'senior-assistant'].includes(role)) {
+    return res.status(403).json({ success: false, error: 'Course staff role required' });
+  }
+  res.json({
+    success: true,
+    submissions: submissionRepository.listByAssignment(courseId, assignmentId)
+  });
+}
+
+module.exports = {
+  showSubmit, createSubmission, apiCreateSubmission,
+  updateMySubmission, apiUpdateMySubmission,
+  listMySubmissions, apiListMySubmissions,
+  listSubmissionsForAssignment, apiListSubmissionsForAssignment
+};
+```
+
+---
+
+## 5) `src/repositories/submissionRepository.js`（完整）
+
+```js
+const { db } = require('../db');
+
+function createSubmission({ assignment_id, course_id, student_id, content_text, attachment_upload_id }) {
+  const result = db.prepare(`
+    INSERT INTO submissions (assignment_id, course_id, student_id, content_text, attachment_upload_id)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(assignment_id, course_id, student_id, content_text || '', attachment_upload_id || null);
+  return findById(course_id, assignment_id, result.lastInsertRowid);
+}
+
+function findById(courseId, assignmentId, submissionId) {
+  return db.prepare(`
+    SELECT s.*, u.username AS student_username, u.display_name AS student_display_name,
+           up.original_name AS attachment_original_name
+    FROM submissions s
+    JOIN users u ON u.user_id = s.student_id
+    LEFT JOIN uploads up ON up.upload_id = s.attachment_upload_id AND up.course_id = s.course_id
+    WHERE s.course_id = ? AND s.assignment_id = ? AND s.submission_id = ?
+  `).get(courseId, assignmentId, submissionId);
+}
+
+function listByAssignment(courseId, assignmentId) {
+  return db.prepare(`
+    SELECT s.*, u.username AS student_username, u.display_name AS student_display_name,
+           up.original_name AS attachment_original_name
+    FROM submissions s
+    JOIN users u ON u.user_id = s.student_id
+    LEFT JOIN uploads up ON up.upload_id = s.attachment_upload_id AND up.course_id = s.course_id
+    WHERE s.course_id = ? AND s.assignment_id = ?
+    ORDER BY s.submission_id DESC
+  `).all(courseId, assignmentId);
+}
+
+function listByStudent(studentId) {
+  return db.prepare(`
+    SELECT s.*, a.title AS assignment_title, c.title AS course_title,
+           up.original_name AS attachment_original_name
+    FROM submissions s
+    JOIN assignments a ON a.assignment_id = s.assignment_id
+    JOIN courses c ON c.course_id = s.course_id
+    LEFT JOIN uploads up ON up.upload_id = s.attachment_upload_id AND up.course_id = s.course_id
+    WHERE s.student_id = ?
+    ORDER BY s.submission_id DESC
+  `).all(studentId);
+}
+
+function updateSubmission(courseId, assignmentId, submissionId, { content_text, attachment_upload_id }) {
+  db.prepare(`
+    UPDATE submissions
+    SET content_text = ?, attachment_upload_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE course_id = ? AND assignment_id = ? AND submission_id = ?
+  `).run(content_text || '', attachment_upload_id || null, courseId, assignmentId, submissionId);
+  return findById(courseId, assignmentId, submissionId);
+}
+
+module.exports = { createSubmission, findById, listByAssignment, listByStudent, updateSubmission };
+```
+
+---
+
+## 6) `src/views/submission_new.ejs`（完整）
+
+```ejs
+<%- include('partials/header') %>
+<h1>Submit: <%= assignment.title %></h1>
+<% if (error) { %><p style="color:red;"><%= error %></p><% } %>
+<form method="post" action="/courses/<%= course.course_id %>/assignments/<%= assignment.assignment_id %>/submissions">
+  <div><label>Content</label><textarea name="content_text"></textarea></div>
+  <div>
+    <label>Attachment Upload ID (must be from this course)</label>
+    <input type="number" name="attachment_upload_id" min="1" step="1" placeholder="optional">
+  </div>
+  <button type="submit">Submit</button>
+</form>
+<%- include('partials/footer') %>
+```
+
+---
+
+## 7) `src/views/my_submissions.ejs`（完整）
+
+```ejs
+<%- include('partials/header') %>
+<h1>My Submissions</h1>
+<ul>
+  <% submissions.forEach(function(s) { %>
+    <li>
+      <strong><%= s.course_title %></strong> / <strong><%= s.assignment_title %></strong> — <%= s.content_text %>
+      <form method="post" action="/courses/<%= s.course_id %>/assignments/<%= s.assignment_id %>/submissions/<%= s.submission_id %>">
+        <input type="text" name="content_text" value="<%= s.content_text %>">
+        <input type="number" name="attachment_upload_id" min="1" step="1" value="<%= s.attachment_upload_id || '' %>" placeholder="optional">
+        <button type="submit">Update</button>
+      </form>
+    </li>
+  <% }) %>
+</ul>
+<%- include('partials/footer') %>
+```
+
+---
+
+如果你还需要把这些改动**打包成一个新的 zip（修复后的仓库）**，我也可以直接把修复后的 zip 给你（你现在主要是想 copy，所以先把完整文件都贴出来了）。

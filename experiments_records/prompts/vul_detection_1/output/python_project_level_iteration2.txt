@@ -1,0 +1,729 @@
+[
+{
+"vulnerability_id": "VULN-001",
+"current_status": "still_present",
+"vulnerability_type_code": 9,
+"vulnerability_type": "Authentication Flaw",
+"cwe_id": "CWE-798",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 9.1,
+"severity_level": "critical",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "The application still auto-seeds a privileged administrator account with the predictable credentials admin/admin123. Any external user who knows those defaults can still authenticate through the normal login endpoints and gain privileged application access.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 29,
+"line_end": 31,
+"function_name": "seed_admin",
+"code": "def seed_admin():\n    db = get_db()\n    UsersRepo(db).ensure_admin(username="admin", password="admin123", display_name="Admin")",
+"reason": "The bootstrap path still hard-codes the same predictable administrator username and password."
+},
+{
+"file_path": "app.py",
+"line_start": 126,
+"line_end": 129,
+"function_name": "_bootstrap",
+"code": "@app.before_request\ndef *bootstrap():\n    init_db()\n    seed_admin()",
+"reason": "The insecure seeding path still runs automatically before requests, so the default admin continues to exist during normal execution."
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 17,
+"line_end": 23,
+"function_name": "ensure_admin",
+"code": "def ensure_admin(self, username="admin", password=None, display_name="Admin") -> int:\n    row = self.db.execute("SELECT user_id FROM users WHERE username=?", (username,)).fetchone()\n    if row:\n        return int(row["user_id"])\n    if not password:\n        raise ValueError("admin bootstrap password required")\n    return self.create_user(username, password, display_name)",
+"reason": "The repository still accepts a caller-supplied bootstrap password and creates the admin account directly; the route-layer change did not remove the insecure provisioning model."
+}
+],
+"root_cause_code": 10,
+"root_cause": "The application still ships with a built-in privileged account and predictable credentials, and it still provisions that account automatically during request bootstrap instead of requiring secure first-run initialization.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 29,
+"line_end": 31,
+"function_name": "seed_admin"
+},
+{
+"file_path": "app.py",
+"line_start": 126,
+"line_end": 129,
+"function_name": "*bootstrap"
+},
+{
+"file_path": "repos/users_repo.py",
+"line_start": 17,
+"line_end": 23,
+"function_name": "ensure_admin"
+}
+],
+"repair_plan": "Remove the hard-coded admin password from seed_admin, move privileged bootstrap to an explicit one-time provisioning flow, require a deployment-supplied secret or setup token, and refuse to create a privileged account implicitly on each request.",
+"repair_failure_root_cause": "The previous repair changed ensure_admin to reject a missing password, but seed_admin still passes the same predictable password admin123 on every request, so the original authentication flaw was not actually removed.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"current_status": "bypassable",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.9,
+"severity_level": "medium",
+"confidence_score": 86,
+"confidence_level": "high",
+"summary": "The user-list endpoints now have an added gate, but that gate is bypassable because it treats the predictably seeded admin account as the entire site-admin boundary. An attacker who authenticates with the still-present default admin credentials can still enumerate all registered users through the same endpoints.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/users"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/admin/users"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 94,
+"line_end": 105,
+"function_name": "is_site_admin / require_site_admin",
+"code": "def is_site_admin():\n    return session.get("username") == "admin"\n\ndef require_site_admin(fn):\n    @wraps(fn)\n    def wrapper(*args, **kwargs):\n        if not is_site_admin():\n            if wants_json():\n                return jsonify({"error":"admin_required"}), 403",
+"reason": "The new authorization check is bound only to the session username admin, not to a separately provisioned secure admin role boundary."
+},
+{
+"file_path": "app.py",
+"line_start": 239,
+"line_end": 251,
+"function_name": "users_list / api_users_list",
+"code": "@app.get("/admin/users")\n@require_login\n@require_site_admin\ndef users_list():\n    db = get_db()\n    return render_template("users_list.html", users=UsersRepo(db).list_users())\n\[n@app.get](mailto:n@app.get)("/api/users")\n@require_login\n@require_site_admin\ndef api_users_list():\n    db = get_db()\n    return jsonify({"users": UsersRepo(db).list_users()})",
+"reason": "The endpoints still disclose the full user list once the site-admin check is satisfied."
+},
+{
+"file_path": "app.py",
+"line_start": 29,
+"line_end": 31,
+"function_name": "seed_admin",
+"code": "UsersRepo(db).ensure_admin(username="admin", password="admin123", display_name="Admin")",
+"reason": "Because the default admin account remains predictable and auto-created, the new access-control boundary on the user-list endpoints remains practically bypassable."
+}
+],
+"root_cause_code": 2,
+"root_cause": "The repair added an endpoint guard, but the guard is anchored to an insecure, predictable admin identity instead of a securely provisioned authorization boundary.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 94,
+"line_end": 105,
+"function_name": "is_site_admin / require_site_admin"
+},
+{
+"file_path": "app.py",
+"line_start": 239,
+"line_end": 251,
+"function_name": "users_list / api_users_list"
+},
+{
+"file_path": "app.py",
+"line_start": 29,
+"line_end": 31,
+"function_name": "seed_admin"
+}
+],
+"repair_plan": "Replace the username==admin check with a real server-side privileged-role flag or deployment-only admin bootstrap model, and remove the predictable default admin account so the user-list routes are not reachable through default credentials.",
+"repair_failure_root_cause": "The previous repair focused on adding @require_site_admin to the endpoints, but it left the underlying site-admin identity tied to the still-seeded default admin account, so the listing remains reachable through a closely related bypass path.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-003",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.4,
+"severity_level": "high",
+"confidence_score": 63,
+"confidence_level": "medium",
+"summary": "The route handlers now add a course-management check, but the actual course write methods still mutate by raw course_id alone and are not bound to an authorized principal at the data-write layer. The repair therefore reduces exposure at the HTTP handler layer but does not fully eliminate the original trust in attacker-chosen course identifiers across the complete mutation path.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 321,
+"line_end": 343,
+"function_name": "course_edit_form / course_update",
+"code": "c = CoursesRepo(db).get_course(course_id)\nif not c:\n    return "Not found", 404\nif not can_manage_course(c, int(session["user_id"])):\n    return redirect(url_for("course_detail", course_id=course_id))\n...\nCoursesRepo(db).update_course(course_id, title, description)",
+"reason": "The authorization decision is made in the route, but the subsequent write still executes on a bare course_id."
+},
+{
+"file_path": "app.py",
+"line_start": 346,
+"line_end": 385,
+"function_name": "api_course_update / course_delete / api_course_delete",
+"code": "if not can_manage_course(c, int(session["user_id"])):\n    return jsonify({"error":"forbidden"}), 403\n...\nCoursesRepo(db).update_course(course_id, title, description)\n...\nCoursesRepo(db).delete_course(course_id)",
+"reason": "The same pattern is repeated on the API and delete flows: handler-level checks, then raw identifier-based writes."
+},
+{
+"file_path": "repos/courses_repo.py",
+"line_start": 28,
+"line_end": 33,
+"function_name": "update_course / delete_course",
+"code": "def update_course(self, course_id, title, description):\n    self.db.execute("UPDATE courses SET title=?, description=? WHERE course_id=?", (title, description, course_id))\n    self.db.commit()\n\ndef delete_course(self, course_id):\n    self.db.execute("DELETE FROM courses WHERE course_id=?", (course_id,))",
+"reason": "The repository write operations remain scoped only by course_id and do not bind the write to the authorized creator or membership context."
+}
+],
+"root_cause_code": 11,
+"root_cause": "The repair added pre-write authorization checks in the route layer, but the actual mutation path still trusts a raw course identifier and does not carry the authorization boundary into the write operation itself.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 321,
+"line_end": 385,
+"function_name": "course_edit_form / course_update / api_course_update / course_delete / api_course_delete"
+},
+{
+"file_path": "repos/courses_repo.py",
+"line_start": 28,
+"line_end": 33,
+"function_name": "update_course / delete_course"
+}
+],
+"repair_plan": "Bind course updates and deletes to an authorization-scoped query or an already-authorized course object, and ensure the write path fails closed if the course is not owned by or delegated to the authenticated principal.",
+"repair_failure_root_cause": "The previous repair stopped at route-level checking and did not harden the actual write path, so the original identifier-driven authorization weakness was reduced but not fully removed across the complete mutation flow.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-004",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.1,
+"severity_level": "high",
+"confidence_score": 61,
+"confidence_level": "medium",
+"summary": "The membership-management routes now compare the loaded membership's course_id to the URL course_id, but the fix still trusts an attacker-supplied membership_id as the first lookup key and keeps the authorization binding mostly in the route layer. The repair narrows the original cross-course IDOR but does not fully eliminate identifier trust across the complete membership mutation path.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 448,
+"line_end": 456,
+"function_name": "member_update",
+"code": "membership = MembershipsRepo(db).get_membership(membership_id)\nif not membership or int(membership["course_id"]) != int(course_id):\n    return "Not found", 404\n...\nMembershipsRepo(db).update_role(course_id, membership_id, role)",
+"reason": "The route still begins from attacker-controlled membership_id and only then checks whether the loaded record belongs to the authorized course."
+},
+{
+"file_path": "app.py",
+"line_start": 462,
+"line_end": 494,
+"function_name": "api_member_update / member_remove / api_member_remove",
+"code": "membership = MembershipsRepo(db).get_membership(membership_id)\nif not membership or int(membership["course_id"]) != int(course_id):\n    return jsonify({"error":"not_found"}), 404\n...\nMembershipsRepo(db).remove_member(course_id, membership_id)",
+"reason": "The same membership_id-first lookup pattern is used on every update and delete entry point."
+},
+{
+"file_path": "repos/memberships_repo.py",
+"line_start": 29,
+"line_end": 44,
+"function_name": "get_membership / update_role / remove_member",
+"code": "def get_membership(self, membership_id):\n    r = self.db.execute("SELECT m.*, u.username, u.display_name FROM memberships m JOIN users u ON u.user_id=m.user_id WHERE m.membership_id=?", (membership_id,)).fetchone()\n...\ndef update_role(self, course_id, membership_id, role_in_course):\n    self.db.execute("UPDATE memberships SET role_in_course=? WHERE membership_id=? AND course_id=?", (role_in_course, membership_id, course_id))\n...\ndef remove_member(self, course_id, membership_id):\n    self.db.execute("DELETE FROM memberships WHERE membership_id=? AND course_id=?", (membership_id, course_id))",
+"reason": "The write query is improved, but the workflow still begins with a foreign membership_id lookup detached from the authorized course context."
+}
+],
+"root_cause_code": 11,
+"root_cause": "The repair narrowed the write query, but the system still trusts a cross-course membership identifier before fully binding it to the caller's authorized course context.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 448,
+"line_end": 494,
+"function_name": "member_update / api_member_update / member_remove / api_member_remove"
+},
+{
+"file_path": "repos/memberships_repo.py",
+"line_start": 29,
+"line_end": 44,
+"function_name": "get_membership / update_role / remove_member"
+}
+],
+"repair_plan": "Fetch membership records using a course-scoped query from the start, not a global membership_id lookup, and carry the bound course membership object through the entire mutation path before updating or deleting.",
+"repair_failure_root_cause": "The previous repair tightened the final write predicate, but it did not fully remove the original trust-boundary problem because the flow still resolves the target from a standalone membership_id before the course binding is established.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-005",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.0,
+"severity_level": "high",
+"confidence_score": 66,
+"confidence_level": "medium",
+"summary": "The post update and delete routes now load the target post and check author or staff status, but the repository still has a privileged branch that drops the ownership predicate entirely when the caller is treated as staff. The original identifier-based mutation risk is therefore narrowed but not fully bound to a least-privilege write path.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 600,
+"line_end": 628,
+"function_name": "post_update / api_post_update",
+"code": "p = PostsRepo(db).get_post(course_id, post_id)\n...\nis_staff = can_moderate_course(course_id, user_id)\nif int(p["author_id"]) != user_id and not is_staff:\n    return jsonify({"error":"forbidden"}), 403\n...\nPostsRepo(db).update_post(course_id, post_id, ..., None if is_staff else user_id)",
+"reason": "The route checks ownership, but then explicitly switches to an unconstrained repository write for staff callers."
+},
+{
+"file_path": "app.py",
+"line_start": 634,
+"line_end": 658,
+"function_name": "post_delete / api_post_delete",
+"code": "p = PostsRepo(db).get_post(course_id, post_id)\n...\nis_staff = can_moderate_course(course_id, user_id)\nif int(p["author_id"]) != user_id and not is_staff:\n    return jsonify({"error":"forbidden"}), 403\nPostsRepo(db).delete_post(course_id, post_id, None if is_staff else user_id)",
+"reason": "The delete flow follows the same pattern: once staff classification is reached, the author bind is dropped."
+},
+{
+"file_path": "repos/posts_repo.py",
+"line_start": 30,
+"line_end": 47,
+"function_name": "update_post / delete_post",
+"code": "def update_post(self, course_id, post_id, title, body, author_id=None):\n    if author_id is None:\n        self.db.execute("UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?", ...)\n...\ndef delete_post(self, course_id, post_id, author_id=None):\n    if author_id is None:\n        self.db.execute("DELETE FROM posts WHERE course_id=? AND post_id=?", (course_id, post_id))",
+"reason": "The repository still permits raw identifier-based post mutation whenever the caller reaches the staff branch."
+}
+],
+"root_cause_code": 7,
+"root_cause": "The repair adds an ownership check in the handler, but it still allows a non-owner mutation path that is keyed only by course_id and post_id once the caller is classified as staff.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 600,
+"line_end": 658,
+"function_name": "post_update / api_post_update / post_delete / api_post_delete"
+},
+{
+"file_path": "repos/posts_repo.py",
+"line_start": 30,
+"line_end": 47,
+"function_name": "update_post / delete_post"
+}
+],
+"repair_plan": "Keep the ownership or explicit moderator authorization bound through the write itself, and separate staff moderation from ordinary ownership updates with a dedicated, explicit moderation write path rather than a None-based unconstrained branch.",
+"repair_failure_root_cause": "The previous repair added route-layer ownership checks, but it implemented the staff exception by dropping the ownership predicate at the repository layer, leaving the original identifier-driven mutation pattern partially intact.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-006",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.0,
+"severity_level": "high",
+"confidence_score": 66,
+"confidence_level": "medium",
+"summary": "The comment update and delete routes now check author or staff status, but the repository still has a staff branch that removes the ownership predicate and mutates by comment identifiers alone within the course/post scope. The original peer-to-peer comment IDOR is therefore reduced but not fully eliminated from the complete mutation path.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 709,
+"line_end": 738,
+"function_name": "comment_update / api_comment_update",
+"code": "comment = CommentsRepo(db).get_comment(course_id, post_id, comment_id)\n...\nis_staff = can_moderate_course(course_id, user_id)\nif int(comment["author_id"]) != user_id and not is_staff:\n    return jsonify({"error":"forbidden"}), 403\n...\nCommentsRepo(db).update_comment(course_id, post_id, comment_id, body, None if is_staff else user_id)",
+"reason": "The handler checks ownership first, but it then routes staff callers into a repository write that omits author binding."
+},
+{
+"file_path": "app.py",
+"line_start": 744,
+"line_end": 772,
+"function_name": "comment_delete / api_comment_delete",
+"code": "comment = CommentsRepo(db).get_comment(course_id, post_id, comment_id)\n...\nis_staff = can_moderate_course(course_id, user_id)\nif int(comment["author_id"]) != user_id and not is_staff:\n    return jsonify({"error":"forbidden"}), 403\nCommentsRepo(db).delete_comment(course_id, post_id, comment_id, None if is_staff else user_id)",
+"reason": "The delete path follows the same model and drops the author constraint for staff."
+},
+{
+"file_path": "repos/comments_repo.py",
+"line_start": 30,
+"line_end": 47,
+"function_name": "update_comment / delete_comment",
+"code": "def update_comment(self, course_id, post_id, comment_id, body, author_id=None):\n    if author_id is None:\n        self.db.execute("UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?", ...)\n...\ndef delete_comment(self, course_id, post_id, comment_id, author_id=None):\n    if author_id is None:\n        self.db.execute("DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?", ...)",
+"reason": "The repository still supports unconstrained identifier-based writes whenever the staff branch is selected."
+}
+],
+"root_cause_code": 7,
+"root_cause": "The repair adds a route-level ownership check but still allows a non-owner write branch that omits author binding once the caller is classified as staff.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 709,
+"line_end": 772,
+"function_name": "comment_update / api_comment_update / comment_delete / api_comment_delete"
+},
+{
+"file_path": "repos/comments_repo.py",
+"line_start": 30,
+"line_end": 47,
+"function_name": "update_comment / delete_comment"
+}
+],
+"repair_plan": "Use explicit moderator-only methods for staff actions and keep ordinary comment-owner mutations bound to author_id at the write layer, so the repository no longer relies on a None-based unconstrained branch.",
+"repair_failure_root_cause": "The previous repair checked ownership in the route but implemented the moderation exception by removing the owner predicate from the repository write path, leaving the original identifier-based mutation pattern partially preserved.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-007",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.2,
+"severity_level": "high",
+"confidence_score": 70,
+"confidence_level": "medium",
+"summary": "The list and detail routes for the question bank are now staff-only, but answer-bearing question access is still implemented through the same generic repository methods using the include_answer switch. The repair narrows the exposed surfaces, yet the separation between student-safe question data and staff-only answer data remains a calling-convention choice rather than a hard authorization boundary.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions/:question_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions/:question_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 1068,
+"line_end": 1082,
+"function_name": "questions_list / api_questions_list",
+"code": "@app.get("/courses/[int:course_id](int:course_id)/questions")\n@require_login\n@require_course_staff\ndef questions_list(course_id):\n    db = get_db()\n    items = QuestionsRepo(db).list_questions(course_id, include_answer=True)\n...\[n@app.get](mailto:n@app.get)("/api/courses/[int:course_id](int:course_id)/questions")\n@require_login\n@require_course_staff\ndef api_questions_list(course_id):\n    db = get_db()\n    return jsonify({"questions": QuestionsRepo(db).list_questions(course_id, include_answer=True)})",
+"reason": "The route guard is improved, but answer-bearing data is still fetched through the same repository API by flipping include_answer=True."
+},
+{
+"file_path": "app.py",
+"line_start": 1119,
+"line_end": 1145,
+"function_name": "question_detail / api_question_detail / question_edit_form",
+"code": "q = QuestionsRepo(db).get_question(course_id, question_id, include_answer=True)\nif not q:\n    return jsonify({"error":"not_found"}), 404",
+"reason": "Staff-only access still depends on callers consistently selecting the correct include_answer mode rather than using a separate staff-only data path."
+},
+{
+"file_path": "repos/questions_repo.py",
+"line_start": 16,
+"line_end": 29,
+"function_name": "list_questions / get_question",
+"code": "def list_questions(self, course_id, include_answer=False):\n    fields = "q.*, u.username as creator_username" if include_answer else "q.question_id, q.course_id, q.created_by, q.qtype, q.prompt, q.options_json, q.created_at, q.updated_at, u.username as creator_username"\n...\ndef get_question(self, course_id, question_id, include_answer=False):\n    fields = "q.*, u.username as creator_username" if include_answer else ...",
+"reason": "The repository still exposes answer_json through the same generic methods based on a boolean flag, so the sensitive answer boundary is not strongly separated."
+}
+],
+"root_cause_code": 2,
+"root_cause": "The repair moved the authorization check to the route layer but did not hard-separate staff-only answer-bearing question reads from student-safe question reads at the data-access layer.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 1068,
+"line_end": 1145,
+"function_name": "questions_list / api_questions_list / question_detail / api_question_detail / question_edit_form"
+},
+{
+"file_path": "repos/questions_repo.py",
+"line_start": 16,
+"line_end": 29,
+"function_name": "list_questions / get_question"
+}
+],
+"repair_plan": "Create dedicated repository methods for staff-only answer-bearing question reads and separate methods for student-safe question views that can never return answer_json, so the access-control boundary is enforced structurally rather than by a boolean flag.",
+"repair_failure_root_cause": "The previous repair changed the route decorators but left the sensitive answer data behind a shared include_answer switch, so the answer-exposure boundary is only partially enforced and remains easy to misuse in future or alternate call paths.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-008",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 4,
+"vulnerability_type": "Path Traversal",
+"cwe_id": "CWE-22",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.1,
+"severity_level": "high",
+"confidence_score": 67,
+"confidence_level": "medium",
+"summary": "The upload handlers now sanitize filenames with secure_filename and perform a containment check, but the server still stores and later serves the original untrusted filename as download metadata. The write-path traversal risk is substantially reduced, yet the repair does not fully isolate untrusted filename input from the end-to-end file handling flow.",
+"entry_points": [
+{
+"type": "file upload handler",
+"method": "POST",
+"route": "/api/courses/:course_id/uploads"
+},
+{
+"type": "file upload handler",
+"method": "POST",
+"route": "/courses/:course_id/uploads"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 1009,
+"line_end": 1021,
+"function_name": "upload_create",
+"code": "safe_name = secure_filename(f.filename or "") or "upload.bin"\nstorage_path = os.path.abspath(os.path.join(folder, f"{token}*{safe_name}"))\nif os.path.commonpath([os.path.abspath(folder), storage_path]) != os.path.abspath(folder):\n    return render_template("upload_new.html", course_id=course_id, error="invalid_filename")\nf.save(storage_path)\nUploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)",
+"reason": "The saved path is sanitized, but the original untrusted filename is still persisted unchanged alongside the upload."
+},
+{
+"file_path": "app.py",
+"line_start": 1027,
+"line_end": 1039,
+"function_name": "api_upload_create",
+"code": "safe_name = secure_filename(f.filename or "") or "upload.bin"\nstorage_path = os.path.abspath(os.path.join(folder, f"{token}*{safe_name}"))\n...\nUploadsRepo(db).create_upload(course_id, int(session["user_id"]), f.filename, storage_path)",
+"reason": "The JSON upload path repeats the same pattern of preserving the raw client-supplied filename after sanitation is applied only to the storage path."
+},
+{
+"file_path": "app.py",
+"line_start": 1043,
+"line_end": 1061,
+"function_name": "upload_download / api_upload_download",
+"code": "return send_file(item["storage_path"], as_attachment=True, download_name=item["original_filename"])",
+"reason": "The download path later reflects the original untrusted filename back into file handling metadata, so the repair did not fully sever trust in attacker-controlled filename input."
+}
+],
+"root_cause_code": 6,
+"root_cause": "The repair sanitized the storage path but did not fully isolate untrusted filename input from the broader upload/download lifecycle, leaving client-controlled filename data in downstream file metadata handling.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 1009,
+"line_end": 1061,
+"function_name": "upload_create / api_upload_create / upload_download / api_upload_download"
+}
+],
+"repair_plan": "Continue using a generated server-side storage path, but also validate or normalize the stored presentation filename separately and avoid carrying raw user-supplied filename content unchanged into later download metadata unless it has passed a stricter allowlist.",
+"repair_failure_root_cause": "The previous repair focused on the filesystem write path and containment check, but it did not fully remove trust in the attacker-controlled filename from the rest of the file-handling flow.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-009",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 13,
+"vulnerability_type": "Business Logic",
+"cwe_id": "CWE-840",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.0,
+"severity_level": "high",
+"confidence_score": 72,
+"confidence_level": "medium",
+"summary": "The answer-write endpoints now verify attempt ownership, reject submitted attempts, and check that the question belongs to the quiz, but the business-rule enforcement still depends on route and SQL-guard coupling rather than a single authoritative attempt-state transition. The repair reduces the tampering surface, yet immutability and quiz-question binding are still enforced as scattered checks instead of a single fail-closed domain rule.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 1400,
+"line_end": 1429,
+"function_name": "answer_question / api_answer_question",
+"code": "attempt = QuizzesRepo(db).get_attempt(attempt_id)\nif not attempt or attempt["student_id"] != int(session["user_id"]) or int(attempt["quiz_id"]) != int(quiz_id) or int(attempt["course_id"]) != int(course_id):\n    return jsonify({"error":"not_found"}), 404\nif attempt.get("submitted_at"):\n    return jsonify({"error":"not_found"}), 404\nquestion_id = int(data.get("question_id") or 0)\nif not QuizzesRepo(db).quiz_has_question(quiz_id, question_id):\n    return jsonify({"error":"not_found"}), 404\nQuizzesRepo(db).upsert_answer(attempt_id, quiz_id, question_id, ...)",
+"reason": "The business rules are enforced through multiple route-side checks before delegating to the repository."
+},
+{
+"file_path": "app.py",
+"line_start": 1431,
+"line_end": 1454,
+"function_name": "submit_attempt / api_submit_attempt",
+"code": "attempt = QuizzesRepo(db).get_attempt(attempt_id)\nif not attempt or attempt["student_id"] != int(session["user_id"]) or int(attempt["quiz_id"]) != int(quiz_id) or int(attempt["course_id"]) != int(course_id):\n    return jsonify({"error":"not_found"}), 404\nif attempt.get("submitted_at"):\n    return jsonify({"error":"not_found"}), 404\nQuizzesRepo(db).submit_attempt(attempt_id)",
+"reason": "Submission immutability is also enforced as a pre-check rather than an authoritative attempt-state transition object."
+},
+{
+"file_path": "repos/quizzes_repo.py",
+"line_start": 71,
+"line_end": 92,
+"function_name": "quiz_has_question / submit_attempt / upsert_answer",
+"code": "def quiz_has_question(self, quiz_id, question_id):\n    r = self.db.execute("SELECT 1 FROM quiz_questions WHERE quiz_id=? AND question_id=?", (quiz_id, question_id)).fetchone()\n    return bool(r)\n...\ndef upsert_answer(self, attempt_id, quiz_id, question_id, answer_json_text):\n    self.db.execute(\n        "INSERT INTO quiz_answers(attempt_id,question_id,answer_json,created_at) "\n        "SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM quiz_attempts WHERE attempt_id=? AND submitted_at IS NULL) "\n        "AND EXISTS (SELECT 1 FROM quiz_questions WHERE quiz_id=? AND question_id=?) "\n        "ON CONFLICT(attempt_id,question_id) DO UPDATE SET answer_json=excluded.answer_json, created_at=excluded.created_at", ...)",
+"reason": "The repository adds guards, but the attempt-state and quiz membership rules are still spread across separate lookups and predicates rather than a single domain-level enforcement point."
+}
+],
+"root_cause_code": 12,
+"root_cause": "The repair distributes attempt immutability and quiz-question membership checks across route logic and SQL predicates instead of enforcing them through one authoritative fail-closed attempt-state rule.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 1400,
+"line_end": 1454,
+"function_name": "answer_question / api_answer_question / submit_attempt / api_submit_attempt"
+},
+{
+"file_path": "repos/quizzes_repo.py",
+"line_start": 71,
+"line_end": 92,
+"function_name": "quiz_has_question / submit_attempt / upsert_answer"
+}
+],
+"repair_plan": "Centralize quiz-attempt state validation in a single repository or service method that atomically verifies attempt ownership, quiz binding, question membership, and unsubmitted state before any answer write or submission transition occurs.",
+"repair_failure_root_cause": "The previous repair added several targeted guards, but it did not consolidate the business rules into one authoritative state transition, so the original answer-tampering problem is only partially addressed by scattered checks.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+}
+]

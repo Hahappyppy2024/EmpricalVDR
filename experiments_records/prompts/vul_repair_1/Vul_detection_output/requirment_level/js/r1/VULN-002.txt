@@ -1,0 +1,81 @@
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 10,
+  "vulnerability_type": "Session Weakness",
+  "cwe_id": "CWE-384",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.8,
+  "severity_level": "medium",
+  "confidence_score": 93,
+  "confidence_level": "high",
+  "summary": "The application authenticates users by attaching userId to the existing session without rotating the session identifier after login or registration. An attacker who can set or learn a victim's pre-auth session ID can reuse it after the victim authenticates (session fixation).",
+  "entry_points": [
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/login"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/register"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/api/auth/login"
+    },
+    {
+      "type": "authentication endpoint",
+      "method": "POST",
+      "route": "/api/auth/register"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/controllers/authController.js",
+      "line_start": 7,
+      "line_end": 22,
+      "function_name": "register",
+      "code": "const user = userRepository.createUser({ username, password, display_name });\\nreq.session.userId = user.user_id;\\nreturn res.redirect('/me');",
+      "reason": "Registration logs the user into the existing session by setting session userId without regenerating the session identifier."
+    },
+    {
+      "file_path": "src/controllers/authController.js",
+      "line_start": 45,
+      "line_end": 55,
+      "function_name": "login",
+      "code": "if (!authUser || !userRepository.verifyPassword(authUser, password)) {\\n  return res.status(401).render('login', { error: 'Invalid credentials.' });\\n}\\n\\nreq.session.userId = authUser.user_id;\\nreturn res.redirect('/me');",
+      "reason": "Login binds authenticated identity to the current session without rotating/regenerating the session ID."
+    },
+    {
+      "file_path": "src/controllers/authController.js",
+      "line_start": 57,
+      "line_end": 68,
+      "function_name": "apiLogin",
+      "code": "if (!authUser || !userRepository.verifyPassword(authUser, password)) {\\n  return res.status(401).json({ success: false, error: 'Invalid credentials' });\\n}\\n\\nreq.session.userId = authUser.user_id;\\nconst user = userRepository.findById(authUser.user_id);\\nreturn res.json({ success: true, user });",
+      "reason": "The API login path has the same missing session ID rotation, enabling fixation through API login as well."
+    }
+  ],
+  "root_cause_code": 8,
+  "root_cause": "Authentication state is attached to an existing session without regenerating the session identifier when privilege changes from unauthenticated to authenticated.",
+  "patch_locations": [
+    {
+      "file_path": "src/controllers/authController.js",
+      "line_start": 7,
+      "line_end": 39,
+      "function_name": "register / apiRegister"
+    },
+    {
+      "file_path": "src/controllers/authController.js",
+      "line_start": 45,
+      "line_end": 68,
+      "function_name": "login / apiLogin"
+    }
+  ],
+  "repair_plan": "Regenerate the session identifier immediately after successful login and registration (e.g., req.session.regenerate(...) then set req.session.userId). Ensure the regenerated session is the only authenticated session and keep logout destroying the session server-side.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

@@ -1,0 +1,271 @@
+1. Unified diff patch (git apply compatible). Include only changed files.
+
+```diff
+--- a/app/controllers/PostController.php
++++ b/app/controllers/PostController.php
+@@ -1,26 +1,19 @@
+ <?php
+ 
+-require_once __DIR__ . '/../core/Controller.php';
+-require_once __DIR__ . '/../core/Auth.php';
+-require_once __DIR__ . '/../repositories/PostRepository.php';
+-require_once __DIR__ . '/../repositories/CommentRepository.php';
+-require_once __DIR__ . '/../repositories/CourseRepository.php';
+-require_once __DIR__ . '/../repositories/MembershipRepository.php';
+-
+-class PostController extends Controller
++declare(strict_types=1);
++
++require_once dirname(__DIR__) . '/core/View.php';
++require_once dirname(__DIR__) . '/core/Auth.php';
++
++final class PostController
+ {
+-    private PostRepository $postRepo;
+-    private CommentRepository $commentRepo;
+-    private CourseRepository $courseRepo;
+-    private MembershipRepository $membershipRepo;
+-
+-    public function __construct(array $config, PDO $pdo)
+-    {
+-        parent::__construct($config, $pdo);
+-        $this->postRepo = new PostRepository($pdo);
+-        $this->commentRepo = new CommentRepository($pdo);
+-        $this->courseRepo = new CourseRepository($pdo);
+-        $this->membershipRepo = new MembershipRepository($pdo);
++    public function __construct(
++        private PostRepository $postRepo,
++        private CommentRepository $commentRepo,
++        private CourseRepository $courseRepo,
++        private MembershipRepository $membershipRepo,
++        private array $config
++    ) {
+     }
+ 
+     public function listHtml(int $courseId): void
+@@ -37,25 +30,25 @@
+         json_response(['success' => true, 'posts' => $this->postRepo->listByCourse($courseId)]);
+     }
+ 
++    public function showCreateForm(int $courseId): void
++    {
++        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
++        render('courses/posts/new', ['title' => 'New Post', 'course' => $this->courseRepo->findById($courseId), 'error' => null]);
++    }
++
+     public function createHtml(int $courseId): void
+     {
+         require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+-        render('courses/posts/create', ['title' => 'New Post', 'course' => $this->courseRepo->findById($courseId), 'error' => null]);
+-    }
+-
+-    public function storeHtml(int $courseId): void
+-    {
+-        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+         $userId = require_login($this->config, false);
+         $result = $this->create($courseId, $userId, request_data());
+         if (!$result['success']) {
+-            render('courses/posts/create', ['title' => 'New Post', 'course' => $this->courseRepo->findById($courseId), 'error' => $result['error']]);
++            render('courses/posts/new', ['title' => 'New Post', 'course' => $this->courseRepo->findById($courseId), 'error' => $result['error']]);
+             return;
+         }
+         redirect_to('/courses/' . $courseId . '/posts/' . $result['post']['post_id']);
+     }
+ 
+-    public function storeApi(int $courseId): void
++    public function createApi(int $courseId): void
+     {
+         require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+         $userId = require_login($this->config, true);
+@@ -76,8 +69,13 @@
+         if ($title === '' || $body === '') {
+             return ['success' => false, 'error' => 'title and body are required'];
+         }
+-        $post = $this->postRepo->create($courseId, $userId, $title, $body);
+-        return ['success' => true, 'post' => $post];
++        $postId = $this->postRepo->create([
++            'course_id' => $courseId,
++            'author_id' => $userId,
++            'title' => $title,
++            'body' => $body,
++        ]);
++        return ['success' => true, 'post' => $this->postRepo->findById($courseId, $postId)];
+     }
+ 
+     public function getHtml(int $courseId, int $postId): void
+--- a/app/controllers/CommentController.php
++++ b/app/controllers/CommentController.php
+@@ -1,26 +1,25 @@
+ <?php
+ 
+-require_once __DIR__ . '/../core/Controller.php';
+-require_once __DIR__ . '/../core/Auth.php';
+-require_once __DIR__ . '/../repositories/CommentRepository.php';
+-require_once __DIR__ . '/../repositories/PostRepository.php';
+-require_once __DIR__ . '/../repositories/CourseRepository.php';
+-require_once __DIR__ . '/../repositories/MembershipRepository.php';
++declare(strict_types=1);
+ 
+-class CommentController extends Controller
++require_once dirname(__DIR__) . '/core/View.php';
++require_once dirname(__DIR__) . '/core/Auth.php';
++
++final class CommentController
+ {
+-    private CommentRepository $commentRepo;
+-    private PostRepository $postRepo;
+-    private CourseRepository $courseRepo;
+-    private MembershipRepository $membershipRepo;
++    public function __construct(
++        private CommentRepository $commentRepo,
++        private PostRepository $postRepo,
++        private CourseRepository $courseRepo,
++        private MembershipRepository $membershipRepo,
++        private array $config
++    ) {
++    }
+ 
+-    public function __construct(array $config, PDO $pdo)
++    public function listHtml(int $courseId, int $postId): void
+     {
+-        parent::__construct($config, $pdo);
+-        $this->commentRepo = new CommentRepository($pdo);
+-        $this->postRepo = new PostRepository($pdo);
+-        $this->courseRepo = new CourseRepository($pdo);
+-        $this->membershipRepo = new MembershipRepository($pdo);
++        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
++        redirect_to('/courses/' . $courseId . '/posts/' . $postId);
+     }
+ 
+     public function listApi(int $courseId, int $postId): void
+@@ -32,26 +31,33 @@
+         json_response(['success' => true, 'comments' => $this->commentRepo->listByPost($courseId, $postId)]);
+     }
+ 
+-    public function storeHtml(int $courseId, int $postId): void
++    public function createHtml(int $courseId, int $postId): void
+     {
+         require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+         $userId = require_login($this->config, false);
+         $result = $this->create($courseId, $postId, $userId, request_data());
+         if (!$result['success']) {
+             $post = $this->postRepo->findById($courseId, $postId);
++            $membership = current_course_membership($this->config, $this->membershipRepo, $this->courseRepo, $courseId);
++            $comments = $post ? $this->commentRepo->listByPost($courseId, $postId) : [];
++            foreach ($comments as &$comment) {
++                $comment['can_manage'] = $membership ? can_manage_course_content($membership, $userId, (int) $comment['author_id']) : false;
++            }
++            unset($comment);
+             render('courses/posts/show', [
+                 'title' => $post ? $post['title'] : 'Post Not Found',
+                 'course' => $this->courseRepo->findById($courseId),
+                 'post' => $post,
+-                'comments' => $post ? $this->commentRepo->listByPost($courseId, $postId) : [],
++                'comments' => $comments,
+                 'comment_error' => $result['error'],
++                'can_manage_post' => $post && $membership ? can_manage_course_content($membership, $userId, (int) $post['author_id']) : false,
+             ]);
+             return;
+         }
+         redirect_to('/courses/' . $courseId . '/posts/' . $postId);
+     }
+ 
+-    public function storeApi(int $courseId, int $postId): void
++    public function createApi(int $courseId, int $postId): void
+     {
+         require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+         $userId = require_login($this->config, true);
+@@ -72,8 +78,13 @@
+         if ($body === '') {
+             return ['success' => false, 'error' => 'body is required'];
+         }
+-        $comment = $this->commentRepo->create($courseId, $postId, $userId, $body);
+-        return ['success' => true, 'comment' => $comment];
++        $commentId = $this->commentRepo->create([
++            'course_id' => $courseId,
++            'post_id' => $postId,
++            'author_id' => $userId,
++            'body' => $body,
++        ]);
++        return ['success' => true, 'comment' => $this->commentRepo->findById($courseId, $postId, $commentId)];
+     }
+ 
+     public function updateHtml(int $courseId, int $postId, int $commentId): void
+```
+
+2. Per-vulnerability summary (group by vulnerability_id):
+
+**VULN-001**
+
+* files changed
+
+  * `app/controllers/PostController.php`
+* key checks added
+
+  * Kept the narrowed author-or-true-moderator authorization path already present in `Auth.php`.
+  * Restored controller compatibility with the repository’s real constructor style used by `public/index.php`.
+  * Restored the expected route methods `showCreateForm`, `createHtml`, and `createApi`.
+  * Restored repository call shape to `PostRepository::create(array $data)`.
+* regression restored
+
+  * Fixed the startup/login regression caused by requiring nonexistent `app/core/Controller.php`.
+  * Fixed the constructor mismatch that broke controller instantiation during bootstrap.
+  * Fixed the wrong view path `courses/posts/create` back to existing `courses/posts/new`.
+* why the vulnerability is mitigated (brief)
+
+  * The controller now runs in the intended app architecture again, while the server-side ownership boundary remains narrowed so `assistant` and `senior-assistant` no longer get blanket post-moderation power.
+
+**VULN-002**
+
+* files changed
+
+  * `app/controllers/CommentController.php`
+* key checks added
+
+  * Kept the narrowed author-or-true-moderator authorization path already present in `Auth.php`.
+  * Restored controller compatibility with the repository’s real constructor style used by `public/index.php`.
+  * Restored the expected route methods `listHtml`, `createHtml`, and `createApi`.
+  * Restored repository call shape to `CommentRepository::create(array $data)`.
+  * Preserved `can_manage` and `can_manage_post` flags when re-rendering the post page after HTML comment-creation validation failures.
+* regression restored
+
+  * Fixed the same startup/login regression chain caused by the incompatible base-controller rewrite.
+  * Fixed missing methods expected by `public/index.php` route dispatch.
+* why the vulnerability is mitigated (brief)
+
+  * The comment controller now matches the current repository contract again, and the server still enforces author ownership unless the caller is a real course moderator (`teacher` or `admin`).
+
+3. Functional verification commands (copy-paste):
+
+Run the full functional test suite:
+
+```bash
+pytest -q tests/test_api_functional_r3_posts_comments.py
+```
+
+Optional minimal functional smoke command if full suite is slow:
+
+```bash
+php -l app/controllers/PostController.php && php -l app/controllers/CommentController.php && php -l app/core/Auth.php
+```
+
+4. Security verification commands (copy-paste):
+
+Run the relevant security tests affected by the repaired vulnerabilities:
+
+```bash
+pytest -q tests/test_api_exploit_r3_posts_comments.py
+```
+
+Optional single-test commands for the most relevant repaired paths:
+
+```bash
+pytest -q tests/test_api_exploit_r3_posts_comments.py -k post
+```
+
+```bash
+pytest -q tests/test_api_exploit_r3_posts_comments.py -k comment
+```
+
+Note:
+The controller fatal that broke `/api/auth/login` is repaired by this patch. In this container I could syntax-check the PHP files, but end-to-end execution is blocked by the local PHP runtime missing the SQLite PDO driver (`could not find driver`), so I could not truthfully claim a full green run here.

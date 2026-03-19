@@ -1,0 +1,109 @@
+{
+"vulnerability_id": "VULN-003",
+"vulnerability_type_code": 7,
+"vulnerability_type": "CSRF",
+"cwe_id": "CWE-352",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 6.5,
+"severity_level": "medium",
+"confidence_score": 89,
+"confidence_level": "high",
+"summary": "State-changing server-rendered actions rely only on the session cookie and do not use anti-CSRF tokens. A malicious site can cause a logged-in victim's browser to submit forged POST requests that create, modify, or delete application data.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/delete"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "views/courses/detail.php",
+"line_start": 6,
+"line_end": 8,
+"function_name": null,
+"code": "<form style="display:inline" method="post" action="/courses/<?= h($course['course_id']) ?>/delete"><button type="submit">Delete</button></form>",
+"reason": "A destructive POST form is rendered without any anti-CSRF token or nonce."
+},
+{
+"file_path": "views/posts/detail.php",
+"line_start": 6,
+"line_end": 8,
+"function_name": null,
+"code": "<form style="display:inline" method="post" action="/courses/<?= h($course_id) ?>/posts/<?= h($post['post_id']) ?>/delete"><button type="submit">Delete</button></form>",
+"reason": "Another state-changing form submits purely based on the victim's authenticated browser session and includes no CSRF token."
+},
+{
+"file_path": "views/memberships/list.php",
+"line_start": 12,
+"line_end": 24,
+"function_name": null,
+"code": "<form method="post" action="/courses/<?= h($course_id) ?>/members/<?= h($m['membership_id']) ?>"> ... </form> ... <form method="post" action="/courses/<?= h($course_id) ?>/members/<?= h($m['membership_id']) ?>/delete">",
+"reason": "Privilege-changing and removal forms are also emitted with no per-request CSRF protection."
+},
+{
+"file_path": "src/controllers/CourseController.php",
+"line_start": 69,
+"line_end": 75,
+"function_name": "delete",
+"code": "$u = require_login(); ... require_course_teacher_or_admin(...); $repo->delete($courseId);",
+"reason": "The server accepts the POST action based only on the logged-in session and authorization state; there is no CSRF verification step."
+},
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 71,
+"line_end": 78,
+"function_name": "delete",
+"code": "$u = require_login(); ... require_course_member(...); $repo->delete($courseId, $postId);",
+"reason": "The controller directly executes the state-changing operation after session-based authentication, with no token validation."
+}
+],
+"root_cause_code": 9,
+"root_cause": "The server-rendered POST workflows do not generate or validate any anti-CSRF token, so browser-submitted authenticated requests are trusted solely because the session cookie is present.",
+"patch_locations": [
+{
+"file_path": "src/helpers.php",
+"line_start": 12,
+"line_end": 69,
+"function_name": null
+},
+{
+"file_path": "views/courses/detail.php",
+"line_start": 6,
+"line_end": 8,
+"function_name": null
+},
+{
+"file_path": "views/posts/detail.php",
+"line_start": 6,
+"line_end": 30,
+"function_name": null
+},
+{
+"file_path": "views/memberships/list.php",
+"line_start": 12,
+"line_end": 24,
+"function_name": null
+}
+],
+"repair_plan": "Add a centralized CSRF mechanism for all state-changing server-rendered endpoints: generate a per-session or per-form token, embed it in every POST form, and reject requests whose token is missing or invalid before performing the action. Apply the check consistently across course, post, comment, membership, assignment, quiz, upload, and submission HTML handlers.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

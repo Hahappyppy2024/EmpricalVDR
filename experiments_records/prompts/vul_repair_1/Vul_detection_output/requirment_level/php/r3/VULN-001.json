@@ -1,0 +1,100 @@
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.6,
+  "severity_level": "high",
+  "confidence_score": 98,
+  "confidence_level": "high",
+  "summary": "Any authenticated member of a course can edit or delete another member's post by supplying that post_id within the same course. This allows unauthorized modification or removal of other users' discussion content because the server checks only course membership, not post ownership or a moderation role.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/posts/:post_id/edit"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/posts/:post_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/posts/:post_id/delete"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id/posts/:post_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "DELETE",
+      "route": "/api/courses/:course_id/posts/:post_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app/controllers/PostController.php",
+      "line_start": 95,
+      "line_end": 104,
+      "function_name": "showEditForm",
+      "code": "require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);\n$post = $this->postRepo->findById($courseId, $postId);\n...\nrender('courses/posts/edit', ['title' => 'Edit Post', 'course' => $this->courseRepo->findById($courseId), 'post' => $post, 'error' => null]);",
+      "reason": "The edit form is available to any course member and does not verify that the requester authored the target post or has a staff moderation role."
+    },
+    {
+      "file_path": "app/controllers/PostController.php",
+      "line_start": 107,
+      "line_end": 143,
+      "function_name": "updateHtml/updateApi/update",
+      "code": "require_course_member(..., $courseId, false);\n$result = $this->update($courseId, $postId, request_data());\n...\nif (!$this->postRepo->findById($courseId, $postId)) { return ['success' => false, 'error' => 'Post not found']; }\n...\n$this->postRepo->update($courseId, $postId, ['title' => $title, 'body' => $body]);",
+      "reason": "Both HTML and API update paths require only course membership and then update the post identified by post_id without any ownership or privileged-role check."
+    },
+    {
+      "file_path": "app/controllers/PostController.php",
+      "line_start": 146,
+      "line_end": 169,
+      "function_name": "deleteHtml/deleteApi/delete",
+      "code": "require_course_member(..., $courseId, false);\n$this->delete($courseId, $postId);\n...\nif (!$this->postRepo->findById($courseId, $postId)) { return ['success' => false, 'error' => 'Post not found']; }\n$this->postRepo->delete($courseId, $postId);",
+      "reason": "Deletion uses the same login-plus-membership check and deletes the referenced post without verifying the caller is authorized to remove another user's post."
+    },
+    {
+      "file_path": "app/repositories/PostRepository.php",
+      "line_start": 59,
+      "line_end": 77,
+      "function_name": "update/delete",
+      "code": "UPDATE posts SET title = :title, body = :body, updated_at = :updated_at\nWHERE course_id = :course_id AND post_id = :post_id\n...\nDELETE FROM posts WHERE course_id = :course_id AND post_id = :post_id",
+      "reason": "The repository write operations are scoped only by course_id and post_id and do not constrain updates or deletes by author_id or any authorization condition."
+    }
+  ],
+  "root_cause_code": 7,
+  "root_cause": "Post mutation flows trust the user-supplied post_id after only verifying course membership, and they omit any ownership or moderation authorization check before updating or deleting the targeted post.",
+  "patch_locations": [
+    {
+      "file_path": "app/controllers/PostController.php",
+      "line_start": 95,
+      "line_end": 169,
+      "function_name": "showEditForm/updateHtml/updateApi/update/deleteHtml/deleteApi/delete"
+    },
+    {
+      "file_path": "app/repositories/PostRepository.php",
+      "line_start": 44,
+      "line_end": 77,
+      "function_name": "findById/update/delete"
+    },
+    {
+      "file_path": "app/core/Auth.php",
+      "line_start": 49,
+      "line_end": 78,
+      "function_name": "require_course_member"
+    }
+  ],
+  "repair_plan": "Before serving the edit form or executing post update/delete, load the target post and verify that the authenticated user is the post author or holds an explicitly authorized staff moderation role for that course. Enforce the same rule in both HTML and API handlers, and constrain repository writes by author_id when the caller is a non-staff course member.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

@@ -1,0 +1,95 @@
+{
+"vulnerability_id": "VULN-006",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.1,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "Any authenticated member of a course can edit or delete another member's comment by specifying that comment_id. The server verifies only course membership and never checks whether the acting user authored the comment or has a dedicated moderation permission.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 18,
+"line_end": 26,
+"function_name": "update",
+"code": "$courseId = (int)$p['course_id']; $postId = (int)$p['post_id']; $commentId = (int)$p['comment_id']; require_course_member($this->pdo, $courseId, $u, false); ... (new CommentRepo($this->pdo))->update($courseId, $postId, $commentId, $body);",
+"reason": "Any member of the course can update any comment_id under the post because ownership is never checked."
+},
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 29,
+"line_end": 36,
+"function_name": "delete",
+"code": "$courseId = (int)$p['course_id']; $postId = (int)$p['post_id']; $commentId = (int)$p['comment_id']; require_course_member($this->pdo, $courseId, $u, false); ... (new CommentRepo($this->pdo))->delete($courseId, $postId, $commentId);",
+"reason": "Deletion has the same authorization gap."
+},
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 61,
+"line_end": 81,
+"function_name": "apiUpdate/apiDelete",
+"code": "require_course_member($this->pdo, $courseId, $u, true); ... $c = $repo->update($courseId, $postId, $commentId, $body); ... $repo->delete($courseId, $postId, $commentId);",
+"reason": "The API endpoints repeat the same missing ownership enforcement."
+},
+{
+"file_path": "src/repos/CommentRepo.php",
+"line_start": 26,
+"line_end": 34,
+"function_name": "update/delete",
+"code": "UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=? ... DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?",
+"reason": "The repository write operations are scoped only by identifiers, not by author_id or a privileged moderator rule."
+}
+],
+"root_cause_code": 7,
+"root_cause": "The code authorizes comment modification and deletion based only on course membership and omits an ownership or moderator check for the targeted comment resource.",
+"patch_locations": [
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 18,
+"line_end": 36,
+"function_name": "update/delete"
+},
+{
+"file_path": "src/controllers/CommentController.php",
+"line_start": 61,
+"line_end": 81,
+"function_name": "apiUpdate/apiDelete"
+},
+{
+"file_path": "src/repos/CommentRepo.php",
+"line_start": 19,
+"line_end": 34,
+"function_name": "getById/update/delete"
+}
+],
+"repair_plan": "Load the target comment before modification and verify that the caller is the comment author or a role explicitly permitted to moderate comments. Apply the same authorization rule in both HTML and API paths, and tighten repository updates/deletes so non-staff writes are scoped to author_id as well as the resource identifiers.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

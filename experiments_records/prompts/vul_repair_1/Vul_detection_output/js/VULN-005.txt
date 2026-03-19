@@ -1,0 +1,66 @@
+{
+  "vulnerability_id": "VULN-005",
+  "vulnerability_type_code": 3,
+  "vulnerability_type": "Broken Access Control",
+  "cwe_id": "CWE-284",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.6,
+  "severity_level": "high",
+  "confidence_score": 97,
+  "confidence_level": "high",
+  "summary": "Uploaded files are directly exposed through a public static /uploads path, allowing anyone who knows or guesses the storage filename to retrieve course files without passing the authenticated download endpoint. This bypasses the course membership checks implemented on the intended download route.",
+  "entry_points": [
+    {
+      "type": "other",
+      "method": "GET",
+      "route": "/uploads/:storage_path"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app.js",
+      "line_start": 33,
+      "line_end": 35,
+      "function_name": null,
+      "code": "app.use('/static', express.static(path.join(__dirname, 'src', 'public')));\napp.use('/uploads', express.static(path.join(__dirname, 'data', 'uploads')));",
+      "reason": "The application publishes the uploads directory directly as a public static path, creating an unauthenticated alternate access path for uploaded files."
+    },
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 74,
+      "line_end": 77,
+      "function_name": null,
+      "code": "router.post('/courses/:course_id/uploads', auth.requireLogin, auth.requireCourseMember, auth.requireCourseStaff, uploadCtrl.uploader.single('file'), uploadCtrl.uploadFile);\nrouter.get('/courses/:course_id/uploads', auth.requireLogin, auth.requireCourseMember, uploadCtrl.listUploads);\nrouter.get('/courses/:course_id/uploads/:upload_id/download', auth.requireLogin, auth.requireCourseMember, uploadCtrl.downloadUpload);\nrouter.delete('/courses/:course_id/uploads/:upload_id', auth.requireLogin, auth.requireCourseMember, auth.requireCourseStaff, uploadCtrl.deleteUpload);",
+      "reason": "A protected download route exists and enforces login and course membership, showing that file access was intended to be authorization-controlled."
+    },
+    {
+      "file_path": "src/controllers/uploadController.js",
+      "line_start": 30,
+      "line_end": 35,
+      "function_name": "uploadFile",
+      "code": "const rec = uploadRepo.createUpload({\n  course_id,\n  uploaded_by: me.user_id,\n  original_name: req.file.originalname,\n  storage_path: req.file.filename\n});",
+      "reason": "The application persists the exact storage filename, which is the identifier exposed by the public /uploads static path."
+    }
+  ],
+  "root_cause_code": 2,
+  "root_cause": "The server exposes a sensitive storage directory through a public static route while also maintaining a separate protected download flow, creating an authorization bypass path.",
+  "patch_locations": [
+    {
+      "file_path": "app.js",
+      "line_start": 33,
+      "line_end": 35,
+      "function_name": null
+    },
+    {
+      "file_path": "src/controllers/uploadController.js",
+      "line_start": 47,
+      "line_end": 56,
+      "function_name": "downloadUpload"
+    }
+  ],
+  "repair_plan": "Remove the public express.static mapping for the uploads directory and require all file access to go through a server-side download handler that validates the caller's authorization for the specific course and upload record. Keep storage filenames unguessable but do not rely on obscurity as the access control mechanism.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

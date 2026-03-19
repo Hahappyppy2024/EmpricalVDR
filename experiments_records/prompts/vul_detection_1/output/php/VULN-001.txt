@@ -1,0 +1,71 @@
+{
+"vulnerability_id": "VULN-001",
+"vulnerability_type_code": 9,
+"vulnerability_type": "Authentication Flaw",
+"cwe_id": "CWE-798",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 9.1,
+"severity_level": "critical",
+"confidence_score": 98,
+"confidence_level": "high",
+"summary": "The application seeds a built-in administrator account with a hard-coded username and password. Anyone who knows or guesses these shipped credentials can authenticate as the global admin and take over all administrative functions.",
+"entry_points": [
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/login"
+},
+{
+"type": "authentication endpoint",
+"method": "POST",
+"route": "/api/auth/login"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/bootstrap.php",
+"line_start": 197,
+"line_end": 207,
+"function_name": "seed_admin",
+"code": "$username = 'admin'; ... $password = 'admin123'; ... $ins->execute([$username, $hash, 'Administrator', now_iso()]);",
+"reason": "The code automatically creates a privileged admin account with a fixed, known password on startup."
+},
+{
+"file_path": "src/helpers.php",
+"line_start": 71,
+"line_end": 75,
+"function_name": "is_global_admin",
+"code": "return ($user['username'] ?? '') === 'admin';",
+"reason": "The application treats the seeded 'admin' username as the global administrator, so compromising that account yields global administrative access."
+},
+{
+"file_path": "src/controllers/AuthController.php",
+"line_start": 86,
+"line_end": 102,
+"function_name": "apiLogin",
+"code": "$row = $repo->getAuthByUsername($username); ... if (!$row || !password_verify($password, $row['password_hash'])) { ... } ... $_SESSION['user'] = $u;",
+"reason": "The fixed admin credentials are accepted through the normal login flow and establish an authenticated admin session."
+}
+],
+"root_cause_code": 10,
+"root_cause": "The application embeds and auto-provisions a privileged default credential instead of requiring secure bootstrap or out-of-band administrator setup.",
+"patch_locations": [
+{
+"file_path": "src/bootstrap.php",
+"line_start": 197,
+"line_end": 213,
+"function_name": "seed_admin"
+},
+{
+"file_path": "src/helpers.php",
+"line_start": 71,
+"line_end": 75,
+"function_name": "is_global_admin"
+}
+],
+"repair_plan": "Remove the hard-coded administrator password and stop auto-seeding a reusable privileged account with known credentials. Require explicit first-run administrator initialization through a one-time setup secret or environment-provided credential, and store admin privilege as durable server-side authorization state rather than inferring it from the fixed username 'admin'.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

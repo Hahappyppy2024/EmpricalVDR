@@ -1,0 +1,279 @@
+```diff
+diff --git a/app/controllers/QuizController.php b/app/controllers/QuizController.php
+index 4d739da..81d432c 100644
+--- a/app/controllers/QuizController.php
++++ b/app/controllers/QuizController.php
+@@ -58,6 +58,10 @@ final class QuizController
+         if ($title === '') {
+             return ['success' => false, 'error' => 'title is required'];
+         }
++        $scheduleError = $this->validateSchedule($openAt, $dueAt);
++        if ($scheduleError !== null) {
++            return ['success' => false, 'error' => $scheduleError];
++        }
+         $quizId = $this->quizRepo->create([
+             'course_id' => $courseId,
+             'created_by' => $userId,
+@@ -113,7 +117,8 @@ final class QuizController
+         if (!$quiz) {
+             json_response(['success' => false, 'error' => 'Quiz not found'], 404);
+         }
+-        json_response(['success' => true, 'quiz' => $quiz, 'questions' => $this->quizRepo->listQuizQuestions($courseId, $quizId)]);
++        $includeAnswers = current_user_is_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId);
++        json_response(['success' => true, 'quiz' => $quiz, 'questions' => $this->quizRepo->listQuizQuestions($courseId, $quizId, $includeAnswers)]);
+     }
+ 
+     public function showEditForm(int $courseId, int $quizId): void
+@@ -165,6 +170,10 @@ final class QuizController
+         if ($title === '') {
+             return ['success' => false, 'error' => 'title is required'];
+         }
++        $scheduleError = $this->validateSchedule($openAt, $dueAt);
++        if ($scheduleError !== null) {
++            return ['success' => false, 'error' => $scheduleError];
++        }
+         $this->quizRepo->update($courseId, $quizId, [
+             'title' => $title,
+             'description' => $description,
+@@ -174,6 +183,21 @@ final class QuizController
+         return ['success' => true, 'quiz' => $this->quizRepo->findById($courseId, $quizId)];
+     }
+ 
++
++    private function validateSchedule(string $openAt, string $dueAt): ?string
++    {
++        if ($openAt !== '' && strtotime($openAt) === false) {
++            return 'open_at must be a valid datetime';
++        }
++        if ($dueAt !== '' && strtotime($dueAt) === false) {
++            return 'due_at must be a valid datetime';
++        }
++        if ($openAt !== '' && $dueAt !== '' && strtotime($dueAt) < strtotime($openAt)) {
++            return 'due_at must be greater than or equal to open_at';
++        }
++        return null;
++    }
++
+     public function deleteHtml(int $courseId, int $quizId): void
+     {
+         require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+diff --git a/app/controllers/QuizAttemptController.php b/app/controllers/QuizAttemptController.php
+index c9f2758..01fee8b 100644
+--- a/app/controllers/QuizAttemptController.php
++++ b/app/controllers/QuizAttemptController.php
+@@ -38,9 +38,14 @@ final class QuizAttemptController
+ 
+     private function startAttempt(int $courseId, int $quizId, int $userId): array
+     {
+-        if (!$this->quizRepo->findById($courseId, $quizId)) {
++        $quiz = $this->quizRepo->findById($courseId, $quizId);
++        if (!$quiz) {
+             return ['success' => false, 'error' => 'Quiz not found'];
+         }
++        $availabilityError = $this->validateQuizAvailability($quiz, 'start');
++        if ($availabilityError !== null) {
++            return ['success' => false, 'error' => $availabilityError];
++        }
+         $attemptId = $this->attemptRepo->create($quizId, $courseId, $userId);
+         return ['success' => true, 'attempt' => $this->buildAttemptPayload($courseId, $quizId, $attemptId)];
+     }
+@@ -57,7 +62,7 @@ final class QuizAttemptController
+         $userId = require_student($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+         $result = $this->answer($courseId, $quizId, $attemptId, $userId, request_data());
+         if (!$result['success']) {
+-            $status = in_array($result['error'], ['Attempt not found', 'Question not found in quiz'], true) ? 404 : ($result['error'] === 'Forbidden' ? 403 : 422);
++            $status = in_array($result['error'], ['Attempt not found', 'Question not found in quiz', 'Quiz not found'], true) ? 404 : ($result['error'] === 'Forbidden' ? 403 : 422);
+             json_response($result, $status);
+         }
+         json_response($result, 200);
+@@ -75,6 +80,14 @@ final class QuizAttemptController
+         if ($attempt['submitted_at'] !== null) {
+             return ['success' => false, 'error' => 'Attempt already submitted'];
+         }
++        $quiz = $this->quizRepo->findById($courseId, $quizId);
++        if (!$quiz) {
++            return ['success' => false, 'error' => 'Quiz not found'];
++        }
++        $availabilityError = $this->validateQuizAvailability($quiz, 'answer');
++        if ($availabilityError !== null) {
++            return ['success' => false, 'error' => $availabilityError];
++        }
+         $questionId = (int) ($data['question_id'] ?? 0);
+         if ($questionId <= 0 || !$this->quizRepo->findQuizQuestion($courseId, $quizId, $questionId)) {
+             return ['success' => false, 'error' => 'Question not found in quiz'];
+@@ -99,7 +112,7 @@ final class QuizAttemptController
+         $userId = require_student($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+         $result = $this->submit($courseId, $quizId, $attemptId, $userId);
+         if (!$result['success']) {
+-            $status = $result['error'] === 'Attempt not found' ? 404 : ($result['error'] === 'Forbidden' ? 403 : 422);
++            $status = in_array($result['error'], ['Attempt not found', 'Quiz not found'], true) ? 404 : ($result['error'] === 'Forbidden' ? 403 : 422);
+             json_response($result, $status);
+         }
+         json_response($result, 200);
+@@ -117,6 +130,14 @@ final class QuizAttemptController
+         if ($attempt['submitted_at'] !== null) {
+             return ['success' => false, 'error' => 'Attempt already submitted'];
+         }
++        $quiz = $this->quizRepo->findById($courseId, $quizId);
++        if (!$quiz) {
++            return ['success' => false, 'error' => 'Quiz not found'];
++        }
++        $availabilityError = $this->validateQuizAvailability($quiz, 'submit');
++        if ($availabilityError !== null) {
++            return ['success' => false, 'error' => $availabilityError];
++        }
+         $this->attemptRepo->submit($courseId, $quizId, $attemptId);
+         return ['success' => true, 'attempt' => $this->buildAttemptPayload($courseId, $quizId, $attemptId)];
+     }
+@@ -133,6 +154,34 @@ final class QuizAttemptController
+         json_response(['success' => true, 'attempts' => $this->attemptRepo->listByStudent($userId)]);
+     }
+ 
++
++    private function validateQuizAvailability(array $quiz, string $action): ?string
++    {
++        $now = time();
++        $openAt = $this->parseQuizTime($quiz['open_at'] ?? null);
++        if ($openAt !== null && $now < $openAt) {
++            return 'Quiz is not open yet';
++        }
++        $dueAt = $this->parseQuizTime($quiz['due_at'] ?? null);
++        if ($dueAt !== null && $now > $dueAt) {
++            return $action === 'start' ? 'Quiz is closed' : 'Quiz deadline has passed';
++        }
++        return null;
++    }
++
++    private function parseQuizTime(mixed $value): ?int
++    {
++        if ($value === null) {
++            return null;
++        }
++        $text = trim((string) $value);
++        if ($text == '') {
++            return null;
++        }
++        $timestamp = strtotime($text);
++        return $timestamp === false ? null : $timestamp;
++    }
++
+     private function buildAttemptPayload(int $courseId, int $quizId, int $attemptId): array
+     {
+         $attempt = $this->attemptRepo->findById($courseId, $quizId, $attemptId);
+diff --git a/app/repositories/QuizRepository.php b/app/repositories/QuizRepository.php
+index 4cd32c0..45408d5 100644
+--- a/app/repositories/QuizRepository.php
++++ b/app/repositories/QuizRepository.php
+@@ -79,30 +79,22 @@ final class QuizRepository
+         return $stmt->execute([':course_id' => $courseId, ':quiz_id' => $quizId]);
+     }
+ 
+-    public function listQuizQuestions(int $courseId, int $quizId): array
++    public function listQuizQuestions(int $courseId, int $quizId, bool $includeAnswers = false): array
+     {
+         $stmt = $this->pdo->prepare(
+-            'SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,
+-                    q.qtype, q.prompt, q.options_json, q.answer_json
+-             FROM quiz_questions qq
+-             JOIN quizzes z ON z.quiz_id = qq.quiz_id AND z.course_id = :course_id
+-             JOIN questions q ON q.question_id = qq.question_id AND q.course_id = :course_id
+-             WHERE qq.quiz_id = :quiz_id
++            $this->quizQuestionSelect($includeAnswers)
++            . ' WHERE qq.quiz_id = :quiz_id
+              ORDER BY qq.position ASC, qq.question_id ASC'
+         );
+         $stmt->execute([':course_id' => $courseId, ':quiz_id' => $quizId]);
+         return $stmt->fetchAll();
+     }
+ 
+-    public function findQuizQuestion(int $courseId, int $quizId, int $questionId): ?array
++    public function findQuizQuestion(int $courseId, int $quizId, int $questionId, bool $includeAnswers = false): ?array
+     {
+         $stmt = $this->pdo->prepare(
+-            'SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,
+-                    q.qtype, q.prompt, q.options_json, q.answer_json
+-             FROM quiz_questions qq
+-             JOIN quizzes z ON z.quiz_id = qq.quiz_id AND z.course_id = :course_id
+-             JOIN questions q ON q.question_id = qq.question_id AND q.course_id = :course_id
+-             WHERE qq.quiz_id = :quiz_id AND qq.question_id = :question_id
++            $this->quizQuestionSelect($includeAnswers)
++            . ' WHERE qq.quiz_id = :quiz_id AND qq.question_id = :question_id
+              LIMIT 1'
+         );
+         $stmt->execute([':course_id' => $courseId, ':quiz_id' => $quizId, ':question_id' => $questionId]);
+@@ -110,6 +102,17 @@ final class QuizRepository
+         return $row ?: null;
+     }
+ 
++
++    private function quizQuestionSelect(bool $includeAnswers): string
++    {
++        $answerColumn = $includeAnswers ? ', q.answer_json' : '';
++        return 'SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,
++                       q.qtype, q.prompt, q.options_json' . $answerColumn . '
++                FROM quiz_questions qq
++                JOIN quizzes z ON z.quiz_id = qq.quiz_id AND z.course_id = :course_id
++                JOIN questions q ON q.question_id = qq.question_id AND q.course_id = :course_id';
++    }
++
+     public function addQuizQuestion(int $quizId, int $questionId, int $points, int $position): bool
+     {
+         $stmt = $this->pdo->prepare(
+```
+
+2. Per-vulnerability summary
+
+**VULN-001**
+
+* files changed
+
+  * `app/controllers/QuizController.php`
+  * `app/repositories/QuizRepository.php`
+* key checks added
+
+  * `GET /api/courses/:course_id/quizzes/:quiz_id` now decides server-side whether the current member is course staff.
+  * `QuizRepository::listQuizQuestions()` and `QuizRepository::findQuizQuestion()` now default to a student-safe projection without `answer_json`.
+  * `answer_json` is only included when a caller explicitly passes `$includeAnswers = true`.
+* why the vulnerability is mitigated
+
+  * Student/member-visible quiz detail responses no longer include answer keys, so authenticated students cannot retrieve correct answers through the quiz detail API.
+
+**VULN-002**
+
+* files changed
+
+  * `app/controllers/QuizAttemptController.php`
+  * `app/controllers/QuizController.php`
+* key checks added
+
+  * Quiz start now rejects attempts before `open_at` and after `due_at`.
+  * Answer save now re-loads the quiz and rejects writes before `open_at` or after `due_at`.
+  * Final submit now re-loads the quiz and rejects submission after `due_at`.
+  * Quiz create/update now validates datetime inputs and rejects `due_at < open_at`.
+* why the vulnerability is mitigated
+
+  * The attempt lifecycle now enforces the quiz availability window at the server-side transition points that were previously exploitable, preventing early starts and late answer/submit actions.
+
+3. Functional verification commands (copy-paste)
+
+Full functional suite:
+
+```bash
+php -d variables_order=EGPCS scripts/init.php
+pytest -q tests/functional_tests
+```
+
+Requirement-05 functional tests:
+
+```bash
+php -d variables_order=EGPCS scripts/init.php
+pytest -q tests/functional_tests -k "quiz or question or attempt or requirement_05 or r5"
+```
+
+Minimal functional smoke:
+
+```bash
+php -l app/controllers/QuizController.php && php -l app/controllers/QuizAttemptController.php && php -l app/repositories/QuizRepository.php
+```
+
+I could syntax-check the patched PHP files, but I could not run the database-backed app in this container because the PHP `pdo_sqlite` driver is not installed here.

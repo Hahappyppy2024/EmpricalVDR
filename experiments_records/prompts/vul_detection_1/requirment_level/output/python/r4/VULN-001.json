@@ -1,0 +1,81 @@
+{
+  "vulnerability_id": "VULN-001",
+  "vulnerability_type_code": 3,
+  "vulnerability_type": "Broken Access Control",
+  "cwe_id": "CWE-862",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.4,
+  "severity_level": "high",
+  "confidence_score": 95,
+  "confidence_level": "high",
+  "summary": "Any authenticated member of a course can list and download every uploaded file in that course, even though upload creation and deletion are restricted to course staff. A student in the course can therefore retrieve staff-managed files and other course attachments without a staff-only authorization check.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/uploads"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/courses/:course_id/uploads"
+    },
+    {
+      "type": "file download endpoint",
+      "method": "GET",
+      "route": "/courses/:course_id/uploads/:upload_id/download"
+    },
+    {
+      "type": "file download endpoint",
+      "method": "GET",
+      "route": "/api/courses/:course_id/uploads/:upload_id/download"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 376,
+      "line_end": 410,
+      "function_name": "new_upload_page / create_upload_submit / api_create_upload",
+      "code": "@assignment_bp.route('/courses/<int:course_id>/uploads/new', methods=['GET'])\n@login_required\n@require_course_staff\ndef new_upload_page(course_id):\n    ...\n\n@assignment_bp.route('/courses/<int:course_id>/uploads', methods=['POST'])\n@login_required\n@require_course_staff\ndef create_upload_submit(course_id):\n    ...\n\n@assignment_bp.route('/api/courses/<int:course_id>/uploads', methods=['POST'])\n@login_required\n@require_course_staff\ndef api_create_upload(course_id):\n    ...",
+      "reason": "Upload creation is explicitly limited to course staff, establishing a stronger staff-managed trust boundary for uploaded files."
+    },
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 423,
+      "line_end": 466,
+      "function_name": "list_uploads_page / api_list_uploads / download_upload / api_download_upload",
+      "code": "@assignment_bp.route('/courses/<int:course_id>/uploads', methods=['GET'])\n@login_required\n@require_course_member\ndef list_uploads_page(course_id):\n    ...\n    return render_template('uploads/list.html', course=course, uploads=list_uploads(course_id), current_user=get_current_user())\n\n@assignment_bp.route('/api/courses/<int:course_id>/uploads', methods=['GET'])\n@login_required\n@require_course_member\ndef api_list_uploads(course_id):\n    ...\n    return jsonify({'success': True, 'uploads': [_upload_to_dict(item) for item in list_uploads(course_id)]})\n\n@assignment_bp.route('/courses/<int:course_id>/uploads/<int:upload_id>/download', methods=['GET'])\n@login_required\n@require_course_member\ndef download_upload(course_id, upload_id):\n    ...\n\n@assignment_bp.route('/api/courses/<int:course_id>/uploads/<int:upload_id>/download', methods=['GET'])\n@login_required\n@require_course_member\ndef api_download_upload(course_id, upload_id):\n    ...",
+      "reason": "File listing and download are available to any course member, not only to staff or to the original uploader."
+    },
+    {
+      "file_path": "templates/uploads/list.html",
+      "line_start": 3,
+      "line_end": 12,
+      "function_name": null,
+      "code": "<h1>Uploads in {{ course['title'] }}</h1>\n<p><a href=\"{{ url_for('assignments.new_upload_page', course_id=course['course_id']) }}\">New upload</a></p>\n{% for upload in uploads %}\n<div class=\"card\">\n  <h3>{{ upload['original_name'] }}</h3>\n  <p>Uploaded by {{ upload['display_name'] }}</p>\n  <p><a href=\"{{ url_for('assignments.download_upload', course_id=course['course_id'], upload_id=upload['upload_id']) }}\">Download</a></p>\n  <form method=\"post\" action=\"{{ url_for('assignments.delete_upload_submit', course_id=course['course_id'], upload_id=upload['upload_id']) }}\">",
+      "reason": "The rendered upload list exposes file names and download actions to any user who reaches the member-only upload listing page."
+    }
+  ],
+  "root_cause_code": 2,
+  "root_cause": "The application enforces staff-only authorization for upload creation and deletion but uses only a generic course-member check for listing and downloading uploaded files, collapsing the intended staff/member access boundary.",
+  "patch_locations": [
+    {
+      "file_path": "controllers/assignment_controller.py",
+      "line_start": 423,
+      "line_end": 466,
+      "function_name": "list_uploads_page / api_list_uploads / download_upload / api_download_upload"
+    },
+    {
+      "file_path": "templates/uploads/list.html",
+      "line_start": 3,
+      "line_end": 12,
+      "function_name": null
+    }
+  ],
+  "repair_plan": "Decide which uploads are actually intended to be student-visible and enforce that rule server-side. Restrict listing and download to staff by default, or add an explicit visibility/ownership policy for each upload and verify that policy before returning metadata or file contents. The page should render only the actions allowed for the current user.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

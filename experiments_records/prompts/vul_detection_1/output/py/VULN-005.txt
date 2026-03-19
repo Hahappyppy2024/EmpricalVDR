@@ -1,0 +1,73 @@
+{
+"vulnerability_id": "VULN-005",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.8,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "Any member of a course can edit or delete another member's post by referencing that post_id. The application verifies only course membership and never checks that the caller owns the targeted post or has a higher moderation role.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 529,
+"line_end": 562,
+"function_name": "post_update / api_post_update / post_delete / api_post_delete",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)")\n@require_login\n@require_course_member\ndef post_update(course_id, post_id):\n    ...\n    PostsRepo(db).update_post(course_id, post_id, title, body)\n\[n@app.put](mailto:n@app.put)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)")\n@require_login\n@require_course_member\ndef api_post_update(course_id, post_id):\n    ...\n    PostsRepo(db).update_post(course_id, post_id, ...)\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)/delete")\n@require_login\n@require_course_member\ndef post_delete(course_id, post_id):\n    PostsRepo(db).delete_post(course_id, post_id)\n\[n@app.delete](mailto:n@app.delete)("/api/courses/[int:course_id](int:course_id)/posts/[int:post_id](int:post_id)")\n@require_login\n@require_course_member\ndef api_post_delete(course_id, post_id):\n    PostsRepo(db).delete_post(course_id, post_id)",
+"reason": "The routes require only membership in the course and perform no owner or moderator authorization check on the targeted post."
+},
+{
+"file_path": "repos/posts_repo.py",
+"line_start": 30,
+"line_end": 38,
+"function_name": "update_post / delete_post",
+"code": "def update_post(self, course_id, post_id, title, body):\n    self.db.execute(\n        "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?",\n        (title, body, now_iso(), course_id, post_id),\n    )\n    self.db.commit()\n\ndef delete_post(self, course_id, post_id):\n    self.db.execute("DELETE FROM posts WHERE course_id=? AND post_id=?", (course_id, post_id))",
+"reason": "The repository constrains the write only by course_id and post_id and does not require author_id or another ownership predicate."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Post mutation endpoints treat course membership as sufficient authorization and omit an ownership or moderator check for the specific post being edited or deleted.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 529,
+"line_end": 562,
+"function_name": "post_update / api_post_update / post_delete / api_post_delete"
+},
+{
+"file_path": "repos/posts_repo.py",
+"line_start": 30,
+"line_end": 38,
+"function_name": "update_post / delete_post"
+}
+],
+"repair_plan": "Load the target post before modification or deletion, verify that the caller is the post author or has an explicitly authorized moderation role in that course, and scope write queries by both post_id and the authorized principal. Reject requests that target posts owned by other users without elevated privilege.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

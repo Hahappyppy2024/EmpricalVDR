@@ -1,0 +1,229 @@
+[
+{
+"vulnerability_id": "VULN-001",
+"current_status": "incorrectly_fixed",
+"vulnerability_type_code": 11,
+"vulnerability_type": "Sensitive Data Exposure",
+"cwe_id": "CWE-200",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.3,
+"severity_level": "high",
+"confidence_score": 88,
+"confidence_level": "high",
+"summary": "The previous repair changed question-bank reads from course-member access to staff-only access, which breaks the requirement-stage student flow instead of removing sensitive fields from member-visible responses. The underlying question-bank handlers and view still return and render answer_json verbatim, so the original answer-disclosure risk was not eliminated by a consistent student-safe field projection strategy.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions/:question_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions/:question_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/quizzes/:quiz_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/routes/api.js",
+"line_start": 92,
+"line_end": 95,
+"function_name": null,
+"code": "router.post('/courses/:course_id/questions', requireCourseStaff, questionController.apiCreateQuestion);\nrouter.get('/courses/:course_id/questions', requireCourseStaff, questionController.apiListQuestions);\nrouter.get('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiGetQuestion);\nrouter.put('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiUpdateQuestion);",
+"reason": "The repair replaced member-readable question-bank GET routes with staff-only middleware, which explains the 403 regression in the requirement-level student flow instead of solving the exposure by returning a student-safe representation."
+},
+{
+"file_path": "src/controllers/questionController.js",
+"line_start": 35,
+"line_end": 51,
+"function_name": "apiListQuestions / apiGetQuestion",
+"code": "function apiListQuestions(req, res) {\n  res.json({ success: true, questions: questionRepository.listByCourse(Number(req.params.course_id)) });\n}\n...\nfunction apiGetQuestion(req, res) {\n  const question = questionRepository.findById(Number(req.params.course_id), Number(req.params.question_id));\n  if (!question) return res.status(404).json({ success: false, error: 'Question not found' });\n  res.json({ success: true, question });\n}",
+"reason": "The question API handlers still use the raw repository methods that return full question rows, including answer_json, so the sensitive field is not removed at the controller layer."
+},
+{
+"file_path": "src/repositories/questionRepository.js",
+"line_start": 11,
+"line_end": 18,
+"function_name": "listByCourse",
+"code": "return db.prepare(`\n  SELECT q.*, u.username AS creator_username, u.display_name AS creator_display_name\n  FROM questions q\n  JOIN users u ON u.user_id = q.created_by\n  WHERE q.course_id = ?\n  ORDER BY q.question_id DESC\n`).all(courseId);",
+"reason": "The repository still returns q.* for question listings, which includes answer_json, so member-safe field projection was not implemented on this read path."
+},
+{
+"file_path": "src/repositories/questionRepository.js",
+"line_start": 21,
+"line_end": 27,
+"function_name": "findById",
+"code": "return db.prepare(`\n  SELECT q.*, u.username AS creator_username, u.display_name AS creator_display_name\n  FROM questions q\n  JOIN users u ON u.user_id = q.created_by\n  WHERE q.course_id = ? AND q.question_id = ?\n`).get(courseId, questionId);",
+"reason": "The detail lookup still returns the full answer-bearing row, so the sensitive field remains present whenever this handler is reachable."
+},
+{
+"file_path": "src/views/question_show.ejs",
+"line_start": 3,
+"line_end": 6,
+"function_name": null,
+"code": "<p><strong>Type:</strong> <%= question.qtype %></p>\n<p><strong>Prompt:</strong> <%= question.prompt %></p>\n<p><strong>Options JSON:</strong> <%= question.options_json || '' %></p>\n<p><strong>Answer JSON:</strong> <%= question.answer_json || '' %></p>",
+"reason": "The server-rendered question detail view still explicitly renders answer_json, so the sensitive data handling bug remains in the presentation layer."
+},
+{
+"file_path": "src/controllers/quizController.js",
+"line_start": 54,
+"line_end": 63,
+"function_name": "apiGetQuiz",
+"code": "const membership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id);\nconst role = membership && membership.role_in_course;\nconst canViewAnswers = ['teacher', 'admin', 'assistant', 'senior-assistant'].includes(role);\nconst quizQuestions = canViewAnswers ? quizRepository.listQuizQuestions(quizId) : quizRepository.listQuizQuestionsSafe(quizId);\nres.json({ success: true, quiz, quiz_questions: quizQuestions });",
+"reason": "Quiz detail now uses a safe projection for non-staff, showing the prior repair only partially addressed this vulnerability family and did not apply the same projection strategy to question-bank reads."
+}
+],
+"root_cause_code": 11,
+"root_cause": "The repair relied on a coarse trust-boundary change at routing time instead of consistently projecting a student-safe question representation across all member-visible read paths. Raw answer-bearing repository methods and the answer-rendering view remain in place for question-bank reads.",
+"patch_locations": [
+{
+"file_path": "src/controllers/questionController.js",
+"line_start": 28,
+"line_end": 51,
+"function_name": "listQuestions / apiListQuestions / getQuestion / apiGetQuestion"
+},
+{
+"file_path": "src/repositories/questionRepository.js",
+"line_start": 11,
+"line_end": 41,
+"function_name": "listByCourse / findById / listByCourseSafe / findByIdSafe"
+},
+{
+"file_path": "src/views/question_show.ejs",
+"line_start": 1,
+"line_end": 9,
+"function_name": null
+},
+{
+"file_path": "src/routes/api.js",
+"line_start": 92,
+"line_end": 95,
+"function_name": null
+},
+{
+"file_path": "src/routes/web.js",
+"line_start": 105,
+"line_end": 108,
+"function_name": null
+}
+],
+"repair_plan": "Keep the requirement-stage member-readable question flow only if needed by the feature, but switch those member-visible question handlers to use findByIdSafe and listByCourseSafe or an equivalent field projection that excludes answer_json and other grading secrets. Preserve staff-only access only for full answer-bearing management views, and remove answer_json rendering from any student-reachable template or API response.",
+"repair_failure_root_cause": "The previous repair fixed the symptom by denying question-bank GET access to students, but it did not fix the underlying data-exposure design because the question controllers, repositories, and template still emit answer_json verbatim. As a result, the repair caused a functional regression while leaving the original sensitive-field handling unresolved in the code paths themselves.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"current_status": "partially_fixed",
+"vulnerability_type_code": 13,
+"vulnerability_type": "Business Logic",
+"cwe_id": "CWE-841",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.1,
+"severity_level": "high",
+"confidence_score": 91,
+"confidence_level": "high",
+"summary": "The prior repair added controller-side checks that reject arbitrary question_id values on the current answer endpoints, but the quiz-question binding rule is still not enforced in the write layer itself. The same invalid-state mutation remains possible for any future or alternate caller of saveAnswer because the persistence path still trusts a bare attempt_id and question_id pair without binding the question to the quiz.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/quizController.js",
+"line_start": 181,
+"line_end": 193,
+"function_name": "answerQuestion",
+"code": "const questionId = Number(question_id);\nif (!questionId || !quizRepository.isQuestionInQuiz(quizId, questionId)) return res.status(404).send('Question not found');\nquizRepository.saveAnswer({ attempt_id: attemptId, question_id: questionId, answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });",
+"reason": "The web handler now performs a pre-save membership check, so the previous exploit is blocked at this one call site rather than being enforced by the write path itself."
+},
+{
+"file_path": "src/controllers/quizController.js",
+"line_start": 196,
+"line_end": 209,
+"function_name": "apiAnswerQuestion",
+"code": "if (!question_id || answer_json === undefined) return res.status(400).json({ success: false, error: 'question_id and answer_json are required' });\nconst questionId = Number(question_id);\nif (!questionId || !quizRepository.isQuestionInQuiz(quizId, questionId)) return res.status(404).json({ success: false, error: 'Question not found' });\nconst answers = quizRepository.saveAnswer({ attempt_id: attemptId, question_id: questionId, answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });",
+"reason": "The API handler also performs the check only at the controller layer, meaning the business rule is not centralized at the actual write operation."
+},
+{
+"file_path": "src/repositories/quizRepository.js",
+"line_start": 97,
+"line_end": 103,
+"function_name": "isQuestionInQuiz",
+"code": "const row = db.prepare(`\n  SELECT 1\n  FROM quiz_questions\n  WHERE quiz_id = ? AND question_id = ?\n`).get(quizId, questionId);\nreturn !!row;",
+"reason": "A helper exists for validating the quiz-question relationship, but it is not integrated into saveAnswer or backed by a database-level integrity check."
+},
+{
+"file_path": "src/repositories/quizRepository.js",
+"line_start": 106,
+"line_end": 112,
+"function_name": "saveAnswer",
+"code": "db.prepare(`\n  INSERT INTO quiz_answers (attempt_id, question_id, answer_json)\n  VALUES (?, ?, ?)\n  ON CONFLICT(attempt_id, question_id) DO UPDATE SET answer_json = excluded.answer_json, created_at = CURRENT_TIMESTAMP\n`).run(attempt_id, question_id, answer_json);\nreturn listAnswersByAttempt(attempt_id);",
+"reason": "The persistence layer still accepts any question_id for a given attempt_id and never validates that the question belongs to the attempt's quiz, so the business rule is still absent at the state-mutation boundary."
+},
+{
+"file_path": "src/repositories/quizRepository.js",
+"line_start": 88,
+"line_end": 94,
+"function_name": "findAttemptById",
+"code": "return db.prepare(`\n  SELECT qa.*, u.username AS student_username, u.display_name AS student_display_name\n  FROM quiz_attempts qa\n  JOIN users u ON u.user_id = qa.student_id\n  WHERE qa.course_id = ? AND qa.quiz_id = ? AND qa.attempt_id = ?\n`).get(courseId, quizId, attemptId);",
+"reason": "The attempt record contains the quiz context needed to enforce the binding at the repository layer, but saveAnswer does not use that context when writing quiz_answers."
+}
+],
+"root_cause_code": 12,
+"root_cause": "The repair added endpoint-level validation but did not move the quiz-question binding rule into the write boundary or schema, so the data layer still permits logically invalid answer records keyed only by identifiers.",
+"patch_locations": [
+{
+"file_path": "src/repositories/quizRepository.js",
+"line_start": 88,
+"line_end": 112,
+"function_name": "findAttemptById / isQuestionInQuiz / saveAnswer"
+},
+{
+"file_path": "src/controllers/quizController.js",
+"line_start": 181,
+"line_end": 209,
+"function_name": "answerQuestion / apiAnswerQuestion"
+},
+{
+"file_path": "scripts/initDb.js",
+"line_start": 1,
+"line_end": 240,
+"function_name": null
+}
+],
+"repair_plan": "Enforce the quiz-question membership rule at the write boundary by making saveAnswer validate attempt_id against the attempt's quiz and reject any question_id not present in quiz_questions for that quiz. Where possible, strengthen the schema as well, such as by adding a repository transaction or relational constraint strategy that prevents quiz_answers from being inserted unless the attempt and question belong to the same configured quiz.",
+"repair_failure_root_cause": "The previous repair stopped the known exploit only in the current controllers and left the core state transition unchanged. Because saveAnswer still trusts raw identifiers and the database schema does not bind quiz_answers to quiz_questions through the attempt's quiz, the original business-rule failure remains only partially fixed.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+}
+]

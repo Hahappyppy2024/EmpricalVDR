@@ -1,0 +1,338 @@
+You are a senior application security engineer analyzing a complete web application project after a previous vulnerability repair attempt.
+
+Inputs provided to you:
+1. Previous vulnerability detection report
+2. Previous vulnerability repair report / patch / summary
+3. Failed functional test results
+4. Failed security exploit test results
+5. The current project codebase
+
+Your task is to produce a strict repair-failure re-analysis report anchored to the first vulnerability detection report.
+
+This is NOT a fresh vulnerability discovery task.
+This is NOT a reclassification task.
+This is NOT a new vulnerability taxonomy pass.
+
+The first vulnerability detection report is the authoritative baseline for vulnerability identity in this iteration.
+
+--------------------------------------------------
+Mandatory Task Assumption
+--------------------------------------------------
+
+For this task, all vulnerabilities from the first vulnerability detection report must be treated as not successfully repaired.
+
+This assumption is mandatory and must not be re-evaluated.
+
+Therefore:
+- do not classify any original vulnerability as fully mitigated,
+- do not omit any original vulnerability from the output,
+- return exactly one output object for every vulnerability_id in the first vulnerability detection report,
+- and analyze how the previous repair attempt failed for each original vulnerability in the current codebase.
+
+Allowed current_status values in this task are exactly:
+- "still_present"
+- "partially_fixed"
+- "incorrectly_fixed"
+- "bypassable"
+
+Do not use "fully_mitigated" in this task.
+
+--------------------------------------------------
+Analysis Objective
+--------------------------------------------------
+
+Analyze the entire project as a whole system, not as isolated files.
+
+For every vulnerability in the first vulnerability detection report:
+- preserve the same vulnerability_id,
+- preserve the same vulnerability identity,
+- do not rename, split, merge, replace, or reinterpret it as a different vulnerability unless the previous classification is clearly impossible to maintain,
+- determine how that same vulnerability remains unresolved after the repair attempt,
+- explain why the previous repair did not fully succeed,
+- identify the remaining repair root cause,
+- and provide the next repair plan.
+
+Focus only on vulnerabilities supported by concrete current-code evidence.
+
+Do NOT perform a broad new vulnerability discovery pass.
+Only mention a newly introduced regression if it is directly caused by the previous repair attempt, is closely related to a previous vulnerability, and is clearly supported by current code evidence.
+
+Use the failed functional test results and failed security exploit test results only as supporting signals.
+Final conclusions must still be grounded in the current codebase.
+
+--------------------------------------------------
+Core Reporting Rules
+--------------------------------------------------
+
+1. Use the first vulnerability detection report as the required baseline.
+
+2. Re-analyze every vulnerability from that report against the current codebase.
+
+3. Every original vulnerability_id must appear exactly once in the output.
+
+4. No original vulnerability_id may be omitted.
+
+5. No new vulnerability_id may be introduced.
+
+6. Do not redefine, rename, split, merge, replace, or reinterpret previously reported vulnerabilities unless clearly required by the current code evidence.
+
+7. For each vulnerability, classify the unresolved state as exactly one of:
+   - still_present
+   - partially_fixed
+   - incorrectly_fixed
+   - bypassable
+
+8. Do not merely restate the original vulnerability.
+   The focus is the repair-failure analysis layer for that same vulnerability.
+
+9. For every vulnerability, explicitly explain:
+   - what was changed by the previous repair attempt,
+   - why that change did not fully eliminate the original risk,
+   - what implementation mistake still remains,
+   - and what concrete repair action should happen next.
+
+10. Only report conclusions supported by direct code evidence.
+
+11. Use the narrowest possible file and line ranges.
+
+12. If exact line numbers are uncertain, provide the smallest reasonable range and lower confidence accordingly.
+
+--------------------------------------------------
+Output Requirements
+--------------------------------------------------
+
+Return ONLY valid JSON.
+
+Do not include markdown.
+Do not include explanations outside the JSON.
+Do not include any prose before or after the JSON.
+
+The output must be a JSON array.
+
+The number of output objects must exactly equal the number of vulnerabilities in the first vulnerability detection report.
+
+Each element must represent exactly one vulnerability_id from the first vulnerability detection report.
+
+--------------------------------------------------
+JSON Schema
+--------------------------------------------------
+
+[
+  {
+    "vulnerability_id": "VULN-001",
+    "current_status": "partially_fixed",
+
+    "vulnerability_type_code": 8,
+    "vulnerability_type": "IDOR",
+    "cwe_id": "CWE-639",
+
+    "cvss_version": "CVSS v4.0 (2023)",
+    "cvss_score": 8.6,
+    "severity_level": "high",
+
+    "confidence_score": 92,
+    "confidence_level": "high",
+
+    "summary": "The application still allows an authenticated user to modify another user's resource by supplying a different resource identifier without fully verifying ownership.",
+
+    "entry_points": [
+      {
+        "type": "JSON API endpoint",
+        "method": "PUT",
+        "route": "/api/posts/:postId"
+      }
+    ],
+
+    "evidence_snippets": [
+      {
+        "file_path": "src/controllers/postController.js",
+        "line_start": 48,
+        "line_end": 58,
+        "function_name": "updatePost",
+        "code": "const postId = req.params.postId; await postRepo.updatePostById(postId, req.body);",
+        "reason": "The controller still uses the user-supplied postId on a mutation path without fully enforcing ownership."
+      }
+    ],
+
+    "root_cause_code": 7,
+    "root_cause": "The original ownership and authorization boundary is still not fully enforced before updating a user-controlled resource identifier.",
+
+    "patch_locations": [
+      {
+        "file_path": "src/controllers/postController.js",
+        "line_start": 42,
+        "line_end": 67,
+        "function_name": "updatePost"
+      }
+    ],
+
+    "repair_plan": "Load the target post before modification, verify that the authenticated user owns it or holds an explicitly authorized elevated role, and ensure the write path is consistently scoped to the authorized resource.",
+
+    "repair_failure_root_cause": "The previous repair did not fully bind the attacker-controlled resource identifier to the authorized owner context across the complete mutation path.",
+
+    "detection_report_complete": 1,
+    "has_root_cause": 1,
+    "has_patch_location": 1,
+    "has_repair_plan": 1,
+    "has_repair_failure_root_cause": 1
+  }
+]
+
+--------------------------------------------------
+Field Requirements
+--------------------------------------------------
+
+For every vulnerability object:
+
+1. vulnerability_id
+- Reuse the exact vulnerability_id from the previous vulnerability detection report.
+- Do not create a new ID.
+- Every original vulnerability_id must appear exactly once.
+
+2. current_status
+- Must be exactly one of:
+  - "still_present"
+  - "partially_fixed"
+  - "incorrectly_fixed"
+  - "bypassable"
+
+3. vulnerability_type_code
+- Must remain consistent with the previous vulnerability detection report unless clearly impossible to maintain.
+
+4. vulnerability_type
+- Must remain semantically consistent with the previous vulnerability detection report unless clearly impossible to maintain.
+
+5. cwe_id
+- Prefer preserving the prior CWE when still semantically correct.
+
+6. cvss_version
+- Must be exactly: "CVSS v4.0 (2023)"
+
+7. cvss_score
+- Numeric value from 0.0 to 10.0
+- Use one decimal place at most.
+
+8. severity_level
+- Must match cvss_score:
+  - 0.0 = none
+  - 0.1 to 3.9 = low
+  - 4.0 to 6.9 = medium
+  - 7.0 to 8.9 = high
+  - 9.0 to 10.0 = critical
+
+9. confidence_score
+- Integer from 0 to 100.
+
+10. confidence_level
+- Must match confidence_score:
+  - 0 to 39 = low
+  - 40 to 74 = medium
+  - 75 to 100 = high
+
+11. summary
+- 1 to 3 sentences
+- Describe what still remains, who can exploit it, and the consequence.
+
+12. entry_points
+- Include:
+  - type
+  - method
+  - route
+
+13. evidence_snippets
+- Each snippet must include:
+  - file_path
+  - line_start
+  - line_end
+  - function_name when available
+  - code
+  - reason
+
+14. root_cause_code
+- Must use the enumeration below.
+
+15. root_cause
+- Explain the current implementation mistake that still leaves this same vulnerability unresolved.
+
+16. patch_locations
+- List the most likely edit locations for the next repair attempt.
+
+17. repair_plan
+- Give concrete next-step repair guidance.
+
+18. repair_failure_root_cause
+- Explain specifically why the previous repair did not successfully fix this same vulnerability.
+
+19. detection_report_complete
+- Use 1 if the object contains all core required elements, else 0.
+
+20. has_root_cause
+- Use 1 if root_cause is present, else 0.
+
+21. has_patch_location
+- Use 1 if patch_locations is present, else 0.
+
+22. has_repair_plan
+- Use 1 if repair_plan is present, else 0.
+
+23. has_repair_failure_root_cause
+- Use 1 if repair_failure_root_cause is present, else 0.
+
+--------------------------------------------------
+Enumerations
+--------------------------------------------------
+
+vulnerability_type_code
+1 = SQL Injection
+2 = Command Injection
+3 = Broken Access Control
+4 = Path Traversal
+5 = Insecure File Upload
+6 = XSS
+7 = CSRF
+8 = IDOR
+9 = Authentication Flaw
+10 = Session Weakness
+11 = Sensitive Data Exposure
+12 = Open Redirect
+13 = Business Logic
+99 = Other
+
+root_cause_code
+1 = missing input validation
+2 = missing authorization check
+3 = missing authentication check
+4 = unsafe query construction
+5 = unsafe output encoding
+6 = unsafe file path handling
+7 = missing ownership check
+8 = unsafe session handling
+9 = missing CSRF protection
+10 = insecure configuration
+11 = trust boundary violation
+12 = business rule enforcement failure
+99 = other
+
+--------------------------------------------------
+Inputs
+--------------------------------------------------
+
+- Previous vulnerability detection report:
+<<<PREVIOUS_VD_REPORT_START
+PASTE PREVIOUS VD REPORT HERE
+PREVIOUS_VD_REPORT_END>>>
+
+- Previous vulnerability repair report / patch / summary:
+<<<PREVIOUS_REPAIR_REPORT_START
+PASTE PREVIOUS REPAIR REPORT HERE
+PREVIOUS_REPAIR_REPORT_END>>>
+
+- Failed Functional test results:
+<<<FAILED_FUNCTIONAL_TEST_RESULTS_START
+PASTE FAILED FUNCTIONAL TEST RESULTS HERE
+FAILED_FUNCTIONAL_TEST_RESULTS_END>>>
+
+- Security exploit test results:
+<<<FAILED_SECURITY_TEST_RESULTS_START
+PASTE FAILED SECURITY TEST RESULTS HERE
+FAILED_SECURITY_TEST_RESULTS_END>>>

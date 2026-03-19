@@ -1,0 +1,73 @@
+{
+"vulnerability_id": "VULN-004",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.6,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "A teacher or admin in one course can change or remove memberships belonging to a different course by supplying a foreign membership_id. The route checks privileges only against the course_id in the URL, while the database write uses membership_id alone.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.py",
+"line_start": 392,
+"line_end": 429,
+"function_name": "member_update / api_member_update / member_remove / api_member_remove",
+"code": "@app.post("/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)")\n@require_login\n@require_teacher_or_admin\ndef member_update(course_id, membership_id):\n    ...\n    MembershipsRepo(db).update_role(membership_id, role)\n\[n@app.put](mailto:n@app.put)("/api/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)")\n@require_login\n@require_teacher_or_admin\ndef api_member_update(course_id, membership_id):\n    ...\n    MembershipsRepo(db).update_role(membership_id, role)\n\[n@app.post](mailto:n@app.post)("/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)/delete")\n@require_login\n@require_teacher_or_admin\ndef member_remove(course_id, membership_id):\n    MembershipsRepo(db).remove_member(membership_id)\n\[n@app.delete](mailto:n@app.delete)("/api/courses/[int:course_id](int:course_id)/members/[int:membership_id](int:membership_id)")\n@require_login\n@require_teacher_or_admin\ndef api_member_remove(course_id, membership_id):\n    MembershipsRepo(db).remove_member(membership_id)",
+"reason": "Authorization is evaluated against the URL course_id, but the target membership record is never verified to belong to that course before update or delete."
+},
+{
+"file_path": "repos/memberships_repo.py",
+"line_start": 29,
+"line_end": 34,
+"function_name": "update_role / remove_member",
+"code": "def update_role(self, membership_id, role_in_course):\n    self.db.execute("UPDATE memberships SET role_in_course=? WHERE membership_id=?", (role_in_course, membership_id))\n    self.db.commit()\n\ndef remove_member(self, membership_id):\n    self.db.execute("DELETE FROM memberships WHERE membership_id=?", (membership_id,))\n    self.db.commit()",
+"reason": "The write queries are keyed only by membership_id, so a membership from another course can be modified or removed once its identifier is known."
+}
+],
+"root_cause_code": 11,
+"root_cause": "The code trusts a user-supplied membership identifier across a course trust boundary and fails to bind that identifier to the authorized course context before performing the write.",
+"patch_locations": [
+{
+"file_path": "app.py",
+"line_start": 392,
+"line_end": 429,
+"function_name": "member_update / api_member_update / member_remove / api_member_remove"
+},
+{
+"file_path": "repos/memberships_repo.py",
+"line_start": 29,
+"line_end": 34,
+"function_name": "update_role / remove_member"
+}
+],
+"repair_plan": "Load the target membership record first, verify that its course_id matches the route course_id, and then enforce that the current user has permission to manage that specific course membership. Repository updates and deletes should be scoped by both membership_id and course_id, or use a fetched membership object that has already passed authorization.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

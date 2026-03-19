@@ -1,0 +1,63 @@
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 10,
+  "vulnerability_type": "Session Weakness",
+  "cwe_id": "CWE-321",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 8.7,
+  "severity_level": "high",
+  "confidence_score": 88,
+  "confidence_level": "high",
+  "summary": "The application uses a hard-coded Flask SECRET_KEY to protect its session cookie. Anyone who obtains the source code or otherwise learns this fixed secret can forge a signed session containing an arbitrary current_user_id and impersonate other users, including the seeded administrator.",
+  "entry_points": [
+    {
+      "type": "other",
+      "method": "COOKIE",
+      "route": "Flask session cookie"
+    },
+    {
+      "type": "background trigger",
+      "method": "INIT",
+      "route": "application bootstrap"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app.py",
+      "line_start": 9,
+      "line_end": 12,
+      "function_name": "create_app",
+      "code": "def create_app():\n    app = Flask(__name__)\n    app.config['SECRET_KEY'] = 'educollab-dev-secret-key'\n    app.config['DATABASE'] = 'data/app.db'",
+      "reason": "The secret used to protect Flask session state is hard-coded and constant across deployments."
+    },
+    {
+      "file_path": "utils/auth.py",
+      "line_start": 8,
+      "line_end": 20,
+      "function_name": "login_user",
+      "code": "SESSION_USER_KEY = 'current_user_id'\n\n\ndef get_current_user():\n    user_id = session.get(SESSION_USER_KEY)\n    if not user_id:\n        return None\n    return get_user_by_id(user_id)\n\n\ndef login_user(user):\n    session[SESSION_USER_KEY] = user['user_id']",
+      "reason": "Authentication state depends directly on the session cookie value current_user_id, so forged signed session data would control the effective logged-in identity."
+    }
+  ],
+  "root_cause_code": 8,
+  "root_cause": "Session integrity relies on a static application secret embedded in source code instead of a unique deployment-time secret managed outside the repository.",
+  "patch_locations": [
+    {
+      "file_path": "app.py",
+      "line_start": 9,
+      "line_end": 12,
+      "function_name": "create_app"
+    },
+    {
+      "file_path": "utils/auth.py",
+      "line_start": 8,
+      "line_end": 20,
+      "function_name": "login_user"
+    }
+  ],
+  "repair_plan": "Load the Flask SECRET_KEY from a strong deployment-specific secret source such as environment configuration, refuse startup when the secret is missing or still set to a known default, and rotate any existing sessions created under the exposed key. Keep authentication decisions bound to server-trusted session material only after the signing key has been secured.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

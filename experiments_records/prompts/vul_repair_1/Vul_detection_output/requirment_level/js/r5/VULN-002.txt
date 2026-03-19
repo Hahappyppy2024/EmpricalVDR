@@ -1,0 +1,79 @@
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 13,
+  "vulnerability_type": "Business Logic",
+  "cwe_id": "CWE-841",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.4,
+  "severity_level": "high",
+  "confidence_score": 93,
+  "confidence_level": "high",
+  "summary": "A student can submit answers for arbitrary question_id values that are not configured for the quiz, because the answer endpoint never verifies quiz-question membership. This enables invalid attempt records, answer injection, and undermines quiz integrity.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/controllers/quizController.js",
+      "line_start": 174,
+      "line_end": 186,
+      "function_name": "answerQuestion",
+      "code": "const { question_id, answer_json } = req.body;\nconst attempt = quizRepository.findAttemptById(courseId, quizId, attemptId);\nif (!attempt) return res.status(404).send('Attempt not found');\nif (attempt.student_id !== req.currentUser.user_id) return res.status(403).send('Own attempt required');\nif (attempt.submitted_at) return res.status(400).send('Attempt already submitted');\nquizRepository.saveAnswer({ attempt_id: attemptId, question_id: Number(question_id), answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });",
+      "reason": "The controller enforces attempt ownership and submission state but never checks that question_id belongs to the quiz’s configured quiz_questions."
+    },
+    {
+      "file_path": "src/controllers/quizController.js",
+      "line_start": 187,
+      "line_end": 201,
+      "function_name": "apiAnswerQuestion",
+      "code": "const { question_id, answer_json } = req.body;\nconst attempt = quizRepository.findAttemptById(courseId, quizId, attemptId);\n...\nif (attempt.submitted_at) return res.status(400).json({ success: false, error: 'Attempt already submitted' });\nif (!question_id || answer_json === undefined) return res.status(400).json({ success: false, error: 'question_id and answer_json are required' });\nconst answers = quizRepository.saveAnswer({ attempt_id: attemptId, question_id: Number(question_id), answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });",
+      "reason": "The API endpoint has the same missing quiz-question binding validation and accepts any question_id value."
+    },
+    {
+      "file_path": "src/repositories/quizRepository.js",
+      "line_start": 85,
+      "line_end": 94,
+      "function_name": "saveAnswer",
+      "code": "db.prepare(`\n  INSERT INTO quiz_answers (attempt_id, question_id, answer_json)\n  VALUES (?, ?, ?)\n  ON CONFLICT(attempt_id, question_id) DO UPDATE SET answer_json = excluded.answer_json, created_at = CURRENT_TIMESTAMP\n`).run(attempt_id, question_id, answer_json);",
+      "reason": "The persistence layer records answers keyed only by (attempt_id, question_id) and does not validate that question_id is part of the quiz configuration."
+    },
+    {
+      "file_path": "src/repositories/quizRepository.js",
+      "line_start": 56,
+      "line_end": 66,
+      "function_name": "listQuizQuestions",
+      "code": "FROM quiz_questions qq\nJOIN questions q ON q.question_id = qq.question_id\nWHERE qq.quiz_id = ?",
+      "reason": "A quiz-question mapping table exists, indicating an intended relationship constraint that is not enforced on answer submission."
+    }
+  ],
+  "root_cause_code": 12,
+  "root_cause": "The quiz attempt workflow does not enforce the quiz-question binding rule on the answer write path, allowing logically invalid state mutations by identifier alone.",
+  "patch_locations": [
+    {
+      "file_path": "src/controllers/quizController.js",
+      "line_start": 174,
+      "line_end": 201,
+      "function_name": "answerQuestion / apiAnswerQuestion"
+    },
+    {
+      "file_path": "src/repositories/quizRepository.js",
+      "line_start": 56,
+      "line_end": 110,
+      "function_name": "listQuizQuestions / saveAnswer"
+    }
+  ],
+  "repair_plan": "Before saving an answer, verify that question_id is configured for the quiz (exists in quiz_questions for the given quiz_id) and reject otherwise. Apply the check consistently in both HTML and API handlers. Where practical, implement a repository helper like isQuestionInQuiz(quiz_id, question_id) and enforce it server-side prior to saveAnswer, so answer injection cannot occur even if clients submit arbitrary IDs.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

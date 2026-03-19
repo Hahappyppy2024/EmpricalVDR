@@ -1,0 +1,85 @@
+{
+  "vulnerability_id": "VULN-003",
+  "vulnerability_type_code": 3,
+  "vulnerability_type": "Broken Access Control",
+  "cwe_id": "CWE-862",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.9,
+  "severity_level": "medium",
+  "confidence_score": 96,
+  "confidence_level": "high",
+  "summary": "Any authenticated user can access the full user directory through the HTML and API user-list endpoints. This exposes all registered usernames, display names, and creation timestamps without any admin-only authorization check.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/admin/users"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/users"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "public/index.php",
+      "line_start": 56,
+      "line_end": 58,
+      "function_name": null,
+      "code": "if ($path === '/admin/users' && $method === 'GET') {\n    $authController->listUsersHtml();\n    exit;\n}",
+      "reason": "The route name implies administrative access, but enforcement depends entirely on the controller."
+    },
+    {
+      "file_path": "public/index.php",
+      "line_start": 105,
+      "line_end": 107,
+      "function_name": null,
+      "code": "if ($path === '/api/users' && $method === 'GET') {\n    $authController->listUsersApi();\n    exit;\n}",
+      "reason": "The API exposes the same user-list operation."
+    },
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 139,
+      "line_end": 148,
+      "function_name": "listUsersHtml/listUsersApi",
+      "code": "public function listUsersHtml(): void\n{\n    require_login($this->config, false);\n    render('admin/users', ['title' => 'Users', 'users' => $this->userRepo->all()]);\n}\n\npublic function listUsersApi(): void\n{\n    require_login($this->config, true);\n    json_response(['success' => true, 'users' => $this->userRepo->all()]);\n}",
+      "reason": "Both handlers require only authentication and do not check any administrator role or equivalent authorization condition."
+    },
+    {
+      "file_path": "app/repositories/UserRepository.php",
+      "line_start": 43,
+      "line_end": 46,
+      "function_name": "all",
+      "code": "$stmt = $this->pdo->query('SELECT user_id, username, display_name, created_at FROM users ORDER BY user_id ASC');\nreturn $stmt->fetchAll();",
+      "reason": "The repository returns the entire user directory to whichever authenticated caller reaches the endpoint."
+    }
+  ],
+  "root_cause_code": 2,
+  "root_cause": "The user-list endpoints enforce only login status and omit any role-based authorization check, even though they expose global user records intended for an administrative context.",
+  "patch_locations": [
+    {
+      "file_path": "app/controllers/AuthController.php",
+      "line_start": 139,
+      "line_end": 148,
+      "function_name": "listUsersHtml/listUsersApi"
+    },
+    {
+      "file_path": "app/core/Auth.php",
+      "line_start": 7,
+      "line_end": 25,
+      "function_name": "current_user_id/require_login"
+    },
+    {
+      "file_path": "app/repositories/UserRepository.php",
+      "line_start": 43,
+      "line_end": 46,
+      "function_name": "all"
+    }
+  ],
+  "repair_plan": "Introduce an explicit administrator authorization check before serving /admin/users and /api/users, and reject non-admin callers with a 403 response. If non-admin users need limited user data elsewhere, create separate endpoints or projections that return only the minimum permitted fields for that role.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

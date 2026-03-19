@@ -1,0 +1,81 @@
+{
+  "vulnerability_id": "VULN-003",
+  "vulnerability_type_code": 8,
+  "vulnerability_type": "IDOR",
+  "cwe_id": "CWE-639",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.4,
+  "severity_level": "high",
+  "confidence_score": 96,
+  "confidence_level": "high",
+  "summary": "Any authenticated course member can edit or delete another user's comment by submitting a different comment_id under the same course and post. This allows unauthorized tampering with other users' comments.",
+  "entry_points": [
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "DELETE",
+      "route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "src/routes/api.js",
+      "line_start": 51,
+      "line_end": 54,
+      "function_name": null,
+      "code": "router.post('/courses/:course_id/posts/:post_id/comments', auth.requireLogin, auth.requireCourseMember, commentCtrl.createComment);\nrouter.get('/courses/:course_id/posts/:post_id/comments', auth.requireLogin, auth.requireCourseMember, commentCtrl.listComments);\nrouter.put('/courses/:course_id/posts/:post_id/comments/:comment_id', auth.requireLogin, auth.requireCourseMember, commentCtrl.updateComment);\nrouter.delete('/courses/:course_id/posts/:post_id/comments/:comment_id', auth.requireLogin, auth.requireCourseMember, commentCtrl.deleteComment);",
+      "reason": "Write access to comment resources requires only course membership, with no ownership or moderation check."
+    },
+    {
+      "file_path": "src/controllers/commentController.js",
+      "line_start": 20,
+      "line_end": 34,
+      "function_name": "updateComment / deleteComment",
+      "code": "const comment_id = Number(req.params.comment_id);\nconst { body } = req.body;\nconst comment = commentRepo.updateComment(course_id, post_id, comment_id, body);\n...\ncommentRepo.deleteComment(course_id, post_id, comment_id);",
+      "reason": "The controller trusts the client-supplied comment_id and never verifies that the comment belongs to the current user."
+    },
+    {
+      "file_path": "src/repos/commentRepo.js",
+      "line_start": 30,
+      "line_end": 38,
+      "function_name": "updateComment / deleteComment",
+      "code": "db.prepare('UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?')\n  .run(body, nowIso(), course_id, post_id, comment_id);\n...\ndb.prepare('DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?')\n  .run(course_id, post_id, comment_id);",
+      "reason": "The database layer scopes only by identifiers supplied by the request and does not enforce author_id on writes."
+    }
+  ],
+  "root_cause_code": 7,
+  "root_cause": "The code omits an ownership check for comment mutations and allows any course member to operate on any comment identifier within the course.",
+  "patch_locations": [
+    {
+      "file_path": "src/controllers/commentController.js",
+      "line_start": 20,
+      "line_end": 36,
+      "function_name": "updateComment / deleteComment"
+    },
+    {
+      "file_path": "src/repos/commentRepo.js",
+      "line_start": 21,
+      "line_end": 38,
+      "function_name": "getById / updateComment / deleteComment"
+    }
+  ],
+  "repair_plan": "Fetch the target comment before mutation and require that the authenticated user is the comment author unless a staff moderation path is intentionally allowed. Scope update and delete queries to author_id for normal users, and keep any elevated moderation behavior on a separate explicit authorization path.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

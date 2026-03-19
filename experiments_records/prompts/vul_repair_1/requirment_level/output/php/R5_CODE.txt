@@ -1,0 +1,645 @@
+可以，下面是这次**3 个被修改文件的完整全文**，你直接整文件覆盖即可。
+
+---
+
+## 1) `app/controllers/QuizController.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require_once dirname(__DIR__) . '/core/View.php';
+require_once dirname(__DIR__) . '/core/Auth.php';
+
+final class QuizController
+{
+    public function __construct(
+        private QuizRepository $quizRepo,
+        private QuestionRepository $questionRepo,
+        private QuizAttemptRepository $attemptRepo,
+        private CourseRepository $courseRepo,
+        private MembershipRepository $membershipRepo,
+        private array $config
+    ) {
+    }
+
+    public function showCreateForm(int $courseId): void
+    {
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        render('courses/quizzes/new', ['title' => 'New Quiz', 'course' => $this->courseRepo->findById($courseId), 'error' => null]);
+    }
+
+    public function createHtml(int $courseId): void
+    {
+        $userId = require_login($this->config, false);
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $result = $this->create($courseId, $userId, request_data());
+        if (!$result['success']) {
+            render('courses/quizzes/new', ['title' => 'New Quiz', 'course' => $this->courseRepo->findById($courseId), 'error' => $result['error']]);
+            return;
+        }
+        redirect_to('/courses/' . $courseId . '/quizzes/' . $result['quiz']['quiz_id']);
+    }
+
+    public function createApi(int $courseId): void
+    {
+        $userId = require_login($this->config, true);
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $result = $this->create($courseId, $userId, request_data());
+        if (!$result['success']) {
+            json_response($result, $result['error'] === 'Course not found' ? 404 : 422);
+        }
+        json_response($result, 201);
+    }
+
+    private function create(int $courseId, int $userId, array $data): array
+    {
+        if (!$this->courseRepo->findById($courseId)) {
+            return ['success' => false, 'error' => 'Course not found'];
+        }
+        $title = trim((string) ($data['title'] ?? ''));
+        $description = trim((string) ($data['description'] ?? ''));
+        $openAt = trim((string) ($data['open_at'] ?? ''));
+        $dueAt = trim((string) ($data['due_at'] ?? ''));
+        if ($title === '') {
+            return ['success' => false, 'error' => 'title is required'];
+        }
+        $scheduleError = $this->validateSchedule($openAt, $dueAt);
+        if ($scheduleError !== null) {
+            return ['success' => false, 'error' => $scheduleError];
+        }
+        $quizId = $this->quizRepo->create([
+            'course_id' => $courseId,
+            'created_by' => $userId,
+            'title' => $title,
+            'description' => $description,
+            'open_at' => $openAt === '' ? null : $openAt,
+            'due_at' => $dueAt === '' ? null : $dueAt,
+        ]);
+        return ['success' => true, 'quiz' => $this->quizRepo->findById($courseId, $quizId)];
+    }
+
+    public function listHtml(int $courseId): void
+    {
+        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        render('courses/quizzes/index', [
+            'title' => 'Quizzes',
+            'course' => $this->courseRepo->findById($courseId),
+            'quizzes' => $this->quizRepo->listByCourse($courseId),
+            'is_staff' => current_user_is_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId),
+        ]);
+    }
+
+    public function listApi(int $courseId): void
+    {
+        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        json_response(['success' => true, 'quizzes' => $this->quizRepo->listByCourse($courseId)]);
+    }
+
+    public function getHtml(int $courseId, int $quizId): void
+    {
+        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $quiz = $this->quizRepo->findById($courseId, $quizId);
+        if (!$quiz) {
+            http_response_code(404);
+        }
+        $userId = current_user_id($this->config);
+        render('courses/quizzes/show', [
+            'title' => $quiz ? $quiz['title'] : 'Quiz Not Found',
+            'course' => $this->courseRepo->findById($courseId),
+            'quiz' => $quiz,
+            'questions' => $quiz ? $this->quizRepo->listQuizQuestions($courseId, $quizId) : [],
+            'question_bank' => $quiz && current_user_is_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId) ? $this->questionRepo->listByCourse($courseId) : [],
+            'attempts' => $userId && $quiz ? array_values(array_filter($this->attemptRepo->listByStudent($userId), static fn(array $a): bool => (int) $a['quiz_id'] === $quizId && (int) $a['course_id'] === $courseId)) : [],
+            'is_staff' => current_user_is_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId),
+            'is_student' => current_course_role($this->config, $this->membershipRepo, $this->courseRepo, $courseId) === 'student',
+        ]);
+    }
+
+    public function getApi(int $courseId, int $quizId): void
+    {
+        require_course_member($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $quiz = $this->quizRepo->findById($courseId, $quizId);
+        if (!$quiz) {
+            json_response(['success' => false, 'error' => 'Quiz not found'], 404);
+        }
+        $includeAnswers = current_user_is_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId);
+        json_response(['success' => true, 'quiz' => $quiz, 'questions' => $this->quizRepo->listQuizQuestions($courseId, $quizId, $includeAnswers)]);
+    }
+
+    public function showEditForm(int $courseId, int $quizId): void
+    {
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $quiz = $this->quizRepo->findById($courseId, $quizId);
+        if (!$quiz) {
+            http_response_code(404);
+            render('courses/quizzes/show', ['title' => 'Quiz Not Found', 'course' => $this->courseRepo->findById($courseId), 'quiz' => null, 'questions' => [], 'question_bank' => [], 'attempts' => [], 'is_staff' => true, 'is_student' => false]);
+            return;
+        }
+        render('courses/quizzes/edit', ['title' => 'Edit Quiz', 'course' => $this->courseRepo->findById($courseId), 'quiz' => $quiz, 'error' => null]);
+    }
+
+    public function updateHtml(int $courseId, int $quizId): void
+    {
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $result = $this->update($courseId, $quizId, request_data());
+        if (!$result['success']) {
+            render('courses/quizzes/edit', ['title' => 'Edit Quiz', 'course' => $this->courseRepo->findById($courseId), 'quiz' => $this->quizRepo->findById($courseId, $quizId), 'error' => $result['error']]);
+            return;
+        }
+        redirect_to('/courses/' . $courseId . '/quizzes/' . $quizId);
+    }
+
+    public function updateApi(int $courseId): void
+    {
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $quizId = (int) ($_GET['quiz_id'] ?? 0);
+        $result = $this->update($courseId, $quizId, request_data());
+        if (!$result['success']) {
+            $status = in_array($result['error'], ['Course not found', 'Quiz not found'], true) ? 404 : 422;
+            json_response($result, $status);
+        }
+        json_response($result, 200);
+    }
+
+    public function updateApiById(int $courseId, int $quizId): void
+    {
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $result = $this->update($courseId, $quizId, request_data());
+        if (!$result['success']) {
+            $status = in_array($result['error'], ['Course not found', 'Quiz not found'], true) ? 404 : 422;
+            json_response($result, $status);
+        }
+        json_response($result, 200);
+    }
+
+    private function update(int $courseId, int $quizId, array $data): array
+    {
+        if (!$this->courseRepo->findById($courseId)) {
+            return ['success' => false, 'error' => 'Course not found'];
+        }
+        if (!$this->quizRepo->findById($courseId, $quizId)) {
+            return ['success' => false, 'error' => 'Quiz not found'];
+        }
+        $title = trim((string) ($data['title'] ?? ''));
+        $description = trim((string) ($data['description'] ?? ''));
+        $openAt = trim((string) ($data['open_at'] ?? ''));
+        $dueAt = trim((string) ($data['due_at'] ?? ''));
+        if ($title === '') {
+            return ['success' => false, 'error' => 'title is required'];
+        }
+        $scheduleError = $this->validateSchedule($openAt, $dueAt);
+        if ($scheduleError !== null) {
+            return ['success' => false, 'error' => $scheduleError];
+        }
+        $this->quizRepo->update($courseId, $quizId, [
+            'title' => $title,
+            'description' => $description,
+            'open_at' => $openAt === '' ? null : $openAt,
+            'due_at' => $dueAt === '' ? null : $dueAt,
+        ]);
+        return ['success' => true, 'quiz' => $this->quizRepo->findById($courseId, $quizId)];
+    }
+
+    private function validateSchedule(string $openAt, string $dueAt): ?string
+    {
+        if ($openAt !== '' && strtotime($openAt) === false) {
+            return 'open_at must be a valid datetime';
+        }
+        if ($dueAt !== '' && strtotime($dueAt) === false) {
+            return 'due_at must be a valid datetime';
+        }
+        if ($openAt !== '' && $dueAt !== '' && strtotime($dueAt) < strtotime($openAt)) {
+            return 'due_at must be greater than or equal to open_at';
+        }
+        return null;
+    }
+
+    public function deleteHtml(int $courseId, int $quizId): void
+    {
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $this->delete($courseId, $quizId);
+        redirect_to('/courses/' . $courseId . '/quizzes');
+    }
+
+    public function deleteApi(int $courseId, int $quizId): void
+    {
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $result = $this->delete($courseId, $quizId);
+        if (!$result['success']) {
+            json_response($result, 404);
+        }
+        json_response($result, 200);
+    }
+
+    private function delete(int $courseId, int $quizId): array
+    {
+        if (!$this->quizRepo->findById($courseId, $quizId)) {
+            return ['success' => false, 'error' => 'Quiz not found'];
+        }
+        $this->quizRepo->delete($courseId, $quizId);
+        return ['success' => true];
+    }
+
+    public function configureQuestionsHtml(int $courseId, int $quizId): void
+    {
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $result = $this->configureQuestion($courseId, $quizId, request_data());
+        redirect_to('/courses/' . $courseId . '/quizzes/' . $quizId);
+    }
+
+    public function configureQuestionsApi(int $courseId, int $quizId): void
+    {
+        require_course_staff($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $result = $this->configureQuestion($courseId, $quizId, request_data());
+        if (!$result['success']) {
+            $status = in_array($result['error'], ['Quiz not found', 'Question not found'], true) ? 404 : 422;
+            json_response($result, $status);
+        }
+        json_response($result, 200);
+    }
+
+    private function configureQuestion(int $courseId, int $quizId, array $data): array
+    {
+        $quiz = $this->quizRepo->findById($courseId, $quizId);
+        if (!$quiz) {
+            return ['success' => false, 'error' => 'Quiz not found'];
+        }
+        $questionId = (int) ($data['question_id'] ?? 0);
+        $position = (int) ($data['position'] ?? 0);
+        $points = (int) ($data['points'] ?? 1);
+        if ($questionId <= 0 || !$this->questionRepo->findById($courseId, $questionId)) {
+            return ['success' => false, 'error' => 'Question not found'];
+        }
+        if (($data['action'] ?? 'add') === 'remove') {
+            $this->quizRepo->deleteQuizQuestion($quizId, $questionId);
+            return ['success' => true];
+        }
+        if ($position <= 0) {
+            $position = count($this->quizRepo->listQuizQuestions($courseId, $quizId)) + 1;
+        }
+        if ($points <= 0) {
+            $points = 1;
+        }
+        $this->quizRepo->addQuizQuestion($quizId, $questionId, $points, $position);
+        return ['success' => true, 'questions' => $this->quizRepo->listQuizQuestions($courseId, $quizId)];
+    }
+}
+```
+
+---
+
+## 2) `app/controllers/QuizAttemptController.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require_once dirname(__DIR__) . '/core/View.php';
+require_once dirname(__DIR__) . '/core/Auth.php';
+
+final class QuizAttemptController
+{
+    public function __construct(
+        private QuizAttemptRepository $attemptRepo,
+        private QuizRepository $quizRepo,
+        private CourseRepository $courseRepo,
+        private MembershipRepository $membershipRepo,
+        private array $config
+    ) {
+    }
+
+    public function startHtml(int $courseId, int $quizId): void
+    {
+        $userId = require_student($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $result = $this->startAttempt($courseId, $quizId, $userId);
+        if (!$result['success']) {
+            redirect_to('/courses/' . $courseId . '/quizzes/' . $quizId);
+        }
+        redirect_to('/courses/' . $courseId . '/quizzes/' . $quizId);
+    }
+
+    public function startApi(int $courseId, int $quizId): void
+    {
+        $userId = require_student($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $result = $this->startAttempt($courseId, $quizId, $userId);
+        if (!$result['success']) {
+            $status = $result['error'] === 'Quiz not found' ? 404 : 422;
+            json_response($result, $status);
+        }
+        json_response($result, 201);
+    }
+
+    private function startAttempt(int $courseId, int $quizId, int $userId): array
+    {
+        $quiz = $this->quizRepo->findById($courseId, $quizId);
+        if (!$quiz) {
+            return ['success' => false, 'error' => 'Quiz not found'];
+        }
+        $availabilityError = $this->validateQuizAvailability($quiz, 'start');
+        if ($availabilityError !== null) {
+            return ['success' => false, 'error' => $availabilityError];
+        }
+        $attemptId = $this->attemptRepo->create($quizId, $courseId, $userId);
+        return ['success' => true, 'attempt' => $this->buildAttemptPayload($courseId, $quizId, $attemptId)];
+    }
+
+    public function answerHtml(int $courseId, int $quizId, int $attemptId): void
+    {
+        $userId = require_student($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $this->answer($courseId, $quizId, $attemptId, $userId, request_data());
+        redirect_to('/courses/' . $courseId . '/quizzes/' . $quizId);
+    }
+
+    public function answerApi(int $courseId, int $quizId, int $attemptId): void
+    {
+        $userId = require_student($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $result = $this->answer($courseId, $quizId, $attemptId, $userId, request_data());
+        if (!$result['success']) {
+            $status = in_array($result['error'], ['Attempt not found', 'Question not found in quiz', 'Quiz not found'], true) ? 404 : ($result['error'] === 'Forbidden' ? 403 : 422);
+            json_response($result, $status);
+        }
+        json_response($result, 200);
+    }
+
+    private function answer(int $courseId, int $quizId, int $attemptId, int $userId, array $data): array
+    {
+        $attempt = $this->attemptRepo->findById($courseId, $quizId, $attemptId);
+        if (!$attempt) {
+            return ['success' => false, 'error' => 'Attempt not found'];
+        }
+        if ((int) $attempt['student_id'] !== $userId) {
+            return ['success' => false, 'error' => 'Forbidden'];
+        }
+        if ($attempt['submitted_at'] !== null) {
+            return ['success' => false, 'error' => 'Attempt already submitted'];
+        }
+        $quiz = $this->quizRepo->findById($courseId, $quizId);
+        if (!$quiz) {
+            return ['success' => false, 'error' => 'Quiz not found'];
+        }
+        $availabilityError = $this->validateQuizAvailability($quiz, 'answer');
+        if ($availabilityError !== null) {
+            return ['success' => false, 'error' => $availabilityError];
+        }
+        $questionId = (int) ($data['question_id'] ?? 0);
+        if ($questionId <= 0 || !$this->quizRepo->findQuizQuestion($courseId, $quizId, $questionId)) {
+            return ['success' => false, 'error' => 'Question not found in quiz'];
+        }
+        $answerJson = $this->normalizeJsonText($data['answer_json'] ?? null);
+        if ($answerJson === null) {
+            return ['success' => false, 'error' => 'answer_json is required'];
+        }
+        $this->attemptRepo->upsertAnswer($attemptId, $questionId, $answerJson);
+        return ['success' => true, 'attempt' => $this->buildAttemptPayload($courseId, $quizId, $attemptId)];
+    }
+
+    public function submitHtml(int $courseId, int $quizId, int $attemptId): void
+    {
+        $userId = require_student($this->config, $this->membershipRepo, $this->courseRepo, $courseId, false);
+        $this->submit($courseId, $quizId, $attemptId, $userId);
+        redirect_to('/courses/' . $courseId . '/quizzes/' . $quizId);
+    }
+
+    public function submitApi(int $courseId, int $quizId, int $attemptId): void
+    {
+        $userId = require_student($this->config, $this->membershipRepo, $this->courseRepo, $courseId, true);
+        $result = $this->submit($courseId, $quizId, $attemptId, $userId);
+        if (!$result['success']) {
+            $status = in_array($result['error'], ['Attempt not found', 'Quiz not found'], true) ? 404 : ($result['error'] === 'Forbidden' ? 403 : 422);
+            json_response($result, $status);
+        }
+        json_response($result, 200);
+    }
+
+    private function submit(int $courseId, int $quizId, int $attemptId, int $userId): array
+    {
+        $attempt = $this->attemptRepo->findById($courseId, $quizId, $attemptId);
+        if (!$attempt) {
+            return ['success' => false, 'error' => 'Attempt not found'];
+        }
+        if ((int) $attempt['student_id'] !== $userId) {
+            return ['success' => false, 'error' => 'Forbidden'];
+        }
+        if ($attempt['submitted_at'] !== null) {
+            return ['success' => false, 'error' => 'Attempt already submitted'];
+        }
+        $quiz = $this->quizRepo->findById($courseId, $quizId);
+        if (!$quiz) {
+            return ['success' => false, 'error' => 'Quiz not found'];
+        }
+        $availabilityError = $this->validateQuizAvailability($quiz, 'submit');
+        if ($availabilityError !== null) {
+            return ['success' => false, 'error' => $availabilityError];
+        }
+        $this->attemptRepo->submit($courseId, $quizId, $attemptId);
+        return ['success' => true, 'attempt' => $this->buildAttemptPayload($courseId, $quizId, $attemptId)];
+    }
+
+    public function listMyHtml(): void
+    {
+        $userId = require_login($this->config, false);
+        render('my/quizzes', ['title' => 'My Quiz Attempts', 'attempts' => $this->attemptRepo->listByStudent($userId)]);
+    }
+
+    public function listMyApi(): void
+    {
+        $userId = require_login($this->config, true);
+        json_response(['success' => true, 'attempts' => $this->attemptRepo->listByStudent($userId)]);
+    }
+
+    private function validateQuizAvailability(array $quiz, string $action): ?string
+    {
+        $now = time();
+        $openAt = $this->parseQuizTime($quiz['open_at'] ?? null);
+        if ($openAt !== null && $now < $openAt) {
+            return 'Quiz is not open yet';
+        }
+        $dueAt = $this->parseQuizTime($quiz['due_at'] ?? null);
+        if ($dueAt !== null && $now > $dueAt) {
+            return $action === 'start' ? 'Quiz is closed' : 'Quiz deadline has passed';
+        }
+        return null;
+    }
+
+    private function parseQuizTime(mixed $value): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+        $text = trim((string) $value);
+        if ($text == '') {
+            return null;
+        }
+        $timestamp = strtotime($text);
+        return $timestamp === false ? null : $timestamp;
+    }
+
+    private function buildAttemptPayload(int $courseId, int $quizId, int $attemptId): array
+    {
+        $attempt = $this->attemptRepo->findById($courseId, $quizId, $attemptId);
+        return [
+            'attempt' => $attempt,
+            'answers' => $this->attemptRepo->listAnswers($attemptId),
+        ];
+    }
+
+    private function normalizeJsonText(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (is_array($value)) {
+            return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+        $text = trim((string) $value);
+        return $text === '' ? null : $text;
+    }
+}
+```
+
+---
+
+## 3) `app/repositories/QuizRepository.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+final class QuizRepository
+{
+    public function __construct(private PDO $pdo)
+    {
+    }
+
+    public function create(array $data): int
+    {
+        $now = date('c');
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO quizzes (course_id, created_by, title, description, open_at, due_at, created_at, updated_at)
+             VALUES (:course_id, :created_by, :title, :description, :open_at, :due_at, :created_at, :updated_at)'
+        );
+        $stmt->execute([
+            ':course_id' => $data['course_id'],
+            ':created_by' => $data['created_by'],
+            ':title' => $data['title'],
+            ':description' => $data['description'],
+            ':open_at' => $data['open_at'],
+            ':due_at' => $data['due_at'],
+            ':created_at' => $now,
+            ':updated_at' => $now,
+        ]);
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    public function listByCourse(int $courseId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT q.*, u.username AS creator_username, u.display_name AS creator_display_name
+             FROM quizzes q
+             JOIN users u ON u.user_id = q.created_by
+             WHERE q.course_id = :course_id
+             ORDER BY q.quiz_id DESC'
+        );
+        $stmt->execute([':course_id' => $courseId]);
+        return $stmt->fetchAll();
+    }
+
+    public function findById(int $courseId, int $quizId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT q.*, u.username AS creator_username, u.display_name AS creator_display_name
+             FROM quizzes q
+             JOIN users u ON u.user_id = q.created_by
+             WHERE q.course_id = :course_id AND q.quiz_id = :quiz_id
+             LIMIT 1'
+        );
+        $stmt->execute([':course_id' => $courseId, ':quiz_id' => $quizId]);
+        $row = $stmt->fetch();
+        return $row ?: null;
+    }
+
+    public function update(int $courseId, int $quizId, array $data): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE quizzes
+             SET title = :title, description = :description, open_at = :open_at, due_at = :due_at, updated_at = :updated_at
+             WHERE course_id = :course_id AND quiz_id = :quiz_id'
+        );
+        return $stmt->execute([
+            ':title' => $data['title'],
+            ':description' => $data['description'],
+            ':open_at' => $data['open_at'],
+            ':due_at' => $data['due_at'],
+            ':updated_at' => date('c'),
+            ':course_id' => $courseId,
+            ':quiz_id' => $quizId,
+        ]);
+    }
+
+    public function delete(int $courseId, int $quizId): bool
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM quizzes WHERE course_id = :course_id AND quiz_id = :quiz_id');
+        return $stmt->execute([':course_id' => $courseId, ':quiz_id' => $quizId]);
+    }
+
+    public function listQuizQuestions(int $courseId, int $quizId, bool $includeAnswers = false): array
+    {
+        $stmt = $this->pdo->prepare(
+            $this->quizQuestionSelect($includeAnswers)
+            . ' WHERE qq.quiz_id = :quiz_id
+             ORDER BY qq.position ASC, qq.question_id ASC'
+        );
+        $stmt->execute([':course_id' => $courseId, ':quiz_id' => $quizId]);
+        return $stmt->fetchAll();
+    }
+
+    public function findQuizQuestion(int $courseId, int $quizId, int $questionId, bool $includeAnswers = false): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            $this->quizQuestionSelect($includeAnswers)
+            . ' WHERE qq.quiz_id = :quiz_id AND qq.question_id = :question_id
+             LIMIT 1'
+        );
+        $stmt->execute([':course_id' => $courseId, ':quiz_id' => $quizId, ':question_id' => $questionId]);
+        $row = $stmt->fetch();
+        return $row ?: null;
+    }
+
+    private function quizQuestionSelect(bool $includeAnswers): string
+    {
+        $answerColumn = $includeAnswers ? ', q.answer_json' : '';
+        return 'SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,
+                       q.qtype, q.prompt, q.options_json' . $answerColumn . '
+                FROM quiz_questions qq
+                JOIN quizzes z ON z.quiz_id = qq.quiz_id AND z.course_id = :course_id
+                JOIN questions q ON q.question_id = qq.question_id AND q.course_id = :course_id';
+    }
+
+    public function addQuizQuestion(int $quizId, int $questionId, int $points, int $position): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO quiz_questions (quiz_id, question_id, points, position)
+             VALUES (:quiz_id, :question_id, :points, :position)
+             ON CONFLICT(quiz_id, question_id) DO UPDATE SET points = excluded.points, position = excluded.position'
+        );
+        return $stmt->execute([
+            ':quiz_id' => $quizId,
+            ':question_id' => $questionId,
+            ':points' => $points,
+            ':position' => $position,
+        ]);
+    }
+
+    public function deleteQuizQuestion(int $quizId, int $questionId): bool
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM quiz_questions WHERE quiz_id = :quiz_id AND question_id = :question_id');
+        return $stmt->execute([':quiz_id' => $quizId, ':question_id' => $questionId]);
+    }
+}
+```
+
+如果你愿意，我下一条可以继续直接给你一份 **“覆盖后怎么跑 php functional tests 的一键命令”**。

@@ -1,0 +1,218 @@
+You are a senior software engineer fixing vulnerabilities in a web application.
+
+Repository input
+- The full project codebase is provided as a ZIP archive.
+- Assume you can read and modify files inside the ZIP repository.
+- Do NOT ask for files outside the ZIP.
+
+Task
+- Implement code changes guided by the vulnerability detection (VD) report below.
+- This is a requirement-level vulnerability repair task.
+- Treat the repository as the full runnable codebase produced after implementing the current requirement increment.
+- Focus only on vulnerabilities reported for the current requirement scope.
+- The current requirement may interact with functionality introduced earlier, but do not perform unrelated hardening, cleanup, or broad refactors outside the reported issue.
+- Apply minimal, correct patches while preserving intended functionality.
+
+Hard constraints
+- Keep the project runnable.
+- Do NOT rename routes, database tables, or response JSON fields.
+- Do NOT change authentication/session key names or role names.
+- No new dependencies. Avoid refactors unrelated to the fixes.
+- Only change files necessary for the fixes.
+- Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or docs.
+
+Primary verification goal (must satisfy)
+- The functional test suite must PASS after the patch (no regressions).
+- Prioritize preserving the intended behavior of the current requirement.
+- Do not over-fix in ways that risk breaking valid workflows.
+
+Authoritative input: Vulnerability Detection Report (VD)
+{
+  "vulnerability_id": "VULN-005",
+  "vulnerability_type_code": 3,
+  "vulnerability_type": "Broken Access Control",
+  "cwe_id": "CWE-862",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.9,
+  "severity_level": "medium",
+  "confidence_score": 98,
+  "confidence_level": "high",
+  "summary": "Any authenticated user can enumerate the full membership roster of any course by calling the member-list endpoints with an arbitrary course_id. This exposes course membership, usernames, display names, user IDs, and course roles without requiring membership in the target course.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "GET",
+      "route": "/courses/:course_id/members"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "GET",
+      "route": "/api/courses/:course_id/members"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "controllers/membership_controller.py",
+      "line_start": 110,
+      "line_end": 131,
+      "function_name": "list_members_page / api_list_members",
+      "code": "@membership_bp.route('/courses/<int:course_id>/members', methods=['GET'])\n@login_required\ndef list_members_page(course_id):\n    course = get_course_by_id(course_id)\n    if course is None:\n        return render_template('404.html', current_user=get_current_user()), 404\n    return render_template(\n        'memberships/list.html',\n        course=course,\n        members=list_members(course_id),\n        roles=sorted(ALLOWED_ROLES),\n        current_user=get_current_user(),\n    )\n\n@membership_bp.route('/api/courses/<int:course_id>/members', methods=['GET'])\n@login_required\ndef api_list_members(course_id):\n    if get_course_by_id(course_id) is None:\n        return jsonify({'success': False, 'error': 'course_not_found'}), 404\n    members = [_membership_to_dict(item) for item in list_members(course_id)]\n    return jsonify({'success': True, 'members': members})",
+      "reason": "Both roster endpoints require only authentication and never check that the caller is a member or staff member of the target course."
+    },
+    {
+      "file_path": "models/membership_repo.py",
+      "line_start": 39,
+      "line_end": 47,
+      "function_name": "list_members",
+      "code": "def list_members(course_id):\n    db = get_db()\n    return db.execute(\n        'SELECT m.membership_id, m.course_id, m.user_id, m.role_in_course, m.created_at, '\n        'u.username, u.display_name '\n        'FROM memberships m JOIN users u ON u.user_id = m.user_id '\n        'WHERE m.course_id = ? ORDER BY m.membership_id ASC',\n        (course_id,),\n    ).fetchall()",
+      "reason": "The repository returns full membership records for the supplied course_id, so the missing authorization check in the controller directly exposes roster data."
+    }
+  ],
+  "root_cause_code": 2,
+  "root_cause": "Course membership listing endpoints are guarded only by a generic login check and do not enforce course membership or staff authorization before exposing roster information.",
+  "patch_locations": [
+    {
+      "file_path": "controllers/membership_controller.py",
+      "line_start": 110,
+      "line_end": 131,
+      "function_name": "list_members_page / api_list_members"
+    },
+    {
+      "file_path": "utils/auth.py",
+      "line_start": 58,
+      "line_end": 89,
+      "function_name": "require_course_member / require_teacher_or_admin / require_course_staff"
+    },
+    {
+      "file_path": "models/membership_repo.py",
+      "line_start": 39,
+      "line_end": 47,
+      "function_name": "list_members"
+    }
+  ],
+  "repair_plan": "Require the caller to be at least a member of the target course before listing members, and consider restricting roster access to staff if the roster is intended to be private. Apply a course-bound authorization decorator to both list endpoints and keep returned fields minimal for non-staff users.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+{
+  "vulnerability_id": "VULN-006",
+  "vulnerability_type_code": 7,
+  "vulnerability_type": "CSRF",
+  "cwe_id": "CWE-352",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 7.4,
+  "severity_level": "high",
+  "confidence_score": 95,
+  "confidence_level": "high",
+  "summary": "The server-rendered membership management forms do not include any CSRF token or equivalent anti-CSRF validation. A malicious site can cause a logged-in teacher or admin to add members, change roles, or remove members using the victim's existing session.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/members"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/members/:membership_id"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/members/:membership_id/delete"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "templates/memberships/new.html",
+      "line_start": 6,
+      "line_end": 20,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"{{ url_for('memberships.add_member_submit', course_id=course['course_id']) }}\">\n  <label>User</label>\n  <select name=\"user_id\" required>\n    {% for item in users %}\n    <option value=\"{{ item['user_id'] }}\">{{ item['display_name'] }} ({{ item['username'] }})</option>\n    {% endfor %}\n  </select>\n  <label>Role</label>\n  <select name=\"role_in_course\" required>\n    {% for role in roles %}\n    <option value=\"{{ role }}\">{{ role }}</option>\n    {% endfor %}\n  </select>\n  <button type=\"submit\">Add Member</button>\n</form>",
+      "reason": "The add-member form performs a privileged state change but contains no CSRF token or nonce."
+    },
+    {
+      "file_path": "templates/memberships/list.html",
+      "line_start": 10,
+      "line_end": 21,
+      "function_name": null,
+      "code": "<form method=\"post\" action=\"{{ url_for('memberships.update_member_role_submit', course_id=course['course_id'], membership_id=item['membership_id']) }}\">\n  <label>Change role</label>\n  <select name=\"role_in_course\">\n    {% for role in roles %}\n    <option value=\"{{ role }}\" {% if role == item['role_in_course'] %}selected{% endif %}>{{ role }}</option>\n    {% endfor %}\n  </select>\n  <button type=\"submit\">Update Role</button>\n</form>\n<form method=\"post\" action=\"{{ url_for('memberships.remove_member_submit', course_id=course['course_id'], membership_id=item['membership_id']) }}\">\n  <button type=\"submit\">Remove Member</button>\n</form>",
+      "reason": "Both role-update and member-removal forms are forgeable because they contain no request authenticity token."
+    },
+    {
+      "file_path": "controllers/membership_controller.py",
+      "line_start": 58,
+      "line_end": 89,
+      "function_name": "add_member_submit",
+      "code": "@membership_bp.route('/courses/<int:course_id>/members', methods=['POST'])\n@login_required\n@require_teacher_or_admin\ndef add_member_submit(course_id):\n    ...\n    try:\n        add_membership(course_id, int(user_id), role_in_course)\n    except sqlite3.IntegrityError:\n        ...\n    return redirect(url_for('memberships.list_members_page', course_id=course_id))",
+      "reason": "The membership creation handler processes authenticated browser POST requests without verifying a CSRF token."
+    },
+    {
+      "file_path": "controllers/membership_controller.py",
+      "line_start": 134,
+      "line_end": 172,
+      "function_name": "update_member_role_submit / remove_member_submit",
+      "code": "@membership_bp.route('/courses/<int:course_id>/members/<int:membership_id>', methods=['POST'])\n@login_required\n@require_teacher_or_admin\ndef update_member_role_submit(course_id, membership_id):\n    ...\n    update_membership_role(membership_id, role_in_course)\n    return redirect(url_for('memberships.list_members_page', course_id=course_id))\n\n@membership_bp.route('/courses/<int:course_id>/members/<int:membership_id>/delete', methods=['POST'])\n@login_required\n@require_teacher_or_admin\ndef remove_member_submit(course_id, membership_id):\n    ...\n    remove_membership(membership_id)\n    return redirect(url_for('memberships.list_members_page', course_id=course_id))",
+      "reason": "The membership update and delete handlers accept cookie-authenticated POST requests without any anti-CSRF validation."
+    }
+  ],
+  "root_cause_code": 9,
+  "root_cause": "Server-rendered membership management endpoints rely on cookie-based authentication but do not require a request authenticity token or equivalent CSRF defense.",
+  "patch_locations": [
+    {
+      "file_path": "templates/memberships/new.html",
+      "line_start": 6,
+      "line_end": 20,
+      "function_name": null
+    },
+    {
+      "file_path": "templates/memberships/list.html",
+      "line_start": 10,
+      "line_end": 21,
+      "function_name": null
+    },
+    {
+      "file_path": "controllers/membership_controller.py",
+      "line_start": 58,
+      "line_end": 89,
+      "function_name": "add_member_submit"
+    },
+    {
+      "file_path": "controllers/membership_controller.py",
+      "line_start": 134,
+      "line_end": 172,
+      "function_name": "update_member_role_submit / remove_member_submit"
+    }
+  ],
+  "repair_plan": "Introduce server-side CSRF protection for browser membership-management workflows by generating a per-session token, embedding it in the add, role-update, and remove-member forms, and rejecting requests whose token is missing or invalid. Apply the same protection consistently to all state-changing HTML form endpoints that rely on authenticated cookies.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}
+
+Repair requirements
+- Implement each vulnerability’s repair_plan consistent with its root_cause and evidence_snippets.
+- Apply fixes at the patch_locations specified in the VD report.
+- Enforce authorization, ownership, and relationship checks server-side (not client-side).
+- Where applicable, scope read/write operations to the authorized parent resource (e.g., course_id + membership_id, course_id + post_id, quiz_id + question_id).
+- Do not introduce client-side-only protections as the primary fix.
+- Do not change unrelated behavior, response schemas, or persistence semantics unless required by the fix.
+- Do not fix additional speculative vulnerabilities that are not supported by the VD report.
+- If a vulnerability spans earlier and current requirement logic, patch the narrowest correct server-side boundary that removes the exploit path and preserves intended behavior.
+- Keep error handling consistent with existing patterns in the repo (e.g., 401/403/404) and do not leak sensitive details.
+- Preserve compatibility with the existing functional test expectations.
+
+Output format (strict)
+1) Unified diff patch (git apply compatible). Include only changed files.
+2) Per-vulnerability summary (group by vulnerability_id):
+   - files changed
+   - key checks added
+   - why the vulnerability is mitigated (brief)
+3) Functional verification commands (copy-paste):
+   - run the full functional test suite (exact command)
+   - run the functional tests relevant to the current requirement (exact command)
+   - (optional) a minimal functional smoke command if full suite is slow

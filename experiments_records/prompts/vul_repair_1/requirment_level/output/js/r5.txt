@@ -1,0 +1,235 @@
+1. Unified diff patch (git apply compatible)
+
+```diff
+diff --git a/src/controllers/quizController.js b/src/controllers/quizController.js
+index 5d4a6dd..8d0f68b 100644
+--- a/src/controllers/quizController.js
++++ b/src/controllers/quizController.js
+@@ -44,7 +44,10 @@ function getQuiz(req, res) {
+   const course = courseRepository.findById(courseId);
+   const quiz = quizRepository.findById(courseId, quizId);
+   if (!course || !quiz) return res.status(404).send('Quiz not found');
+-  const quizQuestions = quizRepository.listQuizQuestions(quizId);
++  const membership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id);
++  const role = membership && membership.role_in_course;
++  const canViewAnswers = ['teacher', 'admin', 'assistant', 'senior-assistant'].includes(role);
++  const quizQuestions = canViewAnswers ? quizRepository.listQuizQuestions(quizId) : quizRepository.listQuizQuestionsSafe(quizId);
+   res.render('quiz_show', { course, quiz, quizQuestions });
+ }
+ 
+@@ -53,7 +56,11 @@ function apiGetQuiz(req, res) {
+   const quizId = Number(req.params.quiz_id);
+   const quiz = quizRepository.findById(courseId, quizId);
+   if (!quiz) return res.status(404).json({ success: false, error: 'Quiz not found' });
+-  res.json({ success: true, quiz, quiz_questions: quizRepository.listQuizQuestions(quizId) });
++  const membership = membershipRepository.findByCourseAndUser(courseId, req.currentUser.user_id);
++  const role = membership && membership.role_in_course;
++  const canViewAnswers = ['teacher', 'admin', 'assistant', 'senior-assistant'].includes(role);
++  const quizQuestions = canViewAnswers ? quizRepository.listQuizQuestions(quizId) : quizRepository.listQuizQuestionsSafe(quizId);
++  res.json({ success: true, quiz, quiz_questions: quizQuestions });
+ }
+ 
+ function showEditQuiz(req, res) {
+@@ -180,7 +187,9 @@ function answerQuestion(req, res) {
+   if (!attempt) return res.status(404).send('Attempt not found');
+   if (attempt.student_id !== req.currentUser.user_id) return res.status(403).send('Own attempt required');
+   if (attempt.submitted_at) return res.status(400).send('Attempt already submitted');
+-  quizRepository.saveAnswer({ attempt_id: attemptId, question_id: Number(question_id), answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });
++  const questionId = Number(question_id);
++  if (!questionId || !quizRepository.isQuestionInQuiz(quizId, questionId)) return res.status(404).send('Question not found');
++  quizRepository.saveAnswer({ attempt_id: attemptId, question_id: questionId, answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });
+   return res.redirect('/my/quizzes');
+ }
+ 
+@@ -194,7 +203,9 @@ function apiAnswerQuestion(req, res) {
+   if (attempt.student_id !== req.currentUser.user_id) return res.status(403).json({ success: false, error: 'Own attempt required' });
+   if (attempt.submitted_at) return res.status(400).json({ success: false, error: 'Attempt already submitted' });
+   if (!question_id || answer_json === undefined) return res.status(400).json({ success: false, error: 'question_id and answer_json are required' });
+-  const answers = quizRepository.saveAnswer({ attempt_id: attemptId, question_id: Number(question_id), answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });
++  const questionId = Number(question_id);
++  if (!questionId || !quizRepository.isQuestionInQuiz(quizId, questionId)) return res.status(404).json({ success: false, error: 'Question not found' });
++  const answers = quizRepository.saveAnswer({ attempt_id: attemptId, question_id: questionId, answer_json: typeof answer_json === 'string' ? answer_json : JSON.stringify(answer_json) });
+   return res.status(201).json({ success: true, answers });
+ }
+ 
+diff --git a/src/repositories/questionRepository.js b/src/repositories/questionRepository.js
+index 88aa2fd..1ee3816 100644
+--- a/src/repositories/questionRepository.js
++++ b/src/repositories/questionRepository.js
+@@ -27,6 +27,20 @@ function findById(courseId, questionId) {
+   `).get(courseId, questionId);
+ }
+ 
++function sanitizeQuestion(question) {
++  if (!question) return question;
++  const { answer_json, ...safeQuestion } = question;
++  return safeQuestion;
++}
++
++function listByCourseSafe(courseId) {
++  return listByCourse(courseId).map(sanitizeQuestion);
++}
++
++function findByIdSafe(courseId, questionId) {
++  return sanitizeQuestion(findById(courseId, questionId));
++}
++
+ function updateQuestion(courseId, questionId, { qtype, prompt, options_json, answer_json }) {
+   db.prepare(`
+     UPDATE questions
+@@ -40,4 +54,8 @@ function deleteQuestion(courseId, questionId) {
+   return db.prepare(`DELETE FROM questions WHERE course_id = ? AND question_id = ?`).run(courseId, questionId);
+ }
+ 
+-module.exports = { createQuestion, listByCourse, findById, updateQuestion, deleteQuestion };
++module.exports = {
++  createQuestion, listByCourse, findById,
++  listByCourseSafe, findByIdSafe, sanitizeQuestion,
++  updateQuestion, deleteQuestion
++};
+diff --git a/src/repositories/quizRepository.js b/src/repositories/quizRepository.js
+index 610f35f..f9dfd46 100644
+--- a/src/repositories/quizRepository.js
++++ b/src/repositories/quizRepository.js
+@@ -65,6 +65,18 @@ function listQuizQuestions(quizId) {
+   `).all(quizId);
+ }
+ 
++function listQuizQuestionsSafe(quizId) {
++  return db.prepare(`
++    SELECT qq.quiz_id, qq.question_id, qq.points, qq.position,
++           q.course_id, q.qtype, q.prompt, q.options_json,
++           q.created_at, q.updated_at
++    FROM quiz_questions qq
++    JOIN questions q ON q.question_id = qq.question_id
++    WHERE qq.quiz_id = ?
++    ORDER BY qq.position ASC, qq.question_id ASC
++  `).all(quizId);
++}
++
+ function createAttempt({ quiz_id, course_id, student_id }) {
+   const result = db.prepare(`
+     INSERT INTO quiz_attempts (quiz_id, course_id, student_id)
+@@ -82,6 +94,15 @@ function findAttemptById(courseId, quizId, attemptId) {
+   `).get(courseId, quizId, attemptId);
+ }
+ 
++function isQuestionInQuiz(quizId, questionId) {
++  const row = db.prepare(`
++    SELECT 1
++    FROM quiz_questions
++    WHERE quiz_id = ? AND question_id = ?
++  `).get(quizId, questionId);
++  return !!row;
++}
++
+ function saveAnswer({ attempt_id, question_id, answer_json }) {
+   db.prepare(`
+     INSERT INTO quiz_answers (attempt_id, question_id, answer_json)
+@@ -118,7 +139,7 @@ function listAttemptsByStudent(studentId) {
+ 
+ module.exports = {
+   createQuiz, listByCourse, findById, updateQuiz, deleteQuiz,
+-  addQuizQuestion, removeQuizQuestion, listQuizQuestions,
++  addQuizQuestion, removeQuizQuestion, listQuizQuestions, listQuizQuestionsSafe, isQuestionInQuiz,
+   createAttempt, findAttemptById, saveAnswer, listAnswersByAttempt,
+   submitAttempt, listAttemptsByStudent
+ };
+diff --git a/src/routes/api.js b/src/routes/api.js
+index d1e8a8d..f42e66e 100644
+--- a/src/routes/api.js
++++ b/src/routes/api.js
+@@ -90,8 +90,8 @@ router.get('/courses/:course_id/uploads/:upload_id/download', requireCourseMembe
+ router.delete('/courses/:course_id/uploads/:upload_id', requireCourseStaff, uploadController.apiDeleteUpload);
+ 
+ router.post('/courses/:course_id/questions', requireCourseStaff, questionController.apiCreateQuestion);
+-router.get('/courses/:course_id/questions', requireCourseMember, questionController.apiListQuestions);
+-router.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.apiGetQuestion);
++router.get('/courses/:course_id/questions', requireCourseStaff, questionController.apiListQuestions);
++router.get('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiGetQuestion);
+ router.put('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiUpdateQuestion);
+ router.delete('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiDeleteQuestion);
+ 
+diff --git a/src/routes/web.js b/src/routes/web.js
+index 567a62b..43f17a9 100644
+--- a/src/routes/web.js
++++ b/src/routes/web.js
+@@ -104,8 +104,8 @@ router.post('/courses/:course_id/uploads', requireCourseStaff, upload.single('fi
+ 
+ router.get('/courses/:course_id/questions/new', requireCourseStaff, questionController.showNewQuestion);
+ router.post('/courses/:course_id/questions', requireCourseStaff, questionController.createQuestion);
+-router.get('/courses/:course_id/questions', requireCourseMember, questionController.listQuestions);
+-router.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.getQuestion);
++router.get('/courses/:course_id/questions', requireCourseStaff, questionController.listQuestions);
++router.get('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.getQuestion);
+ router.get('/courses/:course_id/questions/:question_id/edit', requireCourseStaff, questionController.showEditQuestion);
+ router.post('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.updateQuestion);
+ router.post('/courses/:course_id/questions/:question_id/delete', requireCourseStaff, questionController.deleteQuestion);
+```
+
+2. Per-vulnerability summary
+
+**VULN-001**
+
+* files changed
+
+  * `src/routes/web.js`
+  * `src/routes/api.js`
+  * `src/repositories/questionRepository.js`
+  * `src/repositories/quizRepository.js`
+  * `src/controllers/quizController.js`
+* key checks added
+
+  * Question-bank list/detail routes changed from `requireCourseMember` to `requireCourseStaff` for both web and API.
+  * Added `listQuizQuestionsSafe()` so student/member quiz detail reads exclude `answer_json`.
+  * Quiz detail controller/API now return full quiz-question data only to staff roles, and a student-safe projection to non-staff course members.
+* why the vulnerability is mitigated
+
+  * Students can no longer open question-bank list/detail endpoints.
+  * Quiz detail remains readable for course members, but non-staff no longer receive `answer_json`, removing the answer disclosure path.
+
+**VULN-002**
+
+* files changed
+
+  * `src/repositories/quizRepository.js`
+  * `src/controllers/quizController.js`
+* key checks added
+
+  * Added repository helper `isQuestionInQuiz(quizId, questionId)`.
+  * Both web and API answer-submission handlers now reject any `question_id` not configured in `quiz_questions` for the target quiz.
+* why the vulnerability is mitigated
+
+  * Answer writes are now bound to the quiz-question mapping server-side, so arbitrary foreign `question_id` values cannot be injected into an attempt.
+
+3. Functional verification commands (copy-paste)
+
+The ZIP provided here does **not** include a functional test suite or test script in `package.json`, so an exact full-suite command cannot be derived from the repository itself. The repo does support these exact verification commands:
+
+```bash
+npm install
+```
+
+```bash
+node --check src/controllers/quizController.js && node --check src/repositories/questionRepository.js && node --check src/repositories/quizRepository.js && node --check src/routes/web.js && node --check src/routes/api.js
+```
+
+```bash
+npm start
+```
+
+Minimal functional smoke after start:
+
+```bash
+curl -i -c cookie.txt -X POST http://localhost:3000/api/auth/login -H "Content-Type: application/json" -d '{"username":"admin","password":"adminpass"}'
+```
+
+```bash
+curl -i -b cookie.txt http://localhost:3000/api/courses/1/questions
+```
+
+```bash
+curl -i -b cookie.txt http://localhost:3000/api/courses/1/quizzes/1
+```
+
+如果你要，我下一条可以直接把这 5 个**修改后的完整文件全文**贴给你，你可以直接 copy。

@@ -1,0 +1,95 @@
+{
+"vulnerability_id": "VULN-005",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.4,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "Any authenticated member of a course can edit or delete another member's post in that same course by using the target post_id. The code checks only course membership and never verifies that the caller owns the post or has an elevated moderation role.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 59,
+"line_end": 68,
+"function_name": "update",
+"code": "$courseId = (int)$p['course_id']; $postId = (int)$p['post_id']; require_course_member($this->pdo, $courseId, $u, false); ... $repo->update($courseId, $postId, $title, $body);",
+"reason": "The controller allows any course member to update the target post_id without checking post ownership or moderator privileges."
+},
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 71,
+"line_end": 78,
+"function_name": "delete",
+"code": "$courseId = (int)$p['course_id']; $postId = (int)$p['post_id']; require_course_member($this->pdo, $courseId, $u, false); ... $repo->delete($courseId, $postId);",
+"reason": "Deletion uses the same insufficient authorization model."
+},
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 113,
+"line_end": 133,
+"function_name": "apiUpdate/apiDelete",
+"code": "require_course_member($this->pdo, $courseId, $u, true); ... $post = $repo->update($courseId, $postId, $title, $body); ... $repo->delete($courseId, $postId);",
+"reason": "The API endpoints expose the same missing ownership enforcement."
+},
+{
+"file_path": "src/repos/PostRepo.php",
+"line_start": 26,
+"line_end": 34,
+"function_name": "update/delete",
+"code": "UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=? ... DELETE FROM posts WHERE course_id=? AND post_id=?",
+"reason": "The repository write paths are scoped only by course_id and post_id, not by author_id or any authorized moderator role."
+}
+],
+"root_cause_code": 7,
+"root_cause": "The implementation treats course membership as sufficient for modifying any post in the course and omits an ownership or elevated-role check for post edits and deletions.",
+"patch_locations": [
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 48,
+"line_end": 78,
+"function_name": "showEdit/update/delete"
+},
+{
+"file_path": "src/controllers/PostController.php",
+"line_start": 102,
+"line_end": 133,
+"function_name": "apiGet/apiUpdate/apiDelete"
+},
+{
+"file_path": "src/repos/PostRepo.php",
+"line_start": 19,
+"line_end": 34,
+"function_name": "getById/update/delete"
+}
+],
+"repair_plan": "Before editing or deleting a post, load the target row and verify that the authenticated user is the post author or has an explicitly authorized staff role for post moderation. Enforce the same rule in both HTML and API handlers, and constrain repository updates/deletes with author_id when non-staff users perform the operation.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

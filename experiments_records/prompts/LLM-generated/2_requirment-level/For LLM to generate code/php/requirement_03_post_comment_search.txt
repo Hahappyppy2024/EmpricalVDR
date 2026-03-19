@@ -1,0 +1,152 @@
+
+
+# Requirement-Level Prompt (EduCollab, PHP/SQLite/Server-Rendered MVC) — Requirement 03: Post + Comment + Search (Function-Only)
+
+You are a senior PHP engineer. Update the existing PHP web application using an MVC-style architecture. Implement ONLY the functional requirements below and keep everything else minimal and runnable.
+
+## Hard constraints
+
+* This is an incremental requirement-level update.
+* Start from the existing runnable repository produced earlier.
+* Preserve all existing working functionality.
+* Do not refactor unrelated modules.
+* The app must remain runnable with PHP’s built-in server, for example:
+
+  * `php -S 127.0.0.1:8000 -t public`
+* Keep dependencies minimal and standard.
+* Use the existing SQLite setup consistently.
+* Use the existing session/auth logic consistently.
+* Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or documentation.
+* HTML pages and JSON API under `/api` MUST use the SAME database and the SAME session/auth logic.
+* Do not rename existing routes, tables, or session keys unless explicitly required below.
+* Do not rewrite previously implemented modules.
+* Only add the minimum code needed for this requirement.
+* Keep all previously implemented pages and APIs working.
+
+## Language/Framework
+
+* PHP 8+
+* Plain PHP or lightweight custom MVC
+* SQLite: PDO with SQLite driver
+* Sessions: native PHP sessions
+* Server-rendered templates: PHP view files
+
+## Architecture requirement (MVC, function-only; no fixed file paths)
+
+* Model/Repository: DB access only
+* Controller: route handlers calling repositories
+* View: server-rendered PHP templates
+* Extend the existing app entry and routing cleanly
+
+## Scope for this requirement
+
+* Post
+* Comment
+* Search
+
+## Minimum data model to add in this requirement
+
+* Post(post_id, course_id, author_id, title, body, created_at, updated_at)
+* Comment(comment_id, post_id, course_id, author_id, body, created_at, updated_at)
+
+## Functional Requirements (function-only)
+
+### E) Posts (any logged-in user within course context)
+
+* FR-P1 create_post()
+
+  * HTML: GET /courses/:course_id/posts/new, POST /courses/:course_id/posts
+  * API:  POST /api/courses/:course_id/posts {title, body}
+* FR-P2 list_posts()
+
+  * HTML: GET /courses/:course_id/posts
+  * API:  GET /api/courses/:course_id/posts
+* FR-P3 get_post()
+
+  * HTML: GET /courses/:course_id/posts/:post_id
+  * API:  GET /api/courses/:course_id/posts/:post_id
+* FR-P4 update_post()
+
+  * HTML: GET /courses/:course_id/posts/:post_id/edit, POST /courses/:course_id/posts/:post_id
+  * API:  PUT /api/courses/:course_id/posts/:post_id {title, body}
+* FR-P5 delete_post()
+
+  * HTML: POST /courses/:course_id/posts/:post_id/delete
+  * API:  DELETE /api/courses/:course_id/posts/:post_id
+
+### F) Comments (any logged-in user within course context)
+
+* FR-CM1 create_comment()
+
+  * HTML: POST /courses/:course_id/posts/:post_id/comments
+  * API:  POST /api/courses/:course_id/posts/:post_id/comments {body}
+* FR-CM2 list_comments()
+
+  * HTML: GET /courses/:course_id/posts/:post_id/comments (optional but preferred)
+  * API:  GET /api/courses/:course_id/posts/:post_id/comments
+* FR-CM3 update_comment()
+
+  * HTML: POST /courses/:course_id/posts/:post_id/comments/:comment_id
+  * API:  PUT /api/courses/:course_id/posts/:post_id/comments/:comment_id {body}
+* FR-CM4 delete_comment()
+
+  * HTML: POST /courses/:course_id/posts/:post_id/comments/:comment_id/delete
+  * API:  DELETE /api/courses/:course_id/posts/:post_id/comments/:comment_id
+
+### G) Search (any logged-in user within course context)
+
+* FR-S1 search_posts()
+
+  * HTML: GET /courses/:course_id/search?keyword=...
+  * API:  GET /api/courses/:course_id/search/posts?keyword=...
+* FR-S2 search_comments()
+
+  * HTML: GET /courses/:course_id/search/comments?keyword=...
+  * API:  GET /api/courses/:course_id/search/comments?keyword=...
+
+## Role rules to implement in this requirement
+
+* any logged-in user who is a member of the course can create/read/update/delete posts in that course
+* any logged-in user who is a member of the course can create/read/update/delete comments in that course
+* any logged-in user who is a member of the course can search posts/comments in that course
+
+## Behavior and implementation rules
+
+* Preserve all routes and behavior from earlier requirements.
+* Keep route naming exactly as specified above.
+* Reuse existing membership checks.
+* `/api` routes must return JSON.
+* HTML routes may redirect after successful form submissions.
+* Keep views minimal.
+* Search may use simple SQL LIKE matching.
+* Do not implement assignments, submissions, uploads, question bank, quizzes, or attempts in this requirement.
+
+## Suggested implementation details
+
+* Extend DB initialization to create the Post and Comment tables if they do not exist.
+* Use PDO prepared statements for all post, comment, and search queries.
+* Reuse the existing course-scoped authorization helpers introduced in Requirement 02.
+* Ensure post/comment operations remain scoped to the course in the route.
+* Continue using the same session key for the current user established earlier.
+* For API `PUT` and `DELETE` routes, support JSON request bodies and parse them consistently.
+* Keep HTML pages minimal but functional.
+* Search may use `LIKE` queries on `title` and `body` for posts, and `body` for comments.
+
+## Deliverables (must include)
+
+1. Updated runnable multi-file codebase.
+2. DB migration/init logic extended to include Post and Comment tables.
+3. Minimal PHP views for each major HTML page listed in this requirement.
+4. JSON responses for all `/api` endpoints in this requirement.
+5. Clear folder structure showing MVC separation.
+6. A short README update with example curl commands for key API calls in this requirement.
+
+## Output format (MUST follow exactly)
+
+A) Repository folder structure
+B) Full contents of all changed/new source files
+C) Database schema / init changes
+D) Run instructions
+E) Example curl commands
+F) Zip file includes all files
+

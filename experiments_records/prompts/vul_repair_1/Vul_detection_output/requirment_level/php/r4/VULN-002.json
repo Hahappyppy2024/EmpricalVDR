@@ -1,0 +1,107 @@
+{
+  "vulnerability_id": "VULN-002",
+  "vulnerability_type_code": 13,
+  "vulnerability_type": "Business Logic",
+  "cwe_id": "CWE-841",
+  "cvss_version": "CVSS v4.0 (2023)",
+  "cvss_score": 6.7,
+  "severity_level": "medium",
+  "confidence_score": 95,
+  "confidence_level": "high",
+  "summary": "A student can bind any course upload to their submission by supplying an arbitrary attachment_upload_id from the same course. Because the server verifies only course membership of the upload and not whether that file is authorized for the student's submission, a student can reuse unrelated staff-uploaded files as their own attachment.",
+  "entry_points": [
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/assignments/:assignment_id/submissions"
+    },
+    {
+      "type": "server-rendered form/page",
+      "method": "POST",
+      "route": "/courses/:course_id/assignments/:assignment_id/submissions/:submission_id"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "POST",
+      "route": "/api/courses/:course_id/assignments/:assignment_id/submissions"
+    },
+    {
+      "type": "JSON API endpoint",
+      "method": "PUT",
+      "route": "/api/courses/:course_id/assignments/:assignment_id/submissions/:submission_id"
+    }
+  ],
+  "evidence_snippets": [
+    {
+      "file_path": "app/views/courses/assignments/submit.php",
+      "line_start": 10,
+      "line_end": 16,
+      "function_name": null,
+      "code": "<label>Attachment Upload</label>\n<select name=\"attachment_upload_id\">\n    <option value=\"\">None</option>\n    <?php foreach ($uploads as $upload): ?>\n        <option value=\"<?= htmlspecialchars((string) $upload['upload_id'], ENT_QUOTES, 'UTF-8') ?>\"><?= htmlspecialchars($upload['original_name'], ENT_QUOTES, 'UTF-8') ?></option>\n    <?php endforeach; ?>\n</select>",
+      "reason": "The submission form exposes every upload in the course as an attachable option for the student."
+    },
+    {
+      "file_path": "app/controllers/SubmissionController.php",
+      "line_start": 20,
+      "line_end": 34,
+      "function_name": "showSubmitForm",
+      "code": "render('courses/assignments/submit', [\n    'title' => 'Submit Assignment',\n    'course' => $this->courseRepo->findById($courseId),\n    'assignment' => $this->assignmentRepo->findById($courseId, $assignmentId),\n    'uploads' => $this->uploadRepo->listByCourse($courseId),\n    'my_submissions' => array_values(array_filter(\n        $this->submissionRepo->listByUser($userId),\n        fn(array $s): bool => (int) $s['course_id'] === $courseId && (int) $s['assignment_id'] === $assignmentId\n    )),\n    'error' => null,\n]);",
+      "reason": "The controller intentionally populates the student submission form with the full course upload list instead of a submission-safe attachment set."
+    },
+    {
+      "file_path": "app/controllers/SubmissionController.php",
+      "line_start": 68,
+      "line_end": 88,
+      "function_name": "create",
+      "code": "private function create(int $courseId, int $assignmentId, int $userId, array $data): array\n{\n    if (!$this->assignmentRepo->findById($courseId, $assignmentId)) {\n        return ['success' => false, 'error' => 'Assignment not found'];\n    }\n    ...\n    $attachmentUploadId = isset($data['attachment_upload_id']) && $data['attachment_upload_id'] !== '' ? (int) $data['attachment_upload_id'] : null;\n    ...\n    if ($attachmentUploadId !== null && !$this->uploadRepo->findById($courseId, $attachmentUploadId)) {\n        return ['success' => false, 'error' => 'Attachment not found or not in this course'];\n    }\n    $submissionId = $this->submissionRepo->create([... 'attachment_upload_id' => $attachmentUploadId, ]);\n}",
+      "reason": "Submission creation checks only that the upload belongs to the course; it does not verify that the upload is owned by the student, designated for student submissions, or otherwise authorized for attachment."
+    },
+    {
+      "file_path": "app/controllers/SubmissionController.php",
+      "line_start": 111,
+      "line_end": 132,
+      "function_name": "update",
+      "code": "private function update(int $courseId, int $assignmentId, int $submissionId, int $userId, array $data): array\n{\n    $submission = $this->submissionRepo->findById($courseId, $assignmentId, $submissionId);\n    ...\n    $attachmentUploadId = isset($data['attachment_upload_id']) && $data['attachment_upload_id'] !== '' ? (int) $data['attachment_upload_id'] : null;\n    ...\n    if ($attachmentUploadId !== null && !$this->uploadRepo->findById($courseId, $attachmentUploadId)) {\n        return ['success' => false, 'error' => 'Attachment not found or not in this course'];\n    }\n    $this->submissionRepo->update($courseId, $assignmentId, $submissionId, [\n        'content_text' => $contentText,\n        'attachment_upload_id' => $attachmentUploadId,\n    ]);\n}",
+      "reason": "Submission updates repeat the same course-only attachment check and allow reassignment to any upload identifier from the course."
+    }
+  ],
+  "root_cause_code": 11,
+  "root_cause": "The submission workflow trusts course-scoped upload identifiers across a boundary between generic course files and student-owned submission attachments, and it never enforces an authorization or ownership rule for which uploads may be bound to a student's submission.",
+  "patch_locations": [
+    {
+      "file_path": "app/controllers/SubmissionController.php",
+      "line_start": 20,
+      "line_end": 34,
+      "function_name": "showSubmitForm"
+    },
+    {
+      "file_path": "app/controllers/SubmissionController.php",
+      "line_start": 68,
+      "line_end": 88,
+      "function_name": "create"
+    },
+    {
+      "file_path": "app/controllers/SubmissionController.php",
+      "line_start": 111,
+      "line_end": 132,
+      "function_name": "update"
+    },
+    {
+      "file_path": "app/views/courses/assignments/submit.php",
+      "line_start": 10,
+      "line_end": 16,
+      "function_name": null
+    },
+    {
+      "file_path": "app/repositories/UploadRepository.php",
+      "line_start": 41,
+      "line_end": 52,
+      "function_name": "findById"
+    }
+  ],
+  "repair_plan": "Define and enforce a clear attachment policy for submissions. If students are allowed to attach files, verify that the referenced upload was created by that same student and is marked as attachable to that assignment or submission; otherwise provide a dedicated student-submission upload flow instead of reusing the generic course upload pool. Apply the same authorization rule to both submission creation and update paths and limit the form options to only authorized uploads.",
+  "detection_report_complete": 1,
+  "has_root_cause": 1,
+  "has_patch_location": 1,
+  "has_repair_plan": 1
+}

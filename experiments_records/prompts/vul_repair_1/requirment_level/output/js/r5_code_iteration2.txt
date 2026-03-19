@@ -1,0 +1,186 @@
+Here is the English version:
+
+Patch file:
+[educollab_r5_requirement_round2.patch](sandbox:/mnt/data/educollab_r5_requirement_round2.patch)
+
+1. Unified diff patch (git apply compatible)
+
+```diff
+diff --git a/src/routes/api.js b/src/routes/api.js
+--- a/src/routes/api.js
++++ b/src/routes/api.js
+@@ -90,8 +90,8 @@ router.get('/courses/:course_id/uploads/:upload_id/download', requireCourseMembe
+ router.delete('/courses/:course_id/uploads/:upload_id', requireCourseStaff, uploadController.apiDeleteUpload);
+ 
+ router.post('/courses/:course_id/questions', requireCourseStaff, questionController.apiCreateQuestion);
+-router.get('/courses/:course_id/questions', requireCourseStaff, questionController.apiListQuestions);
+-router.get('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiGetQuestion);
++router.get('/courses/:course_id/questions', requireCourseMember, questionController.apiListQuestions);
++router.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.apiGetQuestion);
+ router.put('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiUpdateQuestion);
+ router.delete('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.apiDeleteQuestion);
+
+diff --git a/src/routes/web.js b/src/routes/web.js
+--- a/src/routes/web.js
++++ b/src/routes/web.js
+@@ -104,8 +104,8 @@ router.post('/courses/:course_id/uploads', requireCourseStaff, upload.single('fi
+
+ router.get('/courses/:course_id/questions/new', requireCourseStaff, questionController.showNewQuestion);
+ router.post('/courses/:course_id/questions', requireCourseStaff, questionController.createQuestion);
+-router.get('/courses/:course_id/questions', requireCourseStaff, questionController.listQuestions);
+-router.get('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.getQuestion);
++router.get('/courses/:course_id/questions', requireCourseMember, questionController.listQuestions);
++router.get('/courses/:course_id/questions/:question_id', requireCourseMember, questionController.getQuestion);
+ router.get('/courses/:course_id/questions/:question_id/edit', requireCourseStaff, questionController.showEditQuestion);
+ router.post('/courses/:course_id/questions/:question_id', requireCourseStaff, questionController.updateQuestion);
+ router.post('/courses/:course_id/questions/:question_id/delete', requireCourseStaff, questionController.deleteQuestion);
+
+diff --git a/src/controllers/questionController.js b/src/controllers/questionController.js
+--- a/src/controllers/questionController.js
++++ b/src/controllers/questionController.js
+@@ -1,6 +1,13 @@
+ const courseRepository = require('../repositories/courseRepository');
+ const questionRepository = require('../repositories/questionRepository');
+
++function canViewQuestionAnswers(req) {
++  const role = req.courseMembership && req.courseMembership.role_in_course;
++  return ['teacher', 'admin', 'assistant', 'senior-assistant'].includes(role);
++}
++
+ function showNewQuestion(req, res) {
+   const course = courseRepository.findById(Number(req.params.course_id));
+   if (!course) return res.status(404).send('Course not found');
+@@ -29,24 +36,29 @@ function listQuestions(req, res) {
+   const courseId = Number(req.params.course_id);
+   const course = courseRepository.findById(courseId);
+   if (!course) return res.status(404).send('Course not found');
+-  res.render('questions_list', { course, questions: questionRepository.listByCourse(courseId) });
++  const questions = canViewQuestionAnswers(req)
++    ? questionRepository.listByCourse(courseId)
++    : questionRepository.listByCourseSafe(courseId);
++  res.render('questions_list', { course, questions });
+ }
+
+ function apiListQuestions(req, res) {
+-  res.json({ success: true, questions: questionRepository.listByCourse(Number(req.params.course_id)) });
++  const courseId = Number(req.params.course_id);
++  const questions = canViewQuestionAnswers(req)
++    ? questionRepository.listByCourse(courseId)
++    : questionRepository.listByCourseSafe(courseId);
++  res.json({ success: true, questions });
+ }
+
+ function getQuestion(req, res) {
+   const courseId = Number(req.params.course_id);
+   const questionId = Number(req.params.question_id);
+   const course = courseRepository.findById(courseId);
+-  const question = questionRepository.findById(courseId, questionId);
++  const question = canViewQuestionAnswers(req)
++    ? questionRepository.findById(courseId, questionId)
++    : questionRepository.findByIdSafe(courseId, questionId);
+   if (!course || !question) return res.status(404).send('Question not found');
+   res.render('question_show', { course, question });
+ }
+
+ function apiGetQuestion(req, res) {
+-  const question = questionRepository.findById(Number(req.params.course_id), Number(req.params.question_id));
++  const courseId = Number(req.params.course_id);
++  const questionId = Number(req.params.question_id);
++  const question = canViewQuestionAnswers(req)
++    ? questionRepository.findById(courseId, questionId)
++    : questionRepository.findByIdSafe(courseId, questionId);
+   if (!question) return res.status(404).json({ success: false, error: 'Question not found' });
+   res.json({ success: true, question });
+ }
+
+diff --git a/src/repositories/quizRepository.js b/src/repositories/quizRepository.js
+--- a/src/repositories/quizRepository.js
++++ b/src/repositories/quizRepository.js
+@@ -104,6 +104,10 @@ function isQuestionInQuiz(quizId, questionId) {
+ }
+
+ function saveAnswer({ attempt_id, question_id, answer_json }) {
++  const attempt = db.prepare(`SELECT quiz_id FROM quiz_attempts WHERE attempt_id = ?`).get(attempt_id);
++  if (!attempt || !isQuestionInQuiz(attempt.quiz_id, question_id)) {
++    return null;
++  }
+   db.prepare(`
+     INSERT INTO quiz_answers (attempt_id, question_id, answer_json)
+     VALUES (?, ?, ?)
+```
+
+2. Per-vulnerability summary
+
+**VULN-001**
+
+* files changed
+
+  * `src/routes/api.js`
+  * `src/routes/web.js`
+  * `src/controllers/questionController.js`
+
+* key checks added
+
+  * Restored question list/detail read access from `requireCourseStaff` back to `requireCourseMember`.
+  * Added role-aware field projection in `questionController`.
+  * Staff still receive full question records, while non-staff members receive `listByCourseSafe()` / `findByIdSafe()` results without `answer_json`.
+
+* regression restored
+
+  * The requirement-stage student question detail flow now returns 200 again instead of the over-restrictive 403 introduced by the previous repair.
+
+* why the vulnerability is mitigated
+
+  * Students can still use the requirement-stage question read flow, but sensitive answer data is no longer disclosed through question list/detail responses.
+  * Staff-only answer visibility is preserved without breaking the member-facing flow.
+
+**VULN-002**
+
+* files changed
+
+  * `src/repositories/quizRepository.js`
+
+* key checks added
+
+  * Hardened `saveAnswer()` so the write layer independently verifies that the target `question_id` belongs to the attempt’s quiz before persisting.
+  * This supplements the controller-level `isQuestionInQuiz()` check added in the previous repair.
+
+* regression restored
+
+  * None.
+
+* why the vulnerability is mitigated
+
+  * Arbitrary foreign question IDs are now blocked both at the controller layer and at the repository write boundary.
+  * Even if another caller reaches `saveAnswer()` later, invalid answer injection is still rejected.
+
+3. Functional verification commands (copy-paste)
+
+Run a syntax check first:
+
+```bash
+node --check src/controllers/questionController.js && node --check src/repositories/quizRepository.js && node --check src/routes/api.js && node --check src/routes/web.js
+```
+
+Run the requirement-stage functional test:
+
+```bash
+node --test tests/api.quiz.functional.test.js
+```
+
+4. Security verification commands (copy-paste)
+
+Run the two relevant security tests:
+
+```bash
+node --test tests/security/test_exploit_vuln_001_question_answer_exposure.js
+```
+
+```bash
+node --test tests/security/test_exploit_vuln_002_quiz_question_injection.js
+```
+
+Additional note:
+The code-level repair plan and the patch are complete, and I did validate the edited files with `node --check`.
+
+I could not honestly claim a full end-to-end test pass inside this container because the ZIP includes a Windows-native `better-sqlite3` binary, which fails under the current Linux environment, and rebuilding that dependency here was blocked by missing downloadable Node headers. So the patch is grounded in the code and directly targets the exact failure modes you provided, but the full runtime verification still needs to be executed in your local project environment.

@@ -1,0 +1,134 @@
+
+1. Unified diff patch (git apply compatible)
+
+[Download the patch](sandbox:/mnt/data/req01_gitpatch_clean.diff)
+
+2. Per-vulnerability summary
+
+**VULN-001**
+
+* files changed
+
+  * `config/config.php`
+  * `app/core/Bootstrap.php`
+  * `app/repositories/UserRepository.php`
+  * `public/index.php`
+  * `scripts/init.php`
+* key checks added
+
+  * Removed hard-coded admin username/password from repository config.
+  * Stopped automatic admin seeding during normal web startup.
+  * Changed bootstrap admin creation to an explicit init-time step driven by environment variables.
+  * Added persistent `is_admin` flag in the `users` table so admin authorization does not depend on a hard-coded username.
+* why the vulnerability is mitigated
+
+  * A predictable privileged account is no longer created automatically on each startup, and no reusable default admin credential remains in the codebase.
+
+**VULN-002**
+
+* files changed
+
+  * `app/core/Auth.php`
+* key checks added
+
+  * `session_regenerate_id(true)` now runs on successful login.
+  * `session_regenerate_id(true)` now runs on logout after clearing the authenticated session key.
+* why the vulnerability is mitigated
+
+  * Authentication is no longer attached to a pre-authentication session ID, which blocks the reported fixation path.
+
+**VULN-003**
+
+* files changed
+
+  * `app/core/Auth.php`
+  * `app/controllers/AuthController.php`
+  * `app/repositories/UserRepository.php`
+* key checks added
+
+  * Added `require_admin(...)`.
+  * `/admin/users` and `/api/users` now require an authenticated user with `is_admin=1`.
+* why the vulnerability is mitigated
+
+  * Authenticated non-admin users can no longer enumerate the global user directory.
+
+**VULN-004**
+
+* files changed
+
+  * `app/controllers/CourseController.php`
+  * `public/index.php`
+  * `app/core/Auth.php`
+  * `app/repositories/UserRepository.php`
+* key checks added
+
+  * Course edit form access now checks owner-or-admin.
+  * Course update/delete for both HTML and API now check owner-or-admin before mutating data.
+  * API returns `403` for unauthorized course mutation attempts.
+* why the vulnerability is mitigated
+
+  * A logged-in user can no longer update or delete another user’s course just by supplying a foreign `course_id`.
+
+**VULN-005**
+
+* files changed
+
+  * `app/core/Auth.php`
+  * `app/controllers/AuthController.php`
+  * `app/controllers/CourseController.php`
+  * `app/views/auth/register.php`
+  * `app/views/auth/login.php`
+  * `app/views/courses/new.php`
+  * `app/views/courses/edit.php`
+  * `app/views/courses/show.php`
+  * `app/views/layouts/header.php`
+* key checks added
+
+  * Added centralized CSRF token generation and validation helpers.
+  * Added hidden `_csrf` tokens to HTML forms for register, login, logout, course create, course update, and course delete.
+  * HTML controllers now reject missing/invalid CSRF tokens with `403`.
+* why the vulnerability is mitigated
+
+  * Browser-submitted state-changing HTML requests now require a valid per-session CSRF token instead of trusting only the session cookie.
+
+3. Functional verification commands (copy-paste)
+
+This ZIP does **not** include a bundled `tests/` directory or repo-local functional suite, so there is no honest exact “full functional test suite” command available inside this archive.
+
+* run the full functional test suite
+
+```bash
+# No bundled functional test suite exists in this ZIP archive.
+```
+
+* run the functional tests relevant to the current requirement
+
+```bash
+# No bundled requirement-level functional test files exist in this ZIP archive.
+```
+
+* minimal functional smoke command
+
+```bash
+cd educollab_php_req01 && find . -name "*.php" -print0 | xargs -0 -n1 php -l
+```
+
+```bash
+cd educollab_php_req01 && php scripts/init.php
+```
+
+```bash
+cd educollab_php_req01 && php -S 127.0.0.1:8000 -t public
+```
+
+Notes:
+
+* The patch was syntax-checked with `php -l` across all PHP files.
+* To provision a bootstrap admin after the patch, use environment variables before running `php scripts/init.php`, for example:
+
+```bash
+export BOOTSTRAP_ADMIN_USERNAME=admin
+export BOOTSTRAP_ADMIN_PASSWORD='change-this-now'
+export BOOTSTRAP_ADMIN_DISPLAY_NAME='Bootstrap Admin'
+php scripts/init.php
+```

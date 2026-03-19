@@ -1,0 +1,12 @@
+ERROR tests/security_tests/test_vuln_001_default_admin_credentials.py::test_exploit_default_admin_credentials_work - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_002_user_list_access_control.py::test_exploit_any_authenticated_user_can_list_all_users - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_003_course_edit_delete_bac.py::test_exploit_any_authenticated_user_can_edit_other_users_course - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_004_cross_course_membership_idor.py::test_exploit_teacher_in_one_course_can_modify_membership_in_another_course - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_005_post_idor.py::test_exploit_course_member_can_edit_another_members_post - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_006_comment_idor.py::test_exploit_course_member_can_delete_another_members_comment - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_007_question_answer_leak.py::test_exploit_student_can_read_question_answer_json - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_008_upload_path_traversal.py::test_exploit_upload_filename_triggers_500 - RuntimeError: Flask server did not start
+ERROR tests/security_tests/test_vuln_009_quiz_answer_tampering.py::test_exploit_student_can_change_answers_after_submit_and_answer_non_quiz_question - RuntimeError: Flask server did not start
+9 errors in 116.74s (0:01:56)
+(venv) PS D:\000_phd_graudaiton\new_DRV\code\unkown\1_project-level\py\educolla_py_repair_iteration2>
+

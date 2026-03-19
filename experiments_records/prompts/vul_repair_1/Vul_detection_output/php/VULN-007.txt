@@ -1,0 +1,115 @@
+{
+"vulnerability_id": "VULN-007",
+"vulnerability_type_code": 11,
+"vulnerability_type": "Sensitive Data Exposure",
+"cwe_id": "CWE-200",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.0,
+"severity_level": "high",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "Students and other ordinary course members can read the full question bank, including answer_json values that contain the correct answers. This exposes assessment secrets and allows enrolled users to retrieve quiz answers directly through the UI or API.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions"
+},
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/questions/:question_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/questions/:question_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 8,
+"line_end": 13,
+"function_name": "list",
+"code": "$courseId = (int)$p['course_id']; require_course_member($this->pdo, $courseId, $u, false); ... $repo->listByCourse($courseId)",
+"reason": "The question bank list is available to any course member, not just staff."
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 38,
+"line_end": 46,
+"function_name": "detail",
+"code": "$courseId = (int)$p['course_id']; $questionId = (int)$p['question_id']; require_course_member($this->pdo, $courseId, $u, false); ... render('questions/detail', ...)",
+"reason": "Any course member can open an individual question detail page."
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 85,
+"line_end": 115,
+"function_name": "apiList/apiGet",
+"code": "require_course_member($this->pdo, $courseId, $u, true); ... json_response(['questions' => $repo->listByCourse($courseId)]); ... json_response(['question' => $q]);",
+"reason": "The API exposes the same data to any authenticated member of the course."
+},
+{
+"file_path": "src/repos/QuestionRepo.php",
+"line_start": 13,
+"line_end": 23,
+"function_name": "listByCourse/getById",
+"code": "SELECT q.*, u.username AS creator_username FROM questions q ...",
+"reason": "The repository returns all question columns, including answer_json, rather than a student-safe projection."
+},
+{
+"file_path": "views/questions/detail.php",
+"line_start": 5,
+"line_end": 7,
+"function_name": null,
+"code": "<div style="white-space:pre-wrap"><?= h($question['prompt']) ?></div>\n<p><b>Options JSON:</b> <pre><?= h($question['options_json'] ?? '') ?></pre></p>\n<p><b>Answer JSON:</b> <pre><?= h($question['answer_json'] ?? '') ?></pre></p>",
+"reason": "The rendered page explicitly displays the stored answer_json value to any user who reaches the question detail view."
+}
+],
+"root_cause_code": 2,
+"root_cause": "Question bank read access is granted to all course members, and the data layer returns sensitive answer fields without applying a role-based projection or staff-only access control.",
+"patch_locations": [
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 8,
+"line_end": 13,
+"function_name": "list"
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 38,
+"line_end": 46,
+"function_name": "detail"
+},
+{
+"file_path": "src/controllers/QuestionController.php",
+"line_start": 85,
+"line_end": 115,
+"function_name": "apiList/apiGet"
+},
+{
+"file_path": "src/repos/QuestionRepo.php",
+"line_start": 13,
+"line_end": 23,
+"function_name": "listByCourse/getById"
+},
+{
+"file_path": "views/questions/detail.php",
+"line_start": 5,
+"line_end": 7,
+"function_name": null
+}
+],
+"repair_plan": "Restrict question-bank management views and APIs to staff-only roles when answer_json or other assessment secrets are present. If students need limited quiz metadata, return a separate student-safe representation that excludes answer_json and any other solution material, and ensure the HTML views follow the same rule.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}

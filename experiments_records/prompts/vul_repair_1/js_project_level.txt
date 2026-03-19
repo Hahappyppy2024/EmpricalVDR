@@ -1,0 +1,580 @@
+You are a senior software engineer fixing vulnerabilities in a web application.
+
+Repository input
+- The full project codebase is provided as a ZIP archive.
+- Assume you can read and modify files inside the ZIP repository.
+- Do NOT ask for files outside the ZIP.
+
+Task
+- Implement code changes guided by the vulnerability detection (VD) report below.
+- Apply minimal, correct patches while preserving intended functionality.
+
+Hard constraints
+- Keep the project runnable.
+- Do NOT rename routes, database tables, or response JSON fields.
+- Do NOT change authentication/session key names or role names.
+- No new dependencies. Avoid refactors unrelated to the fixes.
+- Only change files necessary for the fixes.
+- Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or docs.
+
+Primary verification goal (must satisfy)
+- The functional test suite must PASS after the patch (no regressions).
+
+Authoritative input: Vulnerability Detection Report (VD)
+[
+{
+"vulnerability_id": "VULN-001",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.8,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "A teacher or course admin in one course can modify or remove membership records belonging to a different course by supplying a foreign membership_id. This allows unauthorized role changes or member removal across course boundaries.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/members/:membership_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/routes/api.js",
+"line_start": 37,
+"line_end": 40,
+"function_name": null,
+"code": "router.post('/courses/:course_id/members', auth.requireLogin, auth.requireCourseMember, auth.requireTeacherOrAdmin, membershipCtrl.addMember);\nrouter.get('/courses/:course_id/members', auth.requireLogin, auth.requireCourseMember, membershipCtrl.listMembers);\nrouter.put('/courses/:course_id/members/:membership_id', auth.requireLogin, auth.requireCourseMember, auth.requireTeacherOrAdmin, membershipCtrl.updateMemberRole);\nrouter.delete('/courses/:course_id/members/:membership_id', auth.requireLogin, auth.requireCourseMember, auth.requireTeacherOrAdmin, membershipCtrl.removeMember);",
+"reason": "Authorization is based on the course_id in the route, but the update and delete operations target a separate membership_id object supplied by the client."
+},
+{
+"file_path": "src/controllers/membershipController.js",
+"line_start": 30,
+"line_end": 42,
+"function_name": "updateMemberRole / removeMember",
+"code": "const course_id = Number(req.params.course_id);\nconst membership_id = Number(req.params.membership_id);\nconst { role_in_course } = req.body;\nconst updated = membershipRepo.updateRole(membership_id, role_in_course);\n...\nmembershipRepo.removeMember(membership_id);",
+"reason": "The controller never loads the target membership record to verify that it belongs to req.params.course_id before changing or deleting it."
+},
+{
+"file_path": "src/repos/membershipRepo.js",
+"line_start": 28,
+"line_end": 34,
+"function_name": "updateRole / removeMember",
+"code": "db.prepare('UPDATE memberships SET role_in_course=? WHERE membership_id=?').run(role_in_course, membership_id);\n...\ndb.prepare('DELETE FROM memberships WHERE membership_id=?').run(membership_id);",
+"reason": "Database writes are scoped only by membership_id and do not constrain the operation to the authorized course."
+}
+],
+"root_cause_code": 11,
+"root_cause": "The code trusts a cross-boundary object identifier (membership_id) without verifying that the referenced membership row belongs to the course on which authorization was performed.",
+"patch_locations": [
+{
+"file_path": "src/controllers/membershipController.js",
+"line_start": 30,
+"line_end": 45,
+"function_name": "updateMemberRole / removeMember"
+},
+{
+"file_path": "src/repos/membershipRepo.js",
+"line_start": 10,
+"line_end": 34,
+"function_name": "getById / updateRole / removeMember"
+}
+],
+"repair_plan": "Before updating or deleting a membership, load the target membership by membership_id and verify that its course_id matches the route course_id and that the acting user is authorized for that specific course. Scope the write path by both membership_id and course_id, or replace membership_id-only mutations with course-scoped repository methods.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.8,
+"severity_level": "high",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "Any authenticated member of a course can edit or delete another member's post by supplying that post's identifier. This permits unauthorized modification and destruction of other users' discussion content within the same course.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/routes/api.js",
+"line_start": 44,
+"line_end": 48,
+"function_name": null,
+"code": "router.post('/courses/:course_id/posts', auth.requireLogin, auth.requireCourseMember, postCtrl.createPost);\nrouter.get('/courses/:course_id/posts', auth.requireLogin, auth.requireCourseMember, postCtrl.listPosts);\nrouter.get('/courses/:course_id/posts/:post_id', auth.requireLogin, auth.requireCourseMember, postCtrl.getPost);\nrouter.put('/courses/:course_id/posts/:post_id', auth.requireLogin, auth.requireCourseMember, postCtrl.updatePost);\nrouter.delete('/courses/:course_id/posts/:post_id', auth.requireLogin, auth.requireCourseMember, postCtrl.deletePost);",
+"reason": "The write routes require only generic course membership and do not require ownership or staff privileges for post modification or deletion."
+},
+{
+"file_path": "src/controllers/postController.js",
+"line_start": 45,
+"line_end": 57,
+"function_name": "updatePost / deletePost",
+"code": "const post_id = Number(req.params.post_id);\nconst { title, body } = req.body;\nconst post = postRepo.updatePost(course_id, post_id, { title, body });\n...\npostRepo.deletePost(course_id, post_id);",
+"reason": "The controller uses the attacker-controlled post_id directly and never checks whether req.session.user owns the target post."
+},
+{
+"file_path": "src/repos/postRepo.js",
+"line_start": 30,
+"line_end": 37,
+"function_name": "updatePost / deletePost",
+"code": "db.prepare('UPDATE posts SET title=?, body=?, updated_at=? WHERE course_id=? AND post_id=?')\n  .run(title, body, nowIso(), course_id, post_id);\n...\ndb.prepare('DELETE FROM posts WHERE course_id=? AND post_id=?').run(course_id, post_id);",
+"reason": "Repository writes are scoped only by course_id and post_id; author_id is not enforced in the write path."
+}
+],
+"root_cause_code": 7,
+"root_cause": "The implementation treats course membership as sufficient authorization for mutating a post and omits any ownership check on the targeted post resource.",
+"patch_locations": [
+{
+"file_path": "src/controllers/postController.js",
+"line_start": 45,
+"line_end": 59,
+"function_name": "updatePost / deletePost"
+},
+{
+"file_path": "src/repos/postRepo.js",
+"line_start": 21,
+"line_end": 37,
+"function_name": "getById / updatePost / deletePost"
+}
+],
+"repair_plan": "Load the target post before mutation and require that the authenticated user is either the post author or an explicitly authorized elevated role for that course. Enforce the same rule in the repository by scoping update and delete operations to author_id for self-service edits, or by using a separate privileged path for staff moderation.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-003",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.4,
+"severity_level": "high",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "Any authenticated course member can edit or delete another user's comment by submitting a different comment_id under the same course and post. This allows unauthorized tampering with other users' comments.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/routes/api.js",
+"line_start": 51,
+"line_end": 54,
+"function_name": null,
+"code": "router.post('/courses/:course_id/posts/:post_id/comments', auth.requireLogin, auth.requireCourseMember, commentCtrl.createComment);\nrouter.get('/courses/:course_id/posts/:post_id/comments', auth.requireLogin, auth.requireCourseMember, commentCtrl.listComments);\nrouter.put('/courses/:course_id/posts/:post_id/comments/:comment_id', auth.requireLogin, auth.requireCourseMember, commentCtrl.updateComment);\nrouter.delete('/courses/:course_id/posts/:post_id/comments/:comment_id', auth.requireLogin, auth.requireCourseMember, commentCtrl.deleteComment);",
+"reason": "Write access to comment resources requires only course membership, with no ownership or moderation check."
+},
+{
+"file_path": "src/controllers/commentController.js",
+"line_start": 20,
+"line_end": 34,
+"function_name": "updateComment / deleteComment",
+"code": "const comment_id = Number(req.params.comment_id);\nconst { body } = req.body;\nconst comment = commentRepo.updateComment(course_id, post_id, comment_id, body);\n...\ncommentRepo.deleteComment(course_id, post_id, comment_id);",
+"reason": "The controller trusts the client-supplied comment_id and never verifies that the comment belongs to the current user."
+},
+{
+"file_path": "src/repos/commentRepo.js",
+"line_start": 30,
+"line_end": 38,
+"function_name": "updateComment / deleteComment",
+"code": "db.prepare('UPDATE comments SET body=?, updated_at=? WHERE course_id=? AND post_id=? AND comment_id=?')\n  .run(body, nowIso(), course_id, post_id, comment_id);\n...\ndb.prepare('DELETE FROM comments WHERE course_id=? AND post_id=? AND comment_id=?')\n  .run(course_id, post_id, comment_id);",
+"reason": "The database layer scopes only by identifiers supplied by the request and does not enforce author_id on writes."
+}
+],
+"root_cause_code": 7,
+"root_cause": "The code omits an ownership check for comment mutations and allows any course member to operate on any comment identifier within the course.",
+"patch_locations": [
+{
+"file_path": "src/controllers/commentController.js",
+"line_start": 20,
+"line_end": 36,
+"function_name": "updateComment / deleteComment"
+},
+{
+"file_path": "src/repos/commentRepo.js",
+"line_start": 21,
+"line_end": 38,
+"function_name": "getById / updateComment / deleteComment"
+}
+],
+"repair_plan": "Fetch the target comment before mutation and require that the authenticated user is the comment author unless a staff moderation path is intentionally allowed. Scope update and delete queries to author_id for normal users, and keep any elevated moderation behavior on a separate explicit authorization path.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-004",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.1,
+"severity_level": "high",
+"confidence_score": 94,
+"confidence_level": "high",
+"summary": "A student can overwrite another student's assignment submission by sending that submission's identifier to the update endpoint. This lets one student alter or replace another student's submitted work inside the same course and assignment.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/assignments/:assignment_id/submissions/:submission_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/assignments/:assignment_id/submissions/:submission_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/routes/api.js",
+"line_start": 68,
+"line_end": 71,
+"function_name": null,
+"code": "router.post('/courses/:course_id/assignments/:assignment_id/submissions', auth.requireLogin, auth.requireCourseMember, auth.requireStudent, submissionCtrl.createSubmission);\nrouter.put('/courses/:course_id/assignments/:assignment_id/submissions/:submission_id', auth.requireLogin, auth.requireCourseMember, auth.requireStudent, submissionCtrl.updateMySubmission);\nrouter.get('/my/submissions', auth.requireLogin, submissionCtrl.listMySubmissions);\nrouter.get('/courses/:course_id/assignments/:assignment_id/submissions', auth.requireLogin, auth.requireCourseMember, auth.requireCourseStaff, submissionCtrl.listForAssignment);",
+"reason": "The update endpoint is reachable by any student member of the course and takes submission_id directly from the request."
+},
+{
+"file_path": "src/controllers/submissionController.js",
+"line_start": 36,
+"line_end": 42,
+"function_name": "updateMySubmission",
+"code": "const submission_id = Number(req.params.submission_id);\nconst { content_text, attachment_upload_id } = req.body;\nconst submission = submissionRepo.updateSubmission(course_id, assignment_id, submission_id, { content_text, attachment_upload_id });",
+"reason": "The controller performs no check that submission_id belongs to req.session.user even though the method is named updateMySubmission."
+},
+{
+"file_path": "src/repos/submissionRepo.js",
+"line_start": 28,
+"line_end": 32,
+"function_name": "updateSubmission",
+"code": "db.prepare(\n  'UPDATE submissions SET content_text=?, attachment_upload_id=?, updated_at=? WHERE course_id=? AND assignment_id=? AND submission_id=?'\n).run(content_text, attachment_upload_id || null, nowIso(), course_id, assignment_id, submission_id);",
+"reason": "The update query omits student_id, so possession of a valid submission_id is sufficient to overwrite another student's row."
+}
+],
+"root_cause_code": 7,
+"root_cause": "The update path for submissions trusts a user-supplied submission_id and fails to bind the mutation to the authenticated student's own submission.",
+"patch_locations": [
+{
+"file_path": "src/controllers/submissionController.js",
+"line_start": 36,
+"line_end": 43,
+"function_name": "updateMySubmission"
+},
+{
+"file_path": "src/repos/submissionRepo.js",
+"line_start": 20,
+"line_end": 32,
+"function_name": "getMySubmission / updateSubmission"
+}
+],
+"repair_plan": "Resolve the target submission from the authenticated user and assignment rather than trusting an arbitrary submission_id from the client. Add a lookup that confirms student_id matches the session user, and scope the update query by student_id as well as course_id and assignment_id.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-005",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-284",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.6,
+"severity_level": "high",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "Uploaded files are directly exposed through a public static /uploads path, allowing anyone who knows or guesses the storage filename to retrieve course files without passing the authenticated download endpoint. This bypasses the course membership checks implemented on the intended download route.",
+"entry_points": [
+{
+"type": "other",
+"method": "GET",
+"route": "/uploads/:storage_path"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "app.js",
+"line_start": 33,
+"line_end": 35,
+"function_name": null,
+"code": "app.use('/static', express.static(path.join(__dirname, 'src', 'public')));\napp.use('/uploads', express.static(path.join(__dirname, 'data', 'uploads')));",
+"reason": "The application publishes the uploads directory directly as a public static path, creating an unauthenticated alternate access path for uploaded files."
+},
+{
+"file_path": "src/routes/api.js",
+"line_start": 74,
+"line_end": 77,
+"function_name": null,
+"code": "router.post('/courses/:course_id/uploads', auth.requireLogin, auth.requireCourseMember, auth.requireCourseStaff, uploadCtrl.uploader.single('file'), uploadCtrl.uploadFile);\nrouter.get('/courses/:course_id/uploads', auth.requireLogin, auth.requireCourseMember, uploadCtrl.listUploads);\nrouter.get('/courses/:course_id/uploads/:upload_id/download', auth.requireLogin, auth.requireCourseMember, uploadCtrl.downloadUpload);\nrouter.delete('/courses/:course_id/uploads/:upload_id', auth.requireLogin, auth.requireCourseMember, auth.requireCourseStaff, uploadCtrl.deleteUpload);",
+"reason": "A protected download route exists and enforces login and course membership, showing that file access was intended to be authorization-controlled."
+},
+{
+"file_path": "src/controllers/uploadController.js",
+"line_start": 30,
+"line_end": 35,
+"function_name": "uploadFile",
+"code": "const rec = uploadRepo.createUpload({\n  course_id,\n  uploaded_by: me.user_id,\n  original_name: req.file.originalname,\n  storage_path: req.file.filename\n});",
+"reason": "The application persists the exact storage filename, which is the identifier exposed by the public /uploads static path."
+}
+],
+"root_cause_code": 2,
+"root_cause": "The server exposes a sensitive storage directory through a public static route while also maintaining a separate protected download flow, creating an authorization bypass path.",
+"patch_locations": [
+{
+"file_path": "app.js",
+"line_start": 33,
+"line_end": 35,
+"function_name": null
+},
+{
+"file_path": "src/controllers/uploadController.js",
+"line_start": 47,
+"line_end": 56,
+"function_name": "downloadUpload"
+}
+],
+"repair_plan": "Remove the public express.static mapping for the uploads directory and require all file access to go through a server-side download handler that validates the caller's authorization for the specific course and upload record. Keep storage filenames unguessable but do not rely on obscurity as the access control mechanism.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-006",
+"vulnerability_type_code": 5,
+"vulnerability_type": "Insecure File Upload",
+"cwe_id": "CWE-434",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.4,
+"severity_level": "high",
+"confidence_score": 95,
+"confidence_level": "high",
+"summary": "Course staff can upload arbitrary file types, including HTML or JavaScript-bearing content, and those files are then served from the application's origin. This enables stored active-content delivery and can lead to same-origin XSS against users who open the uploaded file.",
+"entry_points": [
+{
+"type": "file upload handler",
+"method": "POST",
+"route": "/api/courses/:course_id/uploads"
+},
+{
+"type": "file upload handler",
+"method": "POST",
+"route": "/courses/:course_id/uploads"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/controllers/uploadController.js",
+"line_start": 9,
+"line_end": 17,
+"function_name": null,
+"code": "const storage = multer.diskStorage({\n  destination: (req, file, cb) => cb(null, storageDir),\n  filename: (req, file, cb) => {\n    const safe = `${Date.now()}-${Math.random().toString(16).slice(2)}-${file.originalname}`;\n    cb(null, safe);\n  }\n});\n\nconst uploader = multer({ storage });",
+"reason": "The upload handler has no file type allowlist, no content validation, and preserves the original filename extension in the stored file."
+},
+{
+"file_path": "src/controllers/uploadController.js",
+"line_start": 23,
+"line_end": 35,
+"function_name": "uploadFile",
+"code": "if (!req.file) {\n  ...\n}\nconst rec = uploadRepo.createUpload({\n  course_id,\n  uploaded_by: me.user_id,\n  original_name: req.file.originalname,\n  storage_path: req.file.filename\n});",
+"reason": "Any uploaded file accepted by multer is stored and registered without server-side restrictions on active content."
+},
+{
+"file_path": "app.js",
+"line_start": 34,
+"line_end": 35,
+"function_name": null,
+"code": "app.use('/uploads', express.static(path.join(__dirname, 'data', 'uploads')));",
+"reason": "Uploaded files are served directly from the application origin, turning unrestricted file upload into active-content delivery."
+}
+],
+"root_cause_code": 1,
+"root_cause": "The upload pipeline accepts untrusted file content without validating allowed types or neutralizing active content, then exposes the uploaded bytes directly to browsers from the application origin.",
+"patch_locations": [
+{
+"file_path": "src/controllers/uploadController.js",
+"line_start": 9,
+"line_end": 35,
+"function_name": "uploader / uploadFile"
+},
+{
+"file_path": "app.js",
+"line_start": 34,
+"line_end": 35,
+"function_name": null
+}
+],
+"repair_plan": "Restrict uploads to an explicit allowlist of safe file types needed by the application, validate both MIME type and server-side content signature, normalize stored filenames so active extensions are not preserved when unnecessary, and serve uploaded files through a controlled download endpoint with safe Content-Type and Content-Disposition headers rather than direct static hosting.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+},
+{
+"vulnerability_id": "VULN-007",
+"vulnerability_type_code": 13,
+"vulnerability_type": "Business Logic",
+"cwe_id": "CWE-841",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 8.2,
+"severity_level": "high",
+"confidence_score": 90,
+"confidence_level": "high",
+"summary": "Quiz attempt endpoints trust client-supplied attempt_id and question_id without verifying attempt ownership, quiz-question membership, or submission state. A student in the same course can tamper with another student's attempt, answer questions not bound to the quiz, and continue changing answers after submission.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/routes/api.js",
+"line_start": 95,
+"line_end": 98,
+"function_name": null,
+"code": "router.post('/courses/:course_id/quizzes/:quiz_id/attempts/start', auth.requireLogin, auth.requireCourseMember, auth.requireStudent, takeQuizCtrl.startAttempt);\nrouter.post('/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/answers', auth.requireLogin, auth.requireCourseMember, auth.requireStudent, takeQuizCtrl.answerQuestion);\nrouter.post('/courses/:course_id/quizzes/:quiz_id/attempts/:attempt_id/submit', auth.requireLogin, auth.requireCourseMember, auth.requireStudent, takeQuizCtrl.submitAttempt);",
+"reason": "The sensitive quiz workflow is reachable by any student member of the course and relies on attempt_id provided by the client."
+},
+{
+"file_path": "src/controllers/takeQuizController.js",
+"line_start": 34,
+"line_end": 49,
+"function_name": "answerQuestion / submitAttempt",
+"code": "const attempt_id = Number(req.params.attempt_id);\nconst { question_id, answer_json } = req.body;\nconst ans = quizAttemptRepo.upsertAnswer({ attempt_id, question_id: Number(question_id), answer_json: answer_json || '' });\n...\nconst attempt = quizAttemptRepo.submitAttempt(attempt_id);",
+"reason": "The controller neither checks that the attempt belongs to req.session.user nor confirms that question_id belongs to the quiz or that the attempt is still open."
+},
+{
+"file_path": "src/repos/quizAttemptRepo.js",
+"line_start": 10,
+"line_end": 35,
+"function_name": "getAttempt / upsertAnswer / submitAttempt",
+"code": "function getAttempt(attempt_id) {\n  return db.prepare('SELECT * FROM quiz_attempts WHERE attempt_id=?').get(attempt_id);\n}\n...\ndb.prepare(\n  'INSERT INTO quiz_answers (attempt_id, question_id, answer_json, created_at) VALUES (?,?,?,?)\n     ON CONFLICT(attempt_id, question_id) DO UPDATE SET answer_json=excluded.answer_json'\n).run(attempt_id, question_id, answer_json, nowIso());\n...\ndb.prepare('UPDATE quiz_attempts SET submitted_at=? WHERE attempt_id=?').run(nowIso(), attempt_id);",
+"reason": "The repository trusts attempt_id and question_id alone; it does not enforce student ownership, quiz-question binding, or immutability after submission."
+}
+],
+"root_cause_code": 12,
+"root_cause": "The quiz workflow lacks server-side enforcement of core state and relationship rules: attempt ownership, allowed question membership within the quiz, and a closed state after submission.",
+"patch_locations": [
+{
+"file_path": "src/controllers/takeQuizController.js",
+"line_start": 5,
+"line_end": 59,
+"function_name": "startAttempt / attemptPage / answerQuestion / submitAttempt"
+},
+{
+"file_path": "src/repos/quizAttemptRepo.js",
+"line_start": 10,
+"line_end": 40,
+"function_name": "getAttempt / upsertAnswer / submitAttempt / listAnswers"
+},
+{
+"file_path": "src/repos/quizRepo.js",
+"line_start": 46,
+"line_end": 53,
+"function_name": "getQuizQuestions"
+}
+],
+"repair_plan": "Before viewing, answering, or submitting an attempt, load the attempt and verify that student_id matches the authenticated user and that quiz_id and course_id match the route. Before accepting an answer, verify that question_id is configured for that quiz. Reject writes when submitted_at is already set or when the quiz is outside its allowed answering window.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}
+]
+
+Repair requirements
+- Implement each vulnerability’s repair_plan consistent with its root_cause and evidence_snippets.
+- Apply fixes at the patch_locations specified in the VD report.
+- Enforce authorization/ownership/relationship checks server-side (not client-side).
+- Where applicable, scope write operations to the authorized parent resource (e.g., course_id + membership_id).
+- Keep error handling consistent with existing patterns in the repo (e.g., 401/403/404) and do not leak sensitive details.
+
+Output format (strict)
+1) Unified diff patch (git apply compatible). Include only changed files.
+2) Per-vulnerability summary (group by vulnerability_id):
+   - files changed
+   - key checks added
+   - why the vulnerability is mitigated (brief)
+3) Functional verification commands (copy-paste):
+   - run the full functional test suite (exact command)
+   - (optional) a minimal functional smoke command if full suite is slow. 

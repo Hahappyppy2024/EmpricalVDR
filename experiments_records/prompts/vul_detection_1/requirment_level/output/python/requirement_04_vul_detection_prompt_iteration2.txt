@@ -1,0 +1,204 @@
+[
+{
+"vulnerability_id": "VULN-001",
+"current_status": "incorrectly_fixed",
+"vulnerability_type_code": 3,
+"vulnerability_type": "Broken Access Control",
+"cwe_id": "CWE-862",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.2,
+"severity_level": "high",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "The previous repair introduced a visibility filter for uploads, but it still allows any authenticated course member to list and download staff-managed uploads. A student can therefore continue to retrieve staff-created course files and their metadata without a staff-only authorization decision.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "GET",
+"route": "/courses/:course_id/uploads"
+},
+{
+"type": "JSON API endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/uploads"
+},
+{
+"type": "file download endpoint",
+"method": "GET",
+"route": "/courses/:course_id/uploads/:upload_id/download"
+},
+{
+"type": "file download endpoint",
+"method": "GET",
+"route": "/api/courses/:course_id/uploads/:upload_id/download"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 90,
+"line_end": 105,
+"function_name": "_upload_is_student_visible / _can_view_upload",
+"code": "def _upload_is_student_visible(upload):\n    if upload is None:\n        return False\n    uploader_membership = get_course_membership(upload['course_id'], upload['uploaded_by'])\n    return uploader_membership is not None and _is_staff_role(uploader_membership['role_in_course'])\n\n\ndef _can_view_upload(upload):\n    current_user = get_current_user()\n    if upload is None or current_user is None:\n        return False\n    if _current_user_is_course_staff(upload['course_id']):\n        return True\n    if upload['uploaded_by'] == current_user['user_id']:\n        return True\n    return _upload_is_student_visible(upload)",
+"reason": "The repaired visibility policy treats uploads created by staff as student-visible, which preserves the original cross-role disclosure path instead of enforcing the intended staff-only boundary."
+},
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 108,
+"line_end": 109,
+"function_name": "_allowed_uploads_for_user",
+"code": "def _allowed_uploads_for_user(course_id):\n    return [item for item in list_uploads(course_id) if _can_view_upload(item)]",
+"reason": "The list returned to member-facing upload pages and APIs depends entirely on the flawed _can_view_upload policy, so staff uploads remain exposed to students."
+},
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 482,
+"line_end": 506,
+"function_name": "list_uploads_page / api_list_uploads",
+"code": "@assignment_bp.route('/courses/[int:course_id](int:course_id)/uploads', methods=['GET'])\n@login_required\n@require_course_member\ndef list_uploads_page(course_id):\n    ...\n    return render_template('uploads/list.html', course=course, uploads=_allowed_uploads_for_user(course_id), current_user=get_current_user(), can_manage_uploads=_current_user_is_course_staff(course_id), csrf_token=get_or_create_csrf_token())\n\[n@assignment_bp.route](mailto:n@assignment_bp.route)('/api/courses/[int:course_id](int:course_id)/uploads', methods=['GET'])\n@login_required\n@require_course_member\ndef api_list_uploads(course_id):\n    ...\n    return jsonify({'success': True, 'uploads': [_upload_to_dict(item) for item in _allowed_uploads_for_user(course_id)]})",
+"reason": "The member-only listing endpoints still expose whichever uploads pass the incorrect visibility helper, so the server continues to disclose staff-managed uploads to ordinary course members."
+},
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 509,
+"line_end": 526,
+"function_name": "_download_upload_response / download_upload / api_download_upload",
+"code": "def _download_upload_response(course_id, upload_id):\n    item = get_upload_by_id(course_id, upload_id)\n    if item is None or not _can_view_upload(item) or not os.path.exists(item['storage_path']):\n        return None\n    return send_file(item['storage_path'], as_attachment=True, download_name=item['original_name'])",
+"reason": "Download authorization reuses the same flawed _can_view_upload check, so a student can still fetch the file contents of staff uploads."
+}
+],
+"root_cause_code": 2,
+"root_cause": "The repair added a visibility layer but encoded the wrong rule: it explicitly makes staff-uploaded files visible to students, which collapses the staff/member access boundary that the original vulnerability identified.",
+"patch_locations": [
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 90,
+"line_end": 109,
+"function_name": "_upload_is_student_visible / _can_view_upload / _allowed_uploads_for_user"
+},
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 482,
+"line_end": 526,
+"function_name": "list_uploads_page / api_list_uploads / _download_upload_response / download_upload / api_download_upload"
+},
+{
+"file_path": "templates/uploads/list.html",
+"line_start": 3,
+"line_end": 19,
+"function_name": null
+}
+],
+"repair_plan": "Replace the current visibility helper with a policy that denies student access to staff-managed uploads by default. Restrict upload listing and download to course staff unless an upload is explicitly marked student-visible or belongs to the current user under a documented ownership rule, and ensure the template renders only the uploads authorized by that server-side policy.",
+"repair_failure_root_cause": "The previous repair attempted to filter uploads instead of directly enforcing a staff-only default, but the new helper implemented the opposite trust rule by treating staff-created uploads as student-visible. As a result, the original exploit path remained available through both list and download endpoints.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+},
+{
+"vulnerability_id": "VULN-002",
+"current_status": "incorrectly_fixed",
+"vulnerability_type_code": 13,
+"vulnerability_type": "Business Logic",
+"cwe_id": "CWE-840",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.0,
+"severity_level": "high",
+"confidence_score": 97,
+"confidence_level": "high",
+"summary": "The previous repair changed attachment validation to reuse the upload visibility check, but that check still authorizes staff-managed uploads for students. A student can therefore continue to attach arbitrary staff uploads from the same course to a submission without any ownership or submission-scoped binding rule.",
+"entry_points": [
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/assignments/:assignment_id/submissions"
+},
+{
+"type": "JSON API endpoint",
+"method": "POST",
+"route": "/api/courses/:course_id/assignments/:assignment_id/submissions"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/assignments/:assignment_id/submissions/:submission_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/assignments/:assignment_id/submissions/:submission_id"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 112,
+"line_end": 122,
+"function_name": "_attachment_upload_id_from_value_for_user",
+"code": "def _attachment_upload_id_from_value_for_user(course_id, value):\n    if value in (None, '', 'null'):\n        return None\n    try:\n        upload_id = int(value)\n    except (TypeError, ValueError):\n        return 'invalid'\n    upload = get_upload_by_id(course_id, upload_id)\n    if upload is None or not _can_view_upload(upload):\n        return 'invalid'\n    return upload_id",
+"reason": "Attachment acceptance now depends only on whether the user can view the upload, not on whether the user owns it or is otherwise authorized to bind it to a submission."
+},
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 90,
+"line_end": 105,
+"function_name": "_upload_is_student_visible / _can_view_upload",
+"code": "def _upload_is_student_visible(upload):\n    if upload is None:\n        return False\n    uploader_membership = get_course_membership(upload['course_id'], upload['uploaded_by'])\n    return uploader_membership is not None and _is_staff_role(uploader_membership['role_in_course'])\n\n\ndef _can_view_upload(upload):\n    current_user = get_current_user()\n    if upload is None or current_user is None:\n        return False\n    if _current_user_is_course_staff(upload['course_id']):\n        return True\n    if upload['uploaded_by'] == current_user['user_id']:\n        return True\n    return _upload_is_student_visible(upload)",
+"reason": "Because _can_view_upload returns true for staff-created uploads, the new attachment validation still authorizes a student to reuse staff files as submission attachments."
+},
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 303,
+"line_end": 341,
+"function_name": "submit_assignment_page / create_submission_submit / api_create_submission",
+"code": "@assignment_bp.route('/courses/[int:course_id](int:course_id)/assignments/[int:assignment_id](int:assignment_id)/submit', methods=['GET'])\n@login_required\n@require_course_member\ndef submit_assignment_page(course_id, assignment_id):\n    ...\n    return render_template('submissions/new.html', course=course, assignment=assignment, uploads=_allowed_uploads_for_user(course_id), current_user=get_current_user(), csrf_token=get_or_create_csrf_token())\n\[n@assignment_bp.route](mailto:n@assignment_bp.route)('/courses/[int:course_id](int:course_id)/assignments/[int:assignment_id](int:assignment_id)/submissions', methods=['POST'])\n@login_required\n@require_course_member\ndef create_submission_submit(course_id, assignment_id):\n    ...\n    attachment_upload_id = _attachment_upload_id_from_value_for_user(course_id, request.form.get('attachment_upload_id'))\n    ...\n\[n@assignment_bp.route](mailto:n@assignment_bp.route)('/api/courses/[int:course_id](int:course_id)/assignments/[int:assignment_id](int:assignment_id)/submissions', methods=['POST'])\n@login_required\n@require_course_member\ndef api_create_submission(course_id, assignment_id):\n    ...\n    attachment_upload_id = _attachment_upload_id_from_value_for_user(course_id, data.get('attachment_upload_id'))",
+"reason": "Both the form and API creation paths continue to expose the upload set derived from the flawed visibility policy and accept any upload that passes that broad check."
+},
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 344,
+"line_end": 390,
+"function_name": "update_submission_submit / api_update_submission / edit_submission_page",
+"code": "@assignment_bp.route('/courses/[int:course_id](int:course_id)/assignments/[int:assignment_id](int:assignment_id)/submissions/[int:submission_id](int:submission_id)', methods=['POST'])\n@login_required\n@require_course_member\ndef update_submission_submit(course_id, assignment_id, submission_id):\n    ...\n    attachment_upload_id = _attachment_upload_id_from_value_for_user(course_id, request.form.get('attachment_upload_id'))\n    ...\n\[n@assignment_bp.route](mailto:n@assignment_bp.route)('/api/courses/[int:course_id](int:course_id)/assignments/[int:assignment_id](int:assignment_id)/submissions/[int:submission_id](int:submission_id)', methods=['PUT'])\n@login_required\n@require_course_member\ndef api_update_submission(course_id, assignment_id, submission_id):\n    ...\n    attachment_upload_id = _attachment_upload_id_from_value_for_user(course_id, data.get('attachment_upload_id'))\n    ...\n\[n@assignment_bp.route](mailto:n@assignment_bp.route)('/courses/[int:course_id](int:course_id)/assignments/[int:assignment_id](int:assignment_id)/submissions/[int:submission_id](int:submission_id)/edit', methods=['GET'])\n@login_required\n@require_course_member\ndef edit_submission_page(course_id, assignment_id, submission_id):\n    ...\n    return render_template('submissions/edit.html', course=course, assignment=assignment, submission=submission, uploads=_allowed_uploads_for_user(course_id), current_user=get_current_user(), csrf_token=get_or_create_csrf_token())",
+"reason": "The edit paths keep the same broad attachment authorization rule, so an existing submission can still be rebound to any student-visible course upload, including staff files."
+}
+],
+"root_cause_code": 12,
+"root_cause": "The repair replaced the original same-course existence check with a broader visibility-based check, but it still does not enforce a submission-specific authorization rule such as uploader ownership or an explicit attachment eligibility mapping. Because staff uploads remain viewable to students under the new policy, they also remain attachable.",
+"patch_locations": [
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 112,
+"line_end": 122,
+"function_name": "_attachment_upload_id_from_value_for_user"
+},
+{
+"file_path": "controllers/assignment_controller.py",
+"line_start": 303,
+"line_end": 390,
+"function_name": "submit_assignment_page / create_submission_submit / api_create_submission / update_submission_submit / api_update_submission / edit_submission_page"
+},
+{
+"file_path": "templates/submissions/new.html",
+"line_start": 5,
+"line_end": 16,
+"function_name": null
+},
+{
+"file_path": "templates/submissions/edit.html",
+"line_start": 5,
+"line_end": 16,
+"function_name": null
+}
+],
+"repair_plan": "Define and enforce an explicit attachment policy at submission time. For example, require that attachment_upload_id belongs to the current user, or introduce a separate submission-upload resource and expose only uploads that satisfy that policy in the submission forms and APIs; do not reuse generic upload visibility as the authorization rule for attachment rebinding.",
+"repair_failure_root_cause": "The previous repair tried to solve the business-logic issue by swapping the old same-course check for a generic can-view check, but that still permits student use of staff uploads because the visibility rule itself is wrong and too broad for submission attachment binding. The original unauthorized rebinding path therefore remained intact.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1,
+"has_repair_failure_root_cause": 1
+}
+]

@@ -1,0 +1,81 @@
+{
+"vulnerability_id": "VULN-002",
+"vulnerability_type_code": 8,
+"vulnerability_type": "IDOR",
+"cwe_id": "CWE-639",
+"cvss_version": "CVSS v4.0 (2023)",
+"cvss_score": 7.4,
+"severity_level": "high",
+"confidence_score": 96,
+"confidence_level": "high",
+"summary": "Any authenticated course member can edit or delete another member’s comment by supplying the target comment_id under the same course and post. This allows unauthorized tampering with other users’ comments within the course discussion.",
+"entry_points": [
+{
+"type": "JSON API endpoint",
+"method": "PUT",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "JSON API endpoint",
+"method": "DELETE",
+"route": "/api/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id"
+},
+{
+"type": "server-rendered form/page",
+"method": "POST",
+"route": "/courses/:course_id/posts/:post_id/comments/:comment_id/delete"
+}
+],
+"evidence_snippets": [
+{
+"file_path": "src/routes/api.js",
+"line_start": 43,
+"line_end": 46,
+"function_name": null,
+"code": "router.post('/courses/:course_id/posts/:post_id/comments', requireAuthApi, loadCourseMembership, requireCourseMember, commentController.apiCreateComment);\nrouter.put('/courses/:course_id/posts/:post_id/comments/:comment_id', requireAuthApi, loadCourseMembership, requireCourseMember, commentController.apiUpdateComment);\nrouter.delete('/courses/:course_id/posts/:post_id/comments/:comment_id', requireAuthApi, loadCourseMembership, requireCourseMember, commentController.apiDeleteComment);",
+"reason": "Comment update/delete routes require only course membership and do not enforce comment ownership or a staff/moderation role."
+},
+{
+"file_path": "src/controllers/commentController.js",
+"line_start": 80,
+"line_end": 128,
+"function_name": "updateComment / apiUpdateComment",
+"code": "const comment = ensureComment(req.params.course_id, req.params.post_id, req.params.comment_id);\n...\ncommentRepository.updateComment(req.params.comment_id, { body });\n...\nconst updated = commentRepository.updateComment(req.params.comment_id, { body });",
+"reason": "The controller verifies only that the comment belongs to the course/post, but never checks that req.currentUser.user_id matches comment.author_id (or that the user is an authorized moderator) before updating the comment."
+},
+{
+"file_path": "src/repositories/commentRepository.js",
+"line_start": 48,
+"line_end": 55,
+"function_name": "updateComment",
+"code": "function updateComment(commentId, { body }) {\n  db.prepare(`\n    UPDATE comments\n    SET body = ?, updated_at = CURRENT_TIMESTAMP\n    WHERE comment_id = ?\n  `).run(body, commentId);\n  return findById(commentId);\n}",
+"reason": "The write path is scoped only by comment_id and does not constrain by author_id, so a course member can modify another user's comment if they know the comment_id."
+}
+],
+"root_cause_code": 7,
+"root_cause": "Comment mutation endpoints authorize only at the course-membership level and omit an ownership or moderation authorization check for the targeted comment resource.",
+"patch_locations": [
+{
+"file_path": "src/controllers/commentController.js",
+"line_start": 80,
+"line_end": 165,
+"function_name": "updateComment / apiUpdateComment / deleteComment / apiDeleteComment"
+},
+{
+"file_path": "src/repositories/commentRepository.js",
+"line_start": 48,
+"line_end": 60,
+"function_name": "updateComment / deleteComment"
+}
+],
+"repair_plan": "Before updating or deleting a comment, load the comment record and enforce that the caller is the comment author or has an explicitly authorized moderation role for that course. For non-moderator edits, scope repository updates/deletes by both comment_id and author_id (and course_id/post_id where applicable) so a user cannot operate on another member’s comment by identifier alone.",
+"detection_report_complete": 1,
+"has_root_cause": 1,
+"has_patch_location": 1,
+"has_repair_plan": 1
+}
