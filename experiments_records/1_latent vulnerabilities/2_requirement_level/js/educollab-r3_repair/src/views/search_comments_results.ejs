@@ -1,0 +1,29 @@
+<%- include('partials/header') %>
+
+<h1>Search Comments in <%= course.title %></h1>
+
+<form method="get" action="/courses/<%= course.course_id %>/search/comments">
+  <input type="text" name="keyword" value="<%= keyword %>">
+  <button type="submit">Search</button>
+</form>
+
+<p><a href="/courses/<%= course.course_id %>">Back to Course</a></p>
+
+<% if (!comments.length) { %>
+  <p>No matching comments.</p>
+<% } %>
+
+<ul>
+  <% comments.forEach(function(comment) { %>
+    <li>
+      <p>
+        <strong><%= comment.author_display_name %> (@<%= comment.author_username %>)</strong>
+        on post
+        <a href="/courses/<%= course.course_id %>/posts/<%= comment.post_id %>"><%= comment.post_title %></a>
+      </p>
+      <div><%= comment.body %></div>
+    </li>
+  <% }) %>
+</ul>
+
+<%- include('partials/footer') %>

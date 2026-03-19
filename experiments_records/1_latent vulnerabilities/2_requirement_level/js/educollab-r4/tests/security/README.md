@@ -1,0 +1,2 @@
+node --test tests/security/test_exploit_vuln_001_upload_path_traversal.js
+node --test tests/security/test_exploit_vuln_002_submission_attachment_idor.js

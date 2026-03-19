@@ -1,0 +1,15 @@
+<%- include('partials/header') %>
+<h1>My Submissions</h1>
+<ul>
+  <% submissions.forEach(function(s) { %>
+    <li>
+      <strong><%= s.course_title %></strong> / <strong><%= s.assignment_title %></strong> — <%= s.content_text %>
+      <form method="post" action="/courses/<%= s.course_id %>/assignments/<%= s.assignment_id %>/submissions/<%= s.submission_id %>">
+        <input type="text" name="content_text" value="<%= s.content_text %>">
+        <input type="number" name="attachment_upload_id" min="1" step="1" value="<%= s.attachment_upload_id || '' %>" placeholder="optional">
+        <button type="submit">Update</button>
+      </form>
+    </li>
+  <% }) %>
+</ul>
+<%- include('partials/footer') %>

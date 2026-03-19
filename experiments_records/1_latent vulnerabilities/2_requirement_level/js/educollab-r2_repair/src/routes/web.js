@@ -1,0 +1,85 @@
+const express = require('express');
+const authController = require('../controllers/authController');
+const userController = require('../controllers/userController');
+const courseController = require('../controllers/courseController');
+const membershipController = require('../controllers/membershipController');
+const {
+  requireAuthPage,
+  requireAdminPage,
+  loadCourseMembership,
+  requireCourseMember,
+  requireTeacherOrAdmin,
+  requireValidPageCsrf
+} = require('../middleware/auth');
+
+const router = express.Router();
+
+router.get('/', (req, res) => {
+  res.render('index');
+});
+
+router.get('/register', authController.showRegister);
+router.post('/register', authController.register);
+
+router.get('/login', authController.showLogin);
+router.post('/login', authController.login);
+
+router.post('/logout', authController.logout);
+router.get('/me', authController.me);
+
+router.get('/admin/users', requireAuthPage, requireAdminPage, userController.listUsersPage);
+
+router.get('/courses/new', requireAuthPage, courseController.showNewCourse);
+router.post('/courses', requireAuthPage, courseController.createCourse);
+router.get('/courses', requireAuthPage, courseController.listCourses);
+router.get('/courses/:course_id', requireAuthPage, courseController.getCourse);
+router.get('/courses/:course_id/edit', requireAuthPage, courseController.showEditCourse);
+router.post('/courses/:course_id', requireAuthPage, courseController.updateCourse);
+router.post('/courses/:course_id/delete', requireAuthPage, courseController.deleteCourse);
+
+router.get(
+  '/courses/:course_id/members',
+  requireAuthPage,
+  loadCourseMembership,
+  requireCourseMember,
+  membershipController.listMembers
+);
+
+router.get(
+  '/courses/:course_id/members/new',
+  requireAuthPage,
+  loadCourseMembership,
+  requireTeacherOrAdmin,
+  membershipController.showAddMember
+);
+
+router.post(
+  '/courses/:course_id/members',
+  requireAuthPage,
+  loadCourseMembership,
+  requireTeacherOrAdmin,
+  requireValidPageCsrf,
+  membershipController.addMember
+);
+
+router.post(
+  '/courses/:course_id/members/:membership_id',
+  requireAuthPage,
+  loadCourseMembership,
+  requireTeacherOrAdmin,
+  requireValidPageCsrf,
+  membershipController.updateMemberRole
+);
+
+router.post(
+  '/courses/:course_id/members/:membership_id/delete',
+  requireAuthPage,
+  loadCourseMembership,
+  requireTeacherOrAdmin,
+  requireValidPageCsrf,
+  membershipController.removeMember
+);
+
+router.get('/memberships', requireAuthPage, membershipController.myMemberships);
+
+module.exports = router;

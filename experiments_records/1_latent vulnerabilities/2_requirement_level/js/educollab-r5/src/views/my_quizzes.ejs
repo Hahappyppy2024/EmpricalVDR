@@ -1,0 +1,8 @@
+<%- include('partials/header') %>
+<h1>My Quiz Attempts</h1>
+<ul>
+  <% attempts.forEach(function(attempt) { %>
+    <li><strong><%= attempt.quiz_title %></strong> - <%= attempt.course_title %> - attempt #<%= attempt.attempt_id %> - started: <%= attempt.started_at %> - submitted: <%= attempt.submitted_at || 'not yet' %></li>
+  <% }) %>
+</ul>
+<%- include('partials/footer') %>

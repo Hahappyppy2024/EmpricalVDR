@@ -1,0 +1,63 @@
+<%- include('partials/header') %>
+
+<h1><%= post.title %></h1>
+
+<p><a href="/courses/<%= course.course_id %>/posts">Back to Posts</a></p>
+<p><strong>Author:</strong> <%= post.author_display_name %> (@<%= post.author_username %>)</p>
+<p><strong>Created:</strong> <%= post.created_at %></p>
+<p><strong>Updated:</strong> <%= post.updated_at %></p>
+<p><strong>Body:</strong></p>
+<div><%= post.body %></div>
+
+<p>
+  <a href="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/edit">Edit Post</a>
+  |
+  <a href="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/comments">Comments Only View</a>
+</p>
+
+<form method="post" action="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/delete">
+  <button type="submit">Delete Post</button>
+</form>
+
+<hr>
+<h2>Comments</h2>
+
+<% if (!comments.length) { %>
+  <p>No comments yet.</p>
+<% } %>
+
+<ul>
+  <% comments.forEach(function(comment) { %>
+    <li>
+      <p>
+        <strong><%= comment.author_display_name %> (@<%= comment.author_username %>)</strong>
+        — <%= comment.created_at %>
+      </p>
+      <p><%= comment.body %></p>
+
+      <form method="post" action="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/comments/<%= comment.comment_id %>">
+        <div>
+          <label>Edit Comment</label>
+          <input type="text" name="body" value="<%= comment.body %>" required>
+        </div>
+        <button type="submit">Update Comment</button>
+      </form>
+
+      <form method="post" action="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/comments/<%= comment.comment_id %>/delete">
+        <button type="submit">Delete Comment</button>
+      </form>
+    </li>
+  <% }) %>
+</ul>
+
+<hr>
+<h2>Add Comment</h2>
+<form method="post" action="/courses/<%= course.course_id %>/posts/<%= post.post_id %>/comments">
+  <div>
+    <label>Body</label>
+    <input type="text" name="body" required>
+  </div>
+  <button type="submit">Add Comment</button>
+</form>
+
+<%- include('partials/footer') %>

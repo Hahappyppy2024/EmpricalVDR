@@ -1,0 +1,22 @@
+<%- include('partials/header') %>
+
+<h1>All Users</h1>
+
+<table border="1" cellpadding="6">
+  <tr>
+    <th>ID</th>
+    <th>Username</th>
+    <th>Display Name</th>
+    <th>Created At</th>
+  </tr>
+  <% users.forEach(function(user) { %>
+    <tr>
+      <td><%= user.user_id %></td>
+      <td><%= user.username %></td>
+      <td><%= user.display_name %></td>
+      <td><%= user.created_at %></td>
+    </tr>
+  <% }) %>
+</table>
+
+<%- include('partials/footer') %>

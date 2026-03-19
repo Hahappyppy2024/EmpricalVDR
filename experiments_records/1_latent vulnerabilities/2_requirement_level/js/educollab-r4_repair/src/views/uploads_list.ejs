@@ -1,0 +1,14 @@
+<%- include('partials/header') %>
+<h1>Uploads: <%= course.title %></h1>
+<p><a href="/courses/<%= course.course_id %>/uploads/new">Upload File</a></p>
+<ul>
+  <% uploads.forEach(function(upload) { %>
+    <li>
+      <a href="/courses/<%= course.course_id %>/uploads/<%= upload.upload_id %>/download"><%= upload.original_name %></a>
+      <form method="post" action="/courses/<%= course.course_id %>/uploads/<%= upload.upload_id %>/delete" style="display:inline;">
+        <button type="submit">Delete</button>
+      </form>
+    </li>
+  <% }) %>
+</ul>
+<%- include('partials/footer') %>

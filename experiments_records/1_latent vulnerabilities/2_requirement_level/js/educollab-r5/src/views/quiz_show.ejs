@@ -1,0 +1,15 @@
+<%- include('partials/header') %>
+<h1><%= quiz.title %></h1>
+<p><strong>Description:</strong> <%= quiz.description %></p>
+<p><strong>Open At:</strong> <%= quiz.open_at || '' %></p>
+<p><strong>Due At:</strong> <%= quiz.due_at || '' %></p>
+<p><a href="/courses/<%= course.course_id %>/quizzes/<%= quiz.quiz_id %>/edit">Edit</a> | <a href="/courses/<%= course.course_id %>/quizzes/<%= quiz.quiz_id %>/questions">Configure Questions</a></p>
+<form method="post" action="/courses/<%= course.course_id %>/quizzes/<%= quiz.quiz_id %>/delete"><button type="submit">Delete</button></form>
+<form method="post" action="/courses/<%= course.course_id %>/quizzes/<%= quiz.quiz_id %>/start"><button type="submit">Start Attempt</button></form>
+<h2>Questions</h2>
+<ul>
+  <% quizQuestions.forEach(function(item) { %>
+    <li>#<%= item.question_id %> - <%= item.prompt %> (points: <%= item.points %>, position: <%= item.position %>)</li>
+  <% }) %>
+</ul>
+<%- include('partials/footer') %>

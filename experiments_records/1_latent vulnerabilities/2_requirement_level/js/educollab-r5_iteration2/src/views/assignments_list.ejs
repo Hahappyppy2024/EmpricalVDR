@@ -1,0 +1,9 @@
+<%- include('partials/header') %>
+<h1>Assignments: <%= course.title %></h1>
+<p><a href="/courses/<%= course.course_id %>/assignments/new">Create Assignment</a></p>
+<ul>
+  <% assignments.forEach(function(a) { %>
+    <li><a href="/courses/<%= course.course_id %>/assignments/<%= a.assignment_id %>"><%= a.title %></a></li>
+  <% }) %>
+</ul>
+<%- include('partials/footer') %>

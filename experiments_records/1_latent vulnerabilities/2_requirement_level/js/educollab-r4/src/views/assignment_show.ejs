@@ -1,0 +1,13 @@
+<%- include('partials/header') %>
+<h1><%= assignment.title %></h1>
+<p><%= assignment.description %></p>
+<p>Due: <%= assignment.due_at || '' %></p>
+<p>
+  <a href="/courses/<%= course.course_id %>/assignments/<%= assignment.assignment_id %>/edit">Edit</a> |
+  <a href="/courses/<%= course.course_id %>/assignments/<%= assignment.assignment_id %>/submit">Submit</a> |
+  <a href="/courses/<%= course.course_id %>/assignments/<%= assignment.assignment_id %>/submissions">View Submissions</a>
+</p>
+<form method="post" action="/courses/<%= course.course_id %>/assignments/<%= assignment.assignment_id %>/delete">
+  <button type="submit">Delete Assignment</button>
+</form>
+<%- include('partials/footer') %>

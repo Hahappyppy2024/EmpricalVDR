@@ -1,0 +1,43 @@
+<%- include('partials/header') %>
+
+<h1>Course Members</h1>
+<p><strong>Course:</strong> <a href="/courses/<%= course.course_id %>"><%= course.title %></a></p>
+<p><a href="/courses/<%= course.course_id %>/members/new">Add member</a></p>
+
+<% if (!memberships.length) { %>
+  <p>No members found.</p>
+<% } %>
+
+<table border="1" cellpadding="6">
+  <tr>
+    <th>Membership ID</th>
+    <th>User</th>
+    <th>Role</th>
+    <th>Actions</th>
+  </tr>
+  <% memberships.forEach(function(membership) { %>
+    <tr>
+      <td><%= membership.membership_id %></td>
+      <td><%= membership.display_name %> (@<%= membership.username %>)</td>
+      <td>
+        <form method="post" action="/courses/<%= course.course_id %>/members/<%= membership.membership_id %>">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
+          <select name="role_in_course">
+            <% roles.forEach(function(role) { %>
+              <option value="<%= role %>" <%= membership.role_in_course === role ? 'selected' : '' %>><%= role %></option>
+            <% }) %>
+          </select>
+          <button type="submit">Update</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/courses/<%= course.course_id %>/members/<%= membership.membership_id %>/delete">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
+          <button type="submit">Remove</button>
+        </form>
+      </td>
+    </tr>
+  <% }) %>
+</table>
+
+<%- include('partials/footer') %>

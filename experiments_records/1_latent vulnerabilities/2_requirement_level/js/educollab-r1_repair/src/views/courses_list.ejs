@@ -1,0 +1,20 @@
+<%- include('partials/header') %>
+
+<h1>Courses</h1>
+
+<p><a href="/courses/new">Create a course</a></p>
+
+<% if (!courses.length) { %>
+  <p>No courses yet.</p>
+<% } %>
+
+<ul>
+  <% courses.forEach(function(course) { %>
+    <li>
+      <a href="/courses/<%= course.course_id %>"><%= course.title %></a>
+      — created by <%= course.creator_display_name %> (@<%= course.creator_username %>)
+    </li>
+  <% }) %>
+</ul>
+
+<%- include('partials/footer') %>

@@ -1,0 +1,24 @@
+<%- include('partials/header') %>
+
+<h1>Posts in <%= course.title %></h1>
+
+<p>
+  <a href="/courses/<%= course.course_id %>">Back to Course</a>
+  |
+  <a href="/courses/<%= course.course_id %>/posts/new">Create Post</a>
+</p>
+
+<% if (!posts.length) { %>
+  <p>No posts yet.</p>
+<% } %>
+
+<ul>
+  <% posts.forEach(function(post) { %>
+    <li>
+      <a href="/courses/<%= course.course_id %>/posts/<%= post.post_id %>"><%= post.title %></a>
+      — <%= post.author_display_name %> (@<%= post.author_username %>)
+    </li>
+  <% }) %>
+</ul>
+
+<%- include('partials/footer') %>

@@ -1,0 +1,18 @@
+<%- include('partials/header') %>
+
+<h1>My Memberships</h1>
+
+<% if (!memberships.length) { %>
+  <p>No memberships yet.</p>
+<% } %>
+
+<ul>
+  <% memberships.forEach(function(membership) { %>
+    <li>
+      <a href="/courses/<%= membership.course_id %>"><%= membership.course_title %></a>
+      — <%= membership.role_in_course %>
+    </li>
+  <% }) %>
+</ul>
+
+<%- include('partials/footer') %>

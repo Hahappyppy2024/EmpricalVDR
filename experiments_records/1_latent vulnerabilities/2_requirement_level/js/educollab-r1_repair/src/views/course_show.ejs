@@ -1,0 +1,19 @@
+<%- include('partials/header') %>
+
+<h1><%= course.title %></h1>
+
+<p><strong>Course ID:</strong> <%= course.course_id %></p>
+<p><strong>Description:</strong> <%= course.description %></p>
+<p><strong>Created by:</strong> <%= course.creator_display_name %> (@<%= course.creator_username %>)</p>
+<p><strong>Created at:</strong> <%= course.created_at %></p>
+
+<p>
+  <a href="/courses/<%= course.course_id %>/edit">Edit</a>
+</p>
+
+<form method="post" action="/courses/<%= course.course_id %>/delete">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <button type="submit">Delete</button>
+</form>
+
+<%- include('partials/footer') %>

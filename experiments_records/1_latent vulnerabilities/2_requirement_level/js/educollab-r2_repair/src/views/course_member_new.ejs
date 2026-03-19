@@ -1,0 +1,32 @@
+<%- include('partials/header') %>
+
+<h1>Add Course Member</h1>
+<p><strong>Course:</strong> <a href="/courses/<%= course.course_id %>"><%= course.title %></a></p>
+
+<% if (error) { %>
+  <p style="color:red;"><%= error %></p>
+<% } %>
+
+<form method="post" action="/courses/<%= course.course_id %>/members">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
+  <div>
+    <label>User</label>
+    <select name="user_id" required>
+      <option value="">Select a user</option>
+      <% users.forEach(function(user) { %>
+        <option value="<%= user.user_id %>"><%= user.display_name %> (@<%= user.username %>)</option>
+      <% }) %>
+    </select>
+  </div>
+  <div>
+    <label>Role</label>
+    <select name="role_in_course" required>
+      <% roles.forEach(function(role) { %>
+        <option value="<%= role %>"><%= role %></option>
+      <% }) %>
+    </select>
+  </div>
+  <button type="submit">Add member</button>
+</form>
+
+<%- include('partials/footer') %>

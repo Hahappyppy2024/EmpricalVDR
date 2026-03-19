@@ -1,0 +1,25 @@
+<%- include('partials/header') %>
+
+<h1>Search Posts in <%= course.title %></h1>
+
+<form method="get" action="/courses/<%= course.course_id %>/search">
+  <input type="text" name="keyword" value="<%= keyword %>">
+  <button type="submit">Search</button>
+</form>
+
+<p><a href="/courses/<%= course.course_id %>">Back to Course</a></p>
+
+<% if (!posts.length) { %>
+  <p>No matching posts.</p>
+<% } %>
+
+<ul>
+  <% posts.forEach(function(post) { %>
+    <li>
+      <a href="/courses/<%= course.course_id %>/posts/<%= post.post_id %>"><%= post.title %></a>
+      — <%= post.author_display_name %> (@<%= post.author_username %>)
+    </li>
+  <% }) %>
+</ul>
+
+<%- include('partials/footer') %>

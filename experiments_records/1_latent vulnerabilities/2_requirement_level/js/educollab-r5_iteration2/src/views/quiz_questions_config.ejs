@@ -1,0 +1,22 @@
+<%- include('partials/header') %>
+<h1>Configure Quiz Questions</h1>
+<h2><%= quiz.title %></h2>
+<form method="post" action="/courses/<%= course.course_id %>/quizzes/<%= quiz.quiz_id %>/questions">
+  <div>
+    <label>Question</label>
+    <select name="question_id">
+      <% availableQuestions.forEach(function(question) { %>
+        <option value="<%= question.question_id %>">#<%= question.question_id %> - <%= question.prompt %></option>
+      <% }) %>
+    </select>
+  </div>
+  <div><label>Points</label><input type="number" name="points" value="1"></div>
+  <div><label>Position</label><input type="number" name="position" value="1"></div>
+  <button type="submit">Add / Update Mapping</button>
+</form>
+<ul>
+  <% quizQuestions.forEach(function(item) { %>
+    <li>#<%= item.question_id %> - <%= item.prompt %> (points: <%= item.points %>, position: <%= item.position %>)</li>
+  <% }) %>
+</ul>
+<%- include('partials/footer') %>

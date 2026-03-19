@@ -1,0 +1,11 @@
+<%- include('partials/header') %>
+<h1>New Question</h1>
+<% if (error) { %><p style="color:red;"><%= error %></p><% } %>
+<form method="post" action="/courses/<%= course.course_id %>/questions">
+  <div><label>Type</label><input type="text" name="qtype" required></div>
+  <div><label>Prompt</label><textarea name="prompt" required></textarea></div>
+  <div><label>Options JSON</label><textarea name="options_json"></textarea></div>
+  <div><label>Answer JSON</label><textarea name="answer_json"></textarea></div>
+  <button type="submit">Create</button>
+</form>
+<%- include('partials/footer') %>

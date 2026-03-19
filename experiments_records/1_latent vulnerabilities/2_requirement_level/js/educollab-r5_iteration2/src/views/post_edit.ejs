@@ -1,0 +1,9 @@
+<%- include('partials/header') %>
+<h1>Edit Post</h1>
+<% if (error) { %><p style="color:red;"><%= error %></p><% } %>
+<form method="post" action="/courses/<%= course.course_id %>/posts/<%= post.post_id %>">
+  <div><label>Title</label><input type="text" name="title" value="<%= post.title %>" required></div>
+  <div><label>Body</label><textarea name="body"><%= post.body %></textarea></div>
+  <button type="submit">Save</button>
+</form>
+<%- include('partials/footer') %>

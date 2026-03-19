@@ -1,0 +1,12 @@
+<%- include('partials/header') %>
+<h1>Search Comments: <%= course.title %></h1>
+<form method="get" action="/courses/<%= course.course_id %>/search/comments">
+  <input type="text" name="keyword" value="<%= keyword %>">
+  <button type="submit">Search</button>
+</form>
+<ul>
+  <% comments.forEach(function(comment) { %>
+    <li><%= comment.body %> — post: <%= comment.post_title %></li>
+  <% }) %>
+</ul>
+<%- include('partials/footer') %>
