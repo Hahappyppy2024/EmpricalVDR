@@ -1,0 +1,31 @@
+<%- include('../partials/header') %>
+<h2>Course Members</h2>
+<p><a href="/courses/<%= course_id %>">Back to course</a></p>
+<p><a href="/courses/<%= course_id %>/members/new">Add member</a></p>
+<div class="card">
+  <table width="100%" border="1" cellspacing="0" cellpadding="6">
+    <tr><th>membership_id</th><th>user</th><th>role</th><th>actions</th></tr>
+    <% members.forEach(m => { %>
+      <tr>
+        <td><%= m.membership_id %></td>
+        <td><%= m.username %> (<%= m.display_name %>)</td>
+        <td>
+          <form method="post" action="/courses/<%= course_id %>/members/<%= m.membership_id %>">
+            <select name="role_in_course">
+              <% roles.forEach(r => { %>
+                <option value="<%= r %>" <%= m.role_in_course===r?'selected':'' %>><%= r %></option>
+              <% }) %>
+            </select>
+            <button type="submit">Update</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="/courses/<%= course_id %>/members/<%= m.membership_id %>/delete" onsubmit="return confirm('Remove?')">
+            <button type="submit">Remove</button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+<%- include('../partials/footer') %>

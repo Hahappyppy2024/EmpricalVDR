@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block content %}
+<h1>New Quiz</h1>
+<form method="post" action="/courses/{{course_id}}/quizzes">
+<label>title</label><input name="title"/>
+<label>description</label><textarea name="description"></textarea>
+<label>open_at</label><input name="open_at" placeholder="ISO string"/>
+<label>due_at</label><input name="due_at" placeholder="ISO string"/>
+<button class="btn" type="submit">Create</button>
+</form>
+{% endblock %}

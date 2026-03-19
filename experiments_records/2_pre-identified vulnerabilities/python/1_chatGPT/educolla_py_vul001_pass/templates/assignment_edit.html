@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block content %}
+<h1>Edit Assignment</h1>
+<form method="post" action="/courses/{{course_id}}/assignments/{{assignment.assignment_id}}">
+<label>Title</label><input name="title" value="{{assignment.title}}"/>
+<label>Description</label><textarea name="description">{{assignment.description}}</textarea>
+<label>Due</label><input name="due_at" value="{{assignment.due_at}}"/>
+<button class="btn" type="submit">Save</button>
+</form>
+{% endblock %}

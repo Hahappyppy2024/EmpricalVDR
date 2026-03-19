@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block content %}
+<h1>Configure Quiz Questions</h1>
+<p><b>Quiz:</b> {{quiz.title}} (id={{quiz.quiz_id}})</p>
+<h2>Add Question</h2>
+<form method="post" action="/courses/{{course_id}}/quizzes/{{quiz.quiz_id}}/questions">
+<label>question_id</label>
+<select name="question_id">{% for q in questions %}<option value="{{q.question_id}}">Q{{q.question_id}} - {{q.prompt[:60]}}</option>{% endfor %}</select>
+<label>points</label><input name="points" value="1"/>
+<label>position</label><input name="position" value="1"/>
+<button class="btn" type="submit">Add/Replace</button>
+</form>
+<h2>Current</h2>
+<table><tr><th>Question</th><th>Points</th><th>Position</th><th>Remove</th></tr>
+{% for qq in quiz_questions %}
+<tr><td>Q{{qq.question_id}} - {{qq.prompt}}</td><td>{{qq.points}}</td><td>{{qq.position}}</td>
+<td><form class="inline" method="post" action="/courses/{{course_id}}/quizzes/{{quiz.quiz_id}}/questions/{{qq.question_id}}/delete"><button class="btn" type="submit">Remove</button></form></td></tr>
+{% endfor %}
+</table>
+<p><a class="btn" href="/courses/{{course_id}}/quizzes/{{quiz.quiz_id}}">Back</a></p>
+{% endblock %}

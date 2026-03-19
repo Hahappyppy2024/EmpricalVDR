@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block content %}
+<h1>Users</h1>
+<table><tr><th>ID</th><th>Username</th><th>Display</th><th>Created</th></tr>
+{% for u in users %}<tr><td>{{u.user_id}}</td><td>{{u.username}}</td><td>{{u.display_name}}</td><td>{{u.created_at}}</td></tr>{% endfor %}
+</table>
+{% endblock %}

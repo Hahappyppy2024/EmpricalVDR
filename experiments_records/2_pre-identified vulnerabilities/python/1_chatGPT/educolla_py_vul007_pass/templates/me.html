@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block content %}
+<h1>Me</h1>
+<table>
+<tr><th>user_id</th><td>{{ me.user_id }}</td></tr>
+<tr><th>username</th><td>{{ me.username }}</td></tr>
+<tr><th>display_name</th><td>{{ me.display_name }}</td></tr>
+<tr><th>created_at</th><td>{{ me.created_at }}</td></tr>
+</table>
+{% endblock %}

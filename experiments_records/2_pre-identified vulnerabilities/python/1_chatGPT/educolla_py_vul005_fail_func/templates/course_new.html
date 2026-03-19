@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block content %}
+<h1>New Course</h1>
+<form method="post" action="/courses">
+<label>Title</label><input name="title"/>
+<label>Description</label><textarea name="description"></textarea>
+<button class="btn" type="submit">Create</button>
+</form>
+{% endblock %}

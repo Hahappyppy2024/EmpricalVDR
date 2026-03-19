@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block content %}
+<h1>New Question</h1>
+<form method="post" action="/courses/{{course_id}}/questions">
+<label>qtype</label><input name="qtype" value="text"/>
+<label>prompt</label><textarea name="prompt"></textarea>
+<label>options_json (optional JSON)</label><textarea name="options_json" placeholder='["A","B"]'></textarea>
+<label>answer_json (optional JSON)</label><textarea name="answer_json" placeholder='"A"'></textarea>
+<button class="btn" type="submit">Create</button>
+</form>
+{% endblock %}

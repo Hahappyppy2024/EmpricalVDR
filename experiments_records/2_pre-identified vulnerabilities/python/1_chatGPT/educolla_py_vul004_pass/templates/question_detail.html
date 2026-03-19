@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block content %}
+<h1>Question #{{q.question_id}}</h1>
+<p><b>Type:</b> {{q.qtype}}</p>
+<pre style="white-space:pre-wrap;">{{q.prompt}}</pre>
+<p><b>Options:</b> {{q.options_json}}</p>
+<p><b>Answer:</b> {{q.answer_json}}</p>
+{% if my_role in ['teacher','assistant','senior-assistant','admin'] %}
+<p><a class="btn" href="/courses/{{course_id}}/questions/{{q.question_id}}/edit">Edit</a>
+<form class="inline" method="post" action="/courses/{{course_id}}/questions/{{q.question_id}}/delete"><button class="btn" type="submit">Delete</button></form></p>
+{% endif %}
+{% endblock %}

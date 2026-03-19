@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block content %}
+<h1>Submit: {{assignment.title}}</h1>
+{% if existing %}
+<p><b>Existing submission</b> (id={{existing.submission_id}})</p>
+<form method="post" action="/courses/{{course_id}}/assignments/{{assignment.assignment_id}}/submissions/{{existing.submission_id}}">
+<label>Content</label><textarea name="content_text">{{existing.content_text}}</textarea>
+<label>attachment_upload_id (optional)</label><input name="attachment_upload_id" value="{{existing.attachment_upload_id}}"/>
+<button class="btn" type="submit">Update</button>
+</form>
+{% else %}
+<form method="post" action="/courses/{{course_id}}/assignments/{{assignment.assignment_id}}/submissions">
+<label>Content</label><textarea name="content_text"></textarea>
+<label>attachment_upload_id (optional)</label><input name="attachment_upload_id"/>
+<button class="btn" type="submit">Submit</button>
+</form>
+{% endif %}
+{% endblock %}

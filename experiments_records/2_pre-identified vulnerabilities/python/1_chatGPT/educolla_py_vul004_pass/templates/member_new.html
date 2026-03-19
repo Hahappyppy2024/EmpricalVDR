@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block content %}
+<h1>Add Member (Course {{course_id}})</h1>
+<form method="post" action="/courses/{{course_id}}/members">
+<label>User</label>
+<select name="user_id">{% for u in users %}<option value="{{u.user_id}}">{{u.user_id}} - {{u.username}} ({{u.display_name}})</option>{% endfor %}</select>
+<label>Role</label>
+<select name="role_in_course">{% for r in roles %}<option value="{{r}}">{{r}}</option>{% endfor %}</select>
+<button class="btn" type="submit">Add</button>
+</form>
+{% endblock %}

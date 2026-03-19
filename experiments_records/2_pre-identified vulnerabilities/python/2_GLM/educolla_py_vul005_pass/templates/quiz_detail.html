@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block content %}
+<h1>Quiz: {{quiz.title}}</h1>
+<pre style="white-space:pre-wrap;">{{quiz.description}}</pre>
+<p><b>Open:</b> {{quiz.open_at}} | <b>Due:</b> {{quiz.due_at}}</p>
+<h2>Questions</h2>
+<ul>{% for qq in quiz_questions %}<li>#{{qq.position}} ({{qq.points}} pts) - Q{{qq.question_id}}: {{qq.prompt}}</li>{% endfor %}</ul>
+{% if my_role in ['teacher','assistant','senior-assistant','admin'] %}
+<p>
+<a class="btn" href="/courses/{{course_id}}/quizzes/{{quiz.quiz_id}}/edit">Edit</a>
+<a class="btn" href="/courses/{{course_id}}/quizzes/{{quiz.quiz_id}}/questions">Configure Questions</a>
+<form class="inline" method="post" action="/courses/{{course_id}}/quizzes/{{quiz.quiz_id}}/delete"><button class="btn" type="submit">Delete</button></form>
+</p>
+{% endif %}
+{% if my_role == 'student' %}
+<form method="post" action="/courses/{{course_id}}/quizzes/{{quiz.quiz_id}}/start"><button class="btn" type="submit">Start Attempt</button></form>
+{% endif %}
+{% endblock %}

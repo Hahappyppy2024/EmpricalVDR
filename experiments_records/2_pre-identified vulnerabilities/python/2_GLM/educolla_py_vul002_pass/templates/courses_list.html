@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block content %}
+<h1>Courses</h1>
+<p><a class="btn" href="/courses/new">New Course</a></p>
+<table><tr><th>ID</th><th>Title</th><th>Creator</th><th>Created</th></tr>
+{% for c in courses %}
+<tr><td>{{c.course_id}}</td><td><a href="/courses/{{c.course_id}}">{{c.title}}</a></td><td>{{c.creator_username}}</td><td>{{c.created_at}}</td></tr>
+{% endfor %}
+</table>
+{% endblock %}

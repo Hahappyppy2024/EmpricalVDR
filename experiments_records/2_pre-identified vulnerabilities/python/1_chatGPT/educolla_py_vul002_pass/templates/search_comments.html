@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block content %}
+<h1>Search Comments (Course {{course_id}})</h1>
+<form method="get" action="/courses/{{course_id}}/search/comments">
+<input name="keyword" value="{{keyword}}" placeholder="keyword..."/>
+<button class="btn" type="submit">Search</button>
+</form>
+{% if keyword %}
+<h2>Results for "{{keyword}}"</h2>
+<ul>{% for c in results %}<li>post {{c.post_id}}: {{c.body}}</li>{% endfor %}</ul>
+{% endif %}
+{% endblock %}

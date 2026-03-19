@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block content %}
+<h1>Quizzes (Course {{course_id}})</h1>
+{% if my_role in ['teacher','assistant','senior-assistant','admin'] %}<p><a class="btn" href="/courses/{{course_id}}/quizzes/new">New Quiz</a></p>{% endif %}
+<table><tr><th>ID</th><th>Title</th><th>Open</th><th>Due</th><th>Updated</th></tr>
+{% for qz in quizzes %}
+<tr><td>{{qz.quiz_id}}</td><td><a href="/courses/{{course_id}}/quizzes/{{qz.quiz_id}}">{{qz.title}}</a></td><td>{{qz.open_at}}</td><td>{{qz.due_at}}</td><td>{{qz.updated_at}}</td></tr>
+{% endfor %}
+</table>
+{% endblock %}

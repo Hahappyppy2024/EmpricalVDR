@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block content %}
+<h1>My Memberships</h1>
+<table><tr><th>Course</th><th>Role</th><th>Joined</th></tr>
+{% for m in memberships %}
+<tr><td><a href="/courses/{{m.course_id}}">{{m.course_title}}</a> ({{m.course_id}})</td><td>{{m.role_in_course}}</td><td>{{m.created_at}}</td></tr>
+{% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block content %}
+<h1>New Assignment</h1>
+<form method="post" action="/courses/{{course_id}}/assignments">
+<label>Title</label><input name="title"/>
+<label>Description</label><textarea name="description"></textarea>
+<label>Due (ISO string, optional)</label><input name="due_at" placeholder="2026-03-01T00:00:00Z"/>
+<button class="btn" type="submit">Create</button>
+</form>
+{% endblock %}
