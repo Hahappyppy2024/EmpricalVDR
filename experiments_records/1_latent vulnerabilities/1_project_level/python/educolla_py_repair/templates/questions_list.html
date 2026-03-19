@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block content %}
+<h1>Question Bank (Course {{course_id}})</h1>
+{% if my_role in ['teacher','assistant','senior-assistant','admin'] %}<p><a class="btn" href="/courses/{{course_id}}/questions/new">New Question</a></p>{% endif %}
+<table><tr><th>ID</th><th>Type</th><th>Prompt</th><th>Updated</th></tr>
+{% for q in questions %}
+<tr><td>{{q.question_id}}</td><td>{{q.qtype}}</td><td><a href="/courses/{{course_id}}/questions/{{q.question_id}}">{{q.prompt}}</a></td><td>{{q.updated_at}}</td></tr>
+{% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block content %}
+<h1>Course: {{course.title}}</h1>
+<p>{{course.description}}</p>
+<p><b>My role:</b> {{ role or "not a member" }}</p>
+<p>
+<a class="btn" href="/courses/{{course.course_id}}/edit">Edit</a>
+<form class="inline" method="post" action="/courses/{{course.course_id}}/delete"><button class="btn" type="submit">Delete</button></form>
+<a class="btn" href="/courses/{{course.course_id}}/members">Members</a>
+</p>
+<p>
+<a class="btn" href="/courses/{{course.course_id}}/posts">Posts</a>
+<a class="btn" href="/courses/{{course.course_id}}/search">Search Posts</a>
+<a class="btn" href="/courses/{{course.course_id}}/search/comments">Search Comments</a>
+<a class="btn" href="/courses/{{course.course_id}}/assignments">Assignments</a>
+<a class="btn" href="/courses/{{course.course_id}}/uploads">Uploads</a>
+<a class="btn" href="/courses/{{course.course_id}}/questions">Question Bank</a>
+<a class="btn" href="/courses/{{course.course_id}}/quizzes">Quizzes</a>
+</p>
+{% endblock %}
