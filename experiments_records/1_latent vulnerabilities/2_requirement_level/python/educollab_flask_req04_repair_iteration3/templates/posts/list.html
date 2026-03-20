@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Posts for {{ course['title'] }}</h1>
+<p>
+  <a href="{{ url_for('posts.new_post_page', course_id=course['course_id']) }}">New Post</a> |
+  <a href="{{ url_for('posts.search_posts_page', course_id=course['course_id']) }}">Search Posts</a> |
+  <a href="{{ url_for('posts.search_comments_page', course_id=course['course_id']) }}">Search Comments</a>
+</p>
+{% for post in posts %}
+<div class="card">
+  <h3><a href="{{ url_for('posts.get_post_page', course_id=course['course_id'], post_id=post['post_id']) }}">{{ post['title'] }}</a></h3>
+  <p>{{ post['body'][:200] }}</p>
+  <p>By {{ post['display_name'] }} at {{ post['created_at'] }}</p>
+</div>
+{% else %}
+<p>No posts yet.</p>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>{{ course['title'] }}</h1>
+<div class="card">
+  <p>{{ course['description'] }}</p>
+  <p>Course ID: {{ course['course_id'] }}</p>
+  <p>Created by {{ course['creator_name'] }} at {{ course['created_at'] }}</p>
+</div>
+{% if current_user %}
+<p><a href="{{ url_for('courses.edit_course_page', course_id=course['course_id']) }}">Edit course</a></p>
+<p><a href="{{ url_for('memberships.list_members_page', course_id=course['course_id']) }}">View members</a></p>
+<form method="post" action="{{ url_for('courses.delete_course_submit', course_id=course['course_id']) }}">
+  <button type="submit">Delete course</button>
+</form>
+{% endif %}
+{% endblock %}

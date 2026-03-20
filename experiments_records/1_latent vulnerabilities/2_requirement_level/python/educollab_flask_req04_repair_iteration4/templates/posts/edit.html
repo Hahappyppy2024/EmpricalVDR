@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Edit Post</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('posts.update_post_submit', course_id=course['course_id'], post_id=post['post_id']) }}">
+  <label for="title">Title</label>
+  <input id="title" name="title" value="{{ post['title'] }}" required>
+  <label for="body">Body</label>
+  <textarea id="body" name="body" rows="8">{{ post['body'] }}</textarea>
+  <button type="submit">Update Post</button>
+</form>
+{% endblock %}

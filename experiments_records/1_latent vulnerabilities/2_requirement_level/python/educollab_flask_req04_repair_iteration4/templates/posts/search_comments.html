@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Search Comments in {{ course['title'] }}</h1>
+<form method="get" action="{{ url_for('posts.search_comments_page', course_id=course['course_id']) }}">
+  <label for="keyword">Keyword</label>
+  <input id="keyword" name="keyword" value="{{ keyword }}">
+  <button type="submit">Search</button>
+</form>
+{% for comment in comments %}
+<div class="card">
+  <p>{{ comment['body'] }}</p>
+  <p>Post ID: {{ comment['post_id'] }}</p>
+</div>
+{% else %}
+  {% if keyword %}<p>No matching comments.</p>{% endif %}
+{% endfor %}
+{% endblock %}

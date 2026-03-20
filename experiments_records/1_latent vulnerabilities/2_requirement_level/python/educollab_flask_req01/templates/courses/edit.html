@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Edit Course</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('courses.update_course_submit', course_id=course['course_id']) }}">
+  <label>Title</label>
+  <input name="title" value="{{ course['title'] }}" required>
+  <label>Description</label>
+  <textarea name="description">{{ course['description'] }}</textarea>
+  <button type="submit">Save</button>
+</form>
+{% endblock %}

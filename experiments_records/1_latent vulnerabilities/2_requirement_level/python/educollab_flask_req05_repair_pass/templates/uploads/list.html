@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Uploads in {{ course['title'] }}</h1>
+<p><a href="{{ url_for('assignments.new_upload_page', course_id=course['course_id']) }}">New upload</a></p>
+{% for upload in uploads %}
+<div class="card">
+  <h3>{{ upload['original_name'] }}</h3>
+  <p>Uploaded by {{ upload['display_name'] }}</p>
+  <p><a href="{{ url_for('assignments.download_upload', course_id=course['course_id'], upload_id=upload['upload_id']) }}">Download</a></p>
+  <form method="post" action="{{ url_for('assignments.delete_upload_submit', course_id=course['course_id'], upload_id=upload['upload_id']) }}">
+    <button type="submit">Delete</button>
+  </form>
+</div>
+{% else %}
+<p>No uploads yet.</p>
+{% endfor %}
+{% endblock %}

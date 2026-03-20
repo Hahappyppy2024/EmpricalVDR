@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Edit Assignment</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('assignments.update_assignment_submit', course_id=course['course_id'], assignment_id=assignment['assignment_id']) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="title">Title</label>
+  <input id="title" name="title" value="{{ assignment['title'] }}" required>
+  <label for="description">Description</label>
+  <textarea id="description" name="description" rows="6">{{ assignment['description'] }}</textarea>
+  <label for="due_at">Due At</label>
+  <input id="due_at" name="due_at" value="{{ assignment['due_at'] }}">
+  <button type="submit">Save</button>
+</form>
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>{{ post['title'] }}</h1>
+<div class="card">
+  <p>{{ post['body'] }}</p>
+  <p>By {{ post['display_name'] }} at {{ post['created_at'] }}</p>
+  <p>Updated at {{ post['updated_at'] }}</p>
+</div>
+<p>
+  <a href="{{ url_for('posts.list_posts_page', course_id=course['course_id']) }}">Back to Posts</a> |
+  {% if can_manage_post %}<a href="{{ url_for('posts.edit_post_page', course_id=course['course_id'], post_id=post['post_id']) }}">Edit Post</a> | {% endif %}
+  <a href="{{ url_for('posts.list_comments_page', course_id=course['course_id'], post_id=post['post_id']) }}">Comments Page</a>
+</p>
+{% if can_manage_post %}
+<form method="post" action="{{ url_for('posts.delete_post_submit', course_id=course['course_id'], post_id=post['post_id']) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit">Delete Post</button>
+</form>
+{% endif %}
+
+<h2>Add Comment</h2>
+<form method="post" action="{{ url_for('posts.create_comment_submit', course_id=course['course_id'], post_id=post['post_id']) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="body">Comment</label>
+  <textarea id="body" name="body" rows="4"></textarea>
+  <button type="submit">Add Comment</button>
+</form>
+
+<h2>Comments</h2>
+{% for comment in comments %}
+<div class="card">
+  <p>{{ comment['body'] }}</p>
+  <p>By {{ comment['display_name'] }} at {{ comment['created_at'] }}</p>
+  {% if comment['comment_id'] in can_manage_comment_ids %}
+  <form method="post" action="{{ url_for('posts.update_comment_submit', course_id=course['course_id'], post_id=post['post_id'], comment_id=comment['comment_id']) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="comment-{{ comment['comment_id'] }}">Edit comment</label>
+    <textarea id="comment-{{ comment['comment_id'] }}" name="body" rows="3">{{ comment['body'] }}</textarea>
+    <button type="submit">Update Comment</button>
+  </form>
+  <form method="post" action="{{ url_for('posts.delete_comment_submit', course_id=course['course_id'], post_id=post['post_id'], comment_id=comment['comment_id']) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Delete Comment</button>
+  </form>
+  {% endif %}
+</div>
+{% else %}
+<p>No comments yet.</p>
+{% endfor %}
+{% endblock %}

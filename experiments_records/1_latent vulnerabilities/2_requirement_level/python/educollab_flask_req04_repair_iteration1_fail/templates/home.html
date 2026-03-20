@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>EduCollab</h1>
+<p>Minimal Flask MVC application for Requirement 04.</p>
+{% if current_user %}
+<p>Signed in as <strong>{{ current_user['display_name'] }}</strong> ({{ current_user['username'] }}).</p>
+{% else %}
+<p>Please register or log in.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>{{ assignment['title'] }}</h1>
+<div class="card">
+  <p>{{ assignment['description'] }}</p>
+  <p>Due: {{ assignment['due_at'] or 'n/a' }}</p>
+  <p>Created by {{ assignment['display_name'] }} at {{ assignment['created_at'] }}</p>
+</div>
+<p><a href="{{ url_for('assignments.edit_assignment_page', course_id=course['course_id'], assignment_id=assignment['assignment_id']) }}">Edit assignment</a></p>
+<p><a href="{{ url_for('assignments.submit_assignment_page', course_id=course['course_id'], assignment_id=assignment['assignment_id']) }}">Submit work</a></p>
+<p><a href="{{ url_for('assignments.list_submissions_for_assignment_page', course_id=course['course_id'], assignment_id=assignment['assignment_id']) }}">View submissions</a></p>
+<form method="post" action="{{ url_for('assignments.delete_assignment_submit', course_id=course['course_id'], assignment_id=assignment['assignment_id']) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit">Delete assignment</button>
+</form>
+{% endblock %}
