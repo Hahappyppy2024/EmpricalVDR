@@ -1,0 +1,153 @@
+<?php
+
+require_once __DIR__ . '/../repositories/UserRepository.php';
+require_once __DIR__ . '/../repositories/MembershipRepository.php';
+require_once __DIR__ . '/../repositories/CourseRepository.php';
+
+function start_secure_session(array $config): void
+{
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        return;
+    }
+
+    $secure = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+    session_name($config['session']['name']);
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => $config['session']['path'],
+        'domain' => '',
+        'secure' => $secure,
+        'httponly' => true,
+        'samesite' => $config['session']['samesite'],
+    ]);
+    session_start();
+}
+
+function current_user_id(): ?int
+{
+    return isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
+}
+
+function login_user(array $config, int $userId): void
+{
+    start_secure_session($config);
+    session_regenerate_id(true);
+    $_SESSION['user_id'] = $userId;
+}
+
+function logout_user(array $config): void
+{
+    start_secure_session($config);
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], (bool) $params['secure'], (bool) $params['httponly']);
+    }
+    session_destroy();
+}
+
+function require_login(array $config, bool $api = false): int
+{
+    start_secure_session($config);
+    $userId = current_user_id();
+    if ($userId !== null) {
+        return $userId;
+    }
+
+    if ($api) {
+        json_response(['success' => false, 'error' => 'Authentication required'], 401);
+    }
+
+    redirect_to('/login');
+    exit;
+}
+
+function current_user(array $config, UserRepository $userRepo): ?array
+{
+    $userId = current_user_id();
+    if ($userId === null) {
+        return null;
+    }
+    return $userRepo->findById($userId);
+}
+
+function current_course_membership(array $config, MembershipRepository $membershipRepo, CourseRepository $courseRepo, int $courseId): ?array
+{
+    require_login($config, false);
+    if (!$courseRepo->findById($courseId)) {
+        return null;
+    }
+
+    $userId = current_user_id();
+    if ($userId === null) {
+        return null;
+    }
+
+    return $membershipRepo->findByCourseAndUser($courseId, $userId);
+}
+
+function require_course_member(array $config, MembershipRepository $membershipRepo, CourseRepository $courseRepo, int $courseId, bool $api = false): array
+{
+    $userId = require_login($config, $api);
+    $course = $courseRepo->findById($courseId);
+    if (!$course) {
+        if ($api) {
+            json_response(['success' => false, 'error' => 'Course not found'], 404);
+        }
+        http_response_code(404);
+        echo 'Course not found';
+        exit;
+    }
+
+    $membership = $membershipRepo->findByCourseAndUser($courseId, $userId);
+    if ($membership) {
+        return $membership;
+    }
+
+    if ($api) {
+        json_response(['success' => false, 'error' => 'Forbidden'], 403);
+    }
+    http_response_code(403);
+    echo 'Forbidden';
+    exit;
+}
+
+function require_course_staff(array $config, MembershipRepository $membershipRepo, CourseRepository $courseRepo, int $courseId, bool $api = false): array
+{
+    $membership = require_course_member($config, $membershipRepo, $courseRepo, $courseId, $api);
+    if (in_array($membership['role_in_course'], ['teacher', 'admin'], true)) {
+        return $membership;
+    }
+
+    if ($api) {
+        json_response(['success' => false, 'error' => 'Forbidden'], 403);
+    }
+    http_response_code(403);
+    echo 'Forbidden';
+    exit;
+}
+
+function is_course_staff_role(string $role): bool
+{
+    return in_array($role, ['teacher', 'admin', 'assistant', 'senior-assistant'], true);
+}
+
+function can_moderate_course_content(array $membership): bool
+{
+    return in_array((string) ($membership['role_in_course'] ?? ''), ['teacher', 'admin'], true);
+}
+
+function can_manage_course_content(array $membership, int $userId, int $authorId): bool
+{
+    return $userId === $authorId || can_moderate_course_content($membership);
+}
+
+function current_user_can_manage_course(array $config, MembershipRepository $membershipRepo, CourseRepository $courseRepo, int $courseId): bool
+{
+    $membership = current_course_membership($config, $membershipRepo, $courseRepo, $courseId);
+    if (!$membership) {
+        return false;
+    }
+
+    return is_course_staff_role((string) $membership['role_in_course']);
+}
