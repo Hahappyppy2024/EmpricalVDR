@@ -2,7 +2,7 @@
 EmpricalVDR
 
 
-## EduCollab Benchark
+## EduCollab Benchmark
 EduCollab is a multi-language, multi-granularity benchmark of runnable LLM-generated web application artifacts.
 It includes implementations in PHP, JavaScript, and Python, and covers project-level, requirement-level, and file-level settings. 
 All artifacts are built from a shared educational collaboration scenario with aligned functionality across languages.
