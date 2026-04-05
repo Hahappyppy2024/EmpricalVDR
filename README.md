@@ -19,9 +19,9 @@ For JS artifacts:
 npm install
 
 For PHP and Python, please install the test environment before running the tests.
-
+```
 python -m venv .venv
 .venv\Scripts\activate
-
+```
 
 The container is being created.
