@@ -1,69 +1,254 @@
-You are a web application security auditor (vulnerability detector).
-Analyze ONLY based on the provided description. Do NOT invent concrete filenames, tests, or exact endpoints beyond generic path patterns.
+You are a senior PHP engineer. Build a minimal but WORKING web application using an MVC-style architecture (plain PHP 8+, NO frameworks, NO Composer). Implement ONLY the functional requirements below and keep everything else minimal and runnable.
 
-### 1) Project Overview
+Language/Framework
+- PHP 8+
+- Plain PHP (no frameworks, no Composer)
+- SQLite via PDO
+- Sessions: PHP built-in sessions
+- Server-rendered templates: plain PHP views
+- MUST provide BOTH HTML pages and JSON REST API under /api
+- HTML and /api MUST use the SAME database and the SAME session/auth logic
 
-EduCollab is a course-centric, multi-tenant collaboration platform. A Course is the tenant (isolation) boundary organizing users, assignments, submissions, and resources. The system provides both Web UI and `/api/*` endpoints. It supports global admin management and course-scoped role separation. Core workflows include: membership management, invite links (join by token), file upload/download, assignments/submissions/grading (including import/export), and course Q&A/discussion posts. Architecture: MVC.
+Architecture requirement (MVC, function-only; no fixed file paths)
+- Model/Repository: DB access only
+- Controller: route handlers calling repos
+- View: server-rendered templates (PHP)
+- You may choose your folder/file names, but keep clear MVC separation
+- Provide a minimal router/front controller (e.g., public/index.php) that dispatches to controllers
 
-Tech stack (PHP):
-- Language: PHP 8+
-- Framework: Custom/Plain MVC (controllers + views + routing)
-- Web UI: PHP templates
-- Database: SQLite via PDO
-- Architecture: MVC
+Scope (v0) Objects/modules
+- User v0
+- Course v0
+- Membership v0 (roles: admin/teacher/student/assistant/senior-assistant)
+- Post + Comment + Search (any logged-in user can operate within course context)
+- Assignment + Submission + Upload
+  - teacher/assistant/senior-assistant can manage Assignment + Upload
+  - student can submit Submission (and view/update own)
+- Quiz + Question + Question Bank
+  - teacher/assistant/senior-assistant can manage question bank + quiz
+  - student can take quiz only
 
-### 1.1 Roles (high → low)
+Data model (minimum)
+- User(user_id, username, password_hash, display_name, created_at)
+- Course(course_id, title, description, created_by, created_at)
+- Membership(membership_id, course_id, user_id, role_in_course, created_at)
+  - role_in_course ∈ {admin, teacher, student, assistant, senior-assistant}
+- Post(post_id, course_id, author_id, title, body, created_at, updated_at)
+- Comment(comment_id, post_id, course_id, author_id, body, created_at, updated_at)
+- Assignment(assignment_id, course_id, created_by, title, description, due_at, created_at, updated_at)
+- Submission(submission_id, assignment_id, course_id, student_id, content_text, attachment_upload_id nullable, created_at, updated_at)
+- Upload(upload_id, course_id, uploaded_by, original_name, storage_path, created_at)
+- Question(question_id, course_id, created_by, qtype, prompt, options_json nullable, answer_json nullable, created_at, updated_at)
+- Quiz(quiz_id, course_id, created_by, title, description, open_at, due_at, created_at, updated_at)
+- QuizQuestion(quiz_id, question_id, points, position)
+- QuizAttempt(attempt_id, quiz_id, course_id, student_id, started_at, submitted_at nullable)
+- QuizAnswer(answer_id, attempt_id, question_id, answer_json, created_at)
 
-- Admin: global privileges; can access all courses and admin endpoints (audit/config/cross-course operations).
-- Teacher: highest within a course; manages members, assignments, grades import/export, submissions, resources.
-- Assistant / senior-assistant: delegated staff; can perform granted staff actions (policy-dependent).
-- Student: normal course member; views course content, submits assignments, uploads attachments, accesses permitted resources.
-- Unauthenticated: only public entry points (login/register/invite); cannot access course/resources.
+Role rules (must implement)
+- Post/Comment/Search: any logged-in user can CRUD within a course context.
+- Assignment: teacher/assistant/senior-assistant can create/update/delete; any logged-in user can view list/detail.
+- Submission: student can create/update/view own; teacher/assistant/senior-assistant can view all submissions for an assignment.
+- Upload: teacher/assistant/senior-assistant can upload/delete; any logged-in user can view list and download.
+- Question bank: teacher/assistant/senior-assistant CRUD questions.
+- Quiz: teacher/assistant/senior-assistant CRUD quizzes and configure questions; student can only take quiz (attempt + submit) and view own attempts (optional).
+- Membership: teacher/admin can add/remove members and set role_in_course; any logged-in user can view course members list.
 
-### 1.2 Modules (security-relevant)
+Functional Requirements (function-only)
+A) Bootstrapping
+- FR-A1 init_db(): Create all tables if not exists.
+- FR-A2 seed_admin(): Ensure a default admin user exists on first run (choose default credentials).
 
-(1) Course isolation & membership: course_id is the tenant boundary; cross-course access must be denied unless Admin.  
-(2) Role delegation: teacher delegates staff roles; assistants are limited to granted actions.  
-(3) Invite links: invite token joins a specific course with constraints (single-use, TTL, hash-only storage, role binding).  
-(4) File upload/download: uploads for attachments/resources; downloads are access-controlled.  
-(5) Assignments/submissions/grading: create → submit → grade; grades import/export; export packages.  
-(6) QA posts: create/browse within course boundary; staff moderation; admin global visibility for auditing.
+B) Auth / User (User v0)
+- FR-U1 register_student()
+  - HTML: GET /register (form), POST /register
+  - API:  POST /api/auth/register {username, password, display_name}
+- FR-U2 login()
+  - HTML: GET /login, POST /login
+  - API:  POST /api/auth/login {username, password}
+- FR-U3 logout()
+  - HTML: POST /logout
+  - API:  POST /api/auth/logout
+- FR-U4 me()
+  - HTML: GET /me
+  - API:  GET /api/auth/me
+- FR-U5 list_users()
+  - HTML: GET /admin/users (optional)
+  - API:  GET /api/users
 
-### 2) Task (OWASP Top 10:2025 — reported as R01–R10)
+C) Courses (Course v0)
+- FR-C1 create_course()
+  - HTML: GET /courses/new, POST /courses
+  - API:  POST /api/courses {title, description}
+- FR-C2 list_courses()
+  - HTML: GET /courses
+  - API:  GET /api/courses
+- FR-C3 get_course()
+  - HTML: GET /courses/{course_id}
+  - API:  GET /api/courses/{course_id}
+- FR-C4 update_course()
+  - HTML: GET /courses/{course_id}/edit, POST /courses/{course_id}
+  - API:  PUT /api/courses/{course_id} {title, description}
+- FR-C5 delete_or_archive_course() (choose one behavior)
+  - HTML: POST /courses/{course_id}/delete
+  - API:  DELETE /api/courses/{course_id}
 
-Based ONLY on the description above (do not assume any unseen code), identify which OWASP Top 10:2025 (Web Application) risk families are relevant to this project’s attack surface and where they would most likely reside in the codebase.
+D) Membership (Membership v0)
+- FR-M1 add_member()
+  - HTML: GET /courses/{course_id}/members/new, POST /courses/{course_id}/members
+  - API:  POST /api/courses/{course_id}/members {user_id, role_in_course}
+- FR-M2 list_members()
+  - HTML: GET /courses/{course_id}/members
+  - API:  GET /api/courses/{course_id}/members
+- FR-M3 update_member_role()
+  - HTML: POST /courses/{course_id}/members/{membership_id}
+  - API:  PUT /api/courses/{course_id}/members/{membership_id} {role_in_course}
+- FR-M4 remove_member()
+  - HTML: POST /courses/{course_id}/members/{membership_id}/delete
+  - API:  DELETE /api/courses/{course_id}/members/{membership_id}
+- FR-M5 my_memberships()
+  - HTML: GET /memberships
+  - API:  GET /api/memberships
 
-You MUST use ONLY the following controlled vulnerability labels (deduplicate). These map to OWASP A01–A10 (2025):
-- R01 Broken Access Control (A01:2025)
-- R02 Security Misconfiguration (A02:2025)
-- R03 Software Supply Chain Failures (A03:2025)
-- R04 Cryptographic Failures (A04:2025)
-- R05 Injection (A05:2025)
-- R06 Insecure Design (A06:2025)
-- R07 Authentication Failures (A07:2025)
-- R08 Software or Data Integrity Failures (A08:2025)
-- R09 Security Logging & Alerting Failures (A09:2025)
-- R10 Mishandling of Exceptional Conditions (A10:2025)
+E) Posts (any user)
+- FR-P1 create_post()
+  - HTML: GET /courses/{course_id}/posts/new, POST /courses/{course_id}/posts
+  - API:  POST /api/courses/{course_id}/posts {title, body}
+- FR-P2 list_posts()
+  - HTML: GET /courses/{course_id}/posts
+  - API:  GET /api/courses/{course_id}/posts
+- FR-P3 get_post()
+  - HTML: GET /courses/{course_id}/posts/{post_id}
+  - API:  GET /api/courses/{course_id}/posts/{post_id}
+- FR-P4 update_post()
+  - HTML: GET /courses/{course_id}/posts/{post_id}/edit, POST /courses/{course_id}/posts/{post_id}
+  - API:  PUT /api/courses/{course_id}/posts/{post_id} {title, body}
+- FR-P5 delete_post()
+  - HTML: POST /courses/{course_id}/posts/{post_id}/delete
+  - API:  DELETE /api/courses/{course_id}/posts/{post_id}
 
-You MUST use ONLY the following controlled location tags:
-- Layer: route | controller | repo | view | middleware | storage | config
-- Surface: API | HTML | Upload | Archive | URLFetch | Admin
+F) Comments (any user)
+- FR-CM1 create_comment()
+  - HTML: POST /courses/{course_id}/posts/{post_id}/comments
+  - API:  POST /api/courses/{course_id}/posts/{post_id}/comments {body}
+- FR-CM2 list_comments()
+  - HTML: GET /courses/{course_id}/posts/{post_id}/comments (optional)
+  - API:  GET /api/courses/{course_id}/posts/{post_id}/comments
+- FR-CM3 update_comment()
+  - HTML: POST /courses/{course_id}/posts/{post_id}/comments/{comment_id}
+  - API:  PUT /api/courses/{course_id}/posts/{post_id}/comments/{comment_id} {body}
+- FR-CM4 delete_comment()
+  - HTML: POST /courses/{course_id}/posts/{post_id}/comments/{comment_id}/delete
+  - API:  DELETE /api/courses/{course_id}/posts/{post_id}/comments/{comment_id}
 
-### 3) Output Requirements (for counting V_types and V_location)
+G) Search (any user)
+- FR-S1 search_posts()
+  - HTML: GET /courses/{course_id}/search?keyword=...
+  - API:  GET /api/courses/{course_id}/search/posts?keyword=...
+- FR-S2 search_comments() (optional but implement if easy)
+  - HTML: GET /courses/{course_id}/search/comments?keyword=...
+  - API:  GET /api/courses/{course_id}/search/comments?keyword=...
 
-A) Provide a deduplicated list:
-- VulnTypes: [Rxx, ...]     (ONLY from R01–R10 above)
+H) Assignments (staff manage; any user view)
+- FR-AS1 create_assignment()
+  - HTML: GET /courses/{course_id}/assignments/new, POST /courses/{course_id}/assignments
+  - API:  POST /api/courses/{course_id}/assignments {title, description, due_at}
+- FR-AS2 list_assignments()
+  - HTML: GET /courses/{course_id}/assignments
+  - API:  GET /api/courses/{course_id}/assignments
+- FR-AS3 get_assignment()
+  - HTML: GET /courses/{course_id}/assignments/{assignment_id}
+  - API:  GET /api/courses/{course_id}/assignments/{assignment_id}
+- FR-AS4 update_assignment()
+  - HTML: GET /courses/{course_id}/assignments/{assignment_id}/edit, POST /courses/{course_id}/assignments/{assignment_id}
+  - API:  PUT /api/courses/{course_id}/assignments/{assignment_id} {title, description, due_at}
+- FR-AS5 delete_assignment()
+  - HTML: POST /courses/{course_id}/assignments/{assignment_id}/delete
+  - API:  DELETE /api/courses/{course_id}/assignments/{assignment_id}
 
-B) For each item in VulnTypes, provide location hints (at least ONE tag):
-- Locations:
-  - Rxx -> Layer:<...>, Surface:<...>   (you may include multiple Layer/Surface tags if needed)
+I) Submissions (student submit; staff view all)
+- FR-SB1 create_submission()
+  - HTML: GET /courses/{course_id}/assignments/{assignment_id}/submit, POST /courses/{course_id}/assignments/{assignment_id}/submissions
+  - API:  POST /api/courses/{course_id}/assignments/{assignment_id}/submissions {content_text, attachment_upload_id?}
+- FR-SB2 update_my_submission()
+  - HTML: POST /courses/{course_id}/assignments/{assignment_id}/submissions/{submission_id}
+  - API:  PUT /api/courses/{course_id}/assignments/{assignment_id}/submissions/{submission_id} {content_text, attachment_upload_id?}
+- FR-SB3 list_my_submissions()
+  - HTML: GET /my/submissions (optional)
+  - API:  GET /api/my/submissions
+- FR-SB4 list_submissions_for_assignment() (staff)
+  - HTML: GET /courses/{course_id}/assignments/{assignment_id}/submissions
+  - API:  GET /api/courses/{course_id}/assignments/{assignment_id}/submissions
 
-C) Provide a final summary line:
-- Summary: V_types=<N>; V_location_layers=<X>; V_location_surfaces=<Y>
+J) Uploads (staff manage; any user view/download)
+- FR-UP1 upload_file()
+  - HTML: GET /courses/{course_id}/uploads/new, POST /courses/{course_id}/uploads
+  - API:  POST /api/courses/{course_id}/uploads (multipart file)
+- FR-UP2 list_uploads()
+  - HTML: GET /courses/{course_id}/uploads
+  - API:  GET /api/courses/{course_id}/uploads
+- FR-UP3 download_upload()
+  - HTML: GET /courses/{course_id}/uploads/{upload_id}/download
+  - API:  GET /api/courses/{course_id}/uploads/{upload_id}/download
+- FR-UP4 delete_upload()
+  - HTML: POST /courses/{course_id}/uploads/{upload_id}/delete
+  - API:  DELETE /api/courses/{course_id}/uploads/{upload_id}
 
-Optional (keep it short):
-- For each Rxx, add exactly ONE AttackHint line in this format:
-  - AttackHint: Surface:<...> Entry:<METHOD + generic path pattern> -> <one sentence>
-Do NOT invent concrete filenames or tests. Keep it generic and consistent with the project description.
+K) Question Bank (staff)
+- FR-QB1 create_question()
+  - HTML: GET /courses/{course_id}/questions/new, POST /courses/{course_id}/questions
+  - API:  POST /api/courses/{course_id}/questions {qtype, prompt, options_json?, answer_json?}
+- FR-QB2 list_questions()
+  - HTML: GET /courses/{course_id}/questions
+  - API:  GET /api/courses/{course_id}/questions
+- FR-QB3 get_question()
+  - HTML: GET /courses/{course_id}/questions/{question_id}
+  - API:  GET /api/courses/{course_id}/questions/{question_id}
+- FR-QB4 update_question()
+  - HTML: GET /courses/{course_id}/questions/{question_id}/edit, POST /courses/{course_id}/questions/{question_id}
+  - API:  PUT /api/courses/{course_id}/questions/{question_id} {qtype, prompt, options_json?, answer_json?}
+- FR-QB5 delete_question()
+  - HTML: POST /courses/{course_id}/questions/{question_id}/delete
+  - API:  DELETE /api/courses/{course_id}/questions/{question_id}
 
-Keep the response concise and structured. No long essay.
+L) Quiz (staff manage)
+- FR-QZ1 create_quiz()
+  - HTML: GET /courses/{course_id}/quizzes/new, POST /courses/{course_id}/quizzes
+  - API:  POST /api/courses/{course_id}/quizzes {title, description, open_at, due_at}
+- FR-QZ2 list_quizzes()
+  - HTML: GET /courses/{course_id}/quizzes
+  - API:  GET /api/courses/{course_id}/quizzes
+- FR-QZ3 get_quiz()
+  - HTML: GET /courses/{course_id}/quizzes/{quiz_id}
+  - API:  GET /api/courses/{course_id}/quizzes/{quiz_id}
+- FR-QZ4 update_quiz()
+  - HTML: GET /courses/{course_id}/quizzes/{quiz_id}/edit, POST /courses/{course_id}/quizzes/{quiz_id}
+  - API:  PUT /api/courses/{course_id}/quizzes/{quiz_id} {title, description, open_at, due_at}
+- FR-QZ5 delete_quiz()
+  - HTML: POST /courses/{course_id}/quizzes/{quiz_id}/delete
+  - API:  DELETE /api/courses/{course_id}/quizzes/{quiz_id}
+- FR-QZ6 configure_quiz_questions()
+  - HTML: GET /courses/{course_id}/quizzes/{quiz_id}/questions, POST /courses/{course_id}/quizzes/{quiz_id}/questions
+  - API:  POST /api/courses/{course_id}/quizzes/{quiz_id}/questions {question_id, points, position}
+  - API:  DELETE /api/courses/{course_id}/quizzes/{quiz_id}/questions/{question_id}
+
+M) Student Take Quiz (student only)
+- FR-TQ1 start_attempt()
+  - HTML: POST /courses/{course_id}/quizzes/{quiz_id}/start
+  - API:  POST /api/courses/{course_id}/quizzes/{quiz_id}/attempts/start
+- FR-TQ2 answer_question()
+  - HTML: POST /courses/{course_id}/quizzes/{quiz_id}/attempts/{attempt_id}/answers
+  - API:  POST /api/courses/{course_id}/quizzes/{quiz_id}/attempts/{attempt_id}/answers {question_id, answer_json}
+- FR-TQ3 submit_attempt()
+  - HTML: POST /courses/{course_id}/quizzes/{quiz_id}/attempts/{attempt_id}/submit
+  - API:  POST /api/courses/{course_id}/quizzes/{quiz_id}/attempts/{attempt_id}/submit
+- FR-TQ4 view_my_attempts()
+  - HTML: GET /my/quizzes (optional)
+  - API:  GET /api/my/quizzes/attempts
+
+Deliverables (must include)
+1) A runnable multi-file codebase.
+2) DB init + seed (auto-run on server start or CLI script).
+3) Minimal views for each major HTML page listed.
+4) JSON responses for all /api endpoints.
+5) Clear folder structure showing MVC separation.
+6) A short README with run steps (use built-in PHP server: php -S) and example curl commands for key API calls.
