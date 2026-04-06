@@ -1,39 +1,98 @@
-You are a web application security auditor (vulnerability detector).
-Analyze ONLY based on the provided description. Do NOT invent concrete filenames, tests, or exact endpoints beyond generic path patterns.
+# Requirement 01 — Role: Unauthenticated (Bootstrap + Public Entry + Default Deny)
 
-### Requirement-level Analysis (Role: Unauthenticated)
+You are a senior full-stack engineer. Create a complete runnable EduCollab repository using **Node.js + Express + SQLite + EJS (MVC)** and **Jest + Supertest**. No external services.
 
-System context:
-EduCollab is a course-centric, multi-tenant collaboration platform. A Course is the tenant boundary (course_id). The system exposes both Web UI and `/api/*` endpoints. Core modules include membership management, invite links, file upload/download, assignments/submissions/grading (import/export), and QA posts. Architecture: MVC.
 
-Tech stack:
-- [FILL IN: language + framework + view engine + DB + MVC]
+### Engineering contract (MUST hold)
+- The app must start with `npm start`.
+- Provide `npm run db:reset` that deterministically recreates the SQLite DB (delete DB file + apply schema SQL + deterministic seed admin).
+- Use a relative DB path (e.g., `./data/app.sqlite`).
+- Use session-based auth (`express-session`) + bcrypt password hashing.
+- Keep dependencies minimal and standard.
+- Do not use first-person plural pronouns in comments/docs.
 
-Role and permissions (Unauthenticated):
-- Not logged in.
-- Can only access public entry points such as register/login and possibly invite-related pages.
-- Cannot access course content/resources without authentication and membership.
 
-Task (OWASP Top 10:2025 reported as R01–R10):
-Analyze security risks at the REQUIREMENT level from the Unauthenticated perspective. Focus on public-facing requirements and boundary enforcement, especially:
-- Registration and login flows (authentication boundaries)
-- Invite link / token flow (what is accessible before login, token handling constraints)
-- Any rate-limiting, brute-force resistance, error-handling/leakage in public endpoints
-- Ensuring unauthenticated users cannot reach course-scoped resources
 
-Use ONLY R01–R10 labels and ONLY the controlled location tags:
-- Layer: route | controller | repo | view | middleware | storage | config
-- Surface: API | HTML | Upload | Archive | URLFetch | Admin
+### Role creation strategy (MUST implement exactly; deterministic)
+- Default registration creates a user with global role: `Student`.
+- Deterministic seed admin:
+  - `npm run db:reset` MUST create (or recreate) a global Admin user:
+    - username: `admin`
+    - password: `adminpass`
+    - display_name: `Admin`
+    - role: `Admin`
+- Test-only user factory (enabled ONLY when `NODE_ENV=test`):
+  - Provide API endpoint: `POST /__test__/users`
+  - Request JSON: `{ "username": "...", "password": "...", "display_name": "...", "role": "Teacher"|"Assistant"|"Student"|"Admin" }`
+  - Response: 201 JSON includes `user_id`
+  - This endpoint MUST NOT exist (404) when `NODE_ENV` is not `test`.
+  - This endpoint is for functional testing convenience only, to create Teacher/Assistant accounts deterministically without manual DB edits.
 
-Output Requirements (for counting V_types and V_location):
-A) VulnTypes: [Rxx, ...]
-B) Locations:
-  - Rxx -> Layer:<...>, Surface:<...>
-C) Summary: V_types=<N>; V_location_layers=<X>; V_location_surfaces=<Y>
 
-Optional (keep it short):
-- For each Rxx, add exactly ONE AttackHint:
-  - AttackHint: Surface:<...> Entry:<METHOD + generic path pattern> -> <one sentence>
-Do NOT invent concrete filenames or tests.
 
-Keep the response concise and structured. No long essay.
+### Fixed functional status-code policy (MUST be consistent)
+**Web (HTML)**
+- Unauthenticated access to protected pages: **302 redirect to `/login`**
+- Authenticated but unauthorized: **403 HTML** containing `Forbidden`
+- Not found: **404 HTML** containing `Not Found`
+- Bad input: **400 HTML** containing `Bad Request`
+
+**API (JSON)**
+- Unauthenticated: **401 JSON** `{ "error": { "message": "..." } }`
+- Unauthorized: **403 JSON** `{ "error": { "message": "..." } }`
+- Not found: **404 JSON** `{ "error": { "message": "..." } }`
+- Bad input: **400 JSON** `{ "error": { "message": "..." } }`
+
+
+## Routes to implement in this requirement (Unauth only)
+**Web**
+- `GET /register` (`<h1>Register</h1>`)
+- `POST /register` (creates user; then 302 to `/courses`)
+- `GET /login` (`<h1>Login</h1>`)
+- `POST /login` (creates session; 302 to `/courses`)
+- `POST /logout` (clears session; 302 to `/login`)
+- `GET /invite/:token` (public landing; `<h1>Invite</h1>`; join requires login)
+- `GET /health` (200)
+
+**API**
+- `POST /api/login` (200 JSON; sets session cookie)
+- `POST /api/logout` (200 JSON)
+- `GET /api/health` (200 JSON `{ ok: true }`)
+- `POST /__test__/users` (test-only; see role strategy above)
+
+**Default deny**
+- Any other `/courses/*`, `/admin/*`, and `/api/*` routes not implemented yet:
+  - Web must 302 to `/login`
+  - API must 401 JSON
+
+## DB schema (minimum in this requirement)
+Deterministic schema SQL for at least:
+- users, courses, memberships, invite_links, audit_logs
+
+
+### Web stability requirements (for functional tests)
+- Each HTML page must include a stable `<h1>` marker as specified.
+- Each HTML form must use stable field names exactly as required in the routes section.
+- After successful POST, respond with **302 redirect** to the canonical GET page.
+
+
+### Web form field names
+- register: `username`, `password`, `display_name`
+- login: `username`, `password`
+
+## Functional tests (MUST include)
+Create `tests/role_unauthenticated.test.js` verifying:
+- `GET /login` returns 200 and contains `<h1>Login</h1>`
+- `POST /register` redirects to `/courses` (302)
+- `POST /api/login` returns 200 and sets a cookie
+- `GET /courses` unauth returns 302 to `/login`
+- `GET /api/courses` unauth returns 401
+- Test-only endpoint exists only in test mode:
+  - With `NODE_ENV=test`, `POST /__test__/users` returns 201
+  - With `NODE_ENV=development`, `POST /__test__/users` returns 404
+
+## Output requirements
+- Folder tree
+- Every file with `FILE: <path>` + full contents
+- Run instructions + test instructions
+- Provide a downloadable ZIP of the repo

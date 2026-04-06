@@ -1,0 +1,133 @@
+
+
+# Requirement-Level Prompt (EduCollab, PHP/SQLite/Server-Rendered MVC) — Requirement 02: Membership + Role Enforcement (Function-Only)
+
+You are a senior PHP engineer. Update the existing PHP web application using an MVC-style architecture. Implement ONLY the functional requirements below and keep everything else minimal and runnable.
+
+## Hard constraints
+
+* This is an incremental requirement-level update.
+* Start from the existing runnable repository produced earlier.
+* Preserve all existing working functionality.
+* Do not refactor unrelated modules.
+* The app must remain runnable with PHP’s built-in server, for example:
+
+  * `php -S 127.0.0.1:8000 -t public`
+* Keep dependencies minimal and standard.
+* Use the existing SQLite setup consistently.
+* Use the existing session/auth logic consistently.
+* Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or documentation.
+* HTML pages and JSON API under `/api` MUST use the SAME database and the SAME session/auth logic.
+* Do not rename existing routes, tables, or session keys unless explicitly required below.
+* Do not rewrite previously implemented modules.
+* Only add the minimum code needed for this requirement.
+* Keep all previously implemented pages and APIs working.
+
+## Language/Framework
+
+* PHP 8+
+* Plain PHP or lightweight custom MVC
+* SQLite: PDO with SQLite driver
+* Sessions: native PHP sessions
+* Server-rendered templates: PHP view files
+
+## Architecture requirement (MVC, function-only; no fixed file paths)
+
+* Model/Repository: DB access only
+* Controller: route handlers calling repositories
+* View: server-rendered PHP templates
+* Extend the existing app entry and routing cleanly
+
+## Scope for this requirement
+
+* Membership v0
+* Course-level role enforcement utilities/guards needed by later modules
+
+## Minimum data model to add in this requirement
+
+* Membership(membership_id, course_id, user_id, role_in_course, created_at)
+
+  * role_in_course ∈ {admin, teacher, student, assistant, senior-assistant}
+
+## Functional Requirements (function-only)
+
+### D) Membership (Membership v0)
+
+* FR-M1 add_member()
+
+  * HTML: GET /courses/:course_id/members/new, POST /courses/:course_id/members
+  * API:  POST /api/courses/:course_id/members {user_id, role_in_course}
+* FR-M2 list_members()
+
+  * HTML: GET /courses/:course_id/members
+  * API:  GET /api/courses/:course_id/members
+* FR-M3 update_member_role()
+
+  * HTML: POST /courses/:course_id/members/:membership_id
+  * API:  PUT /api/courses/:course_id/members/:membership_id {role_in_course}
+* FR-M4 remove_member()
+
+  * HTML: POST /courses/:course_id/members/:membership_id/delete
+  * API:  DELETE /api/courses/:course_id/members/:membership_id
+* FR-M5 my_memberships()
+
+  * HTML: GET /memberships
+  * API:  GET /api/memberships
+
+## Role rules to implement in this requirement
+
+* teacher/admin can add members and set role_in_course
+* teacher/admin can update member roles
+* teacher/admin can remove members
+* any logged-in user can view course members list
+* any logged-in user can view their own memberships
+* keep role checking course-scoped
+* implement reusable guards/helpers for later modules, such as:
+
+  * requireLogin
+  * requireCourseMember
+  * requireTeacherOrAdmin
+  * optionally requireCourseStaff
+
+## Behavior and implementation rules
+
+* Preserve all routes and behavior from Requirement 01.
+* Keep route naming exactly as specified above.
+* Reuse the existing DB connection/session logic.
+* `/api` routes must return JSON.
+* HTML routes may redirect after successful form submissions.
+* Keep views minimal.
+* Use existing User and Course tables; do not redesign them.
+* Do not implement posts, comments, search, assignments, submissions, uploads, question bank, quizzes, or attempts in this requirement.
+
+## Suggested implementation details
+
+* Extend DB initialization to create the Membership table if it does not exist.
+* Use PDO prepared statements for all membership-related queries.
+* Enforce course-scoped authorization through shared helper functions or middleware-like guards.
+* Continue using the same session key for the current user established in Requirement 01.
+* For API `PUT` and `DELETE` routes, support JSON request bodies and parse them consistently.
+* Keep the routing compatible with the existing front controller pattern through `public/index.php`.
+* Minimal HTML pages are sufficient, but they must be functional.
+
+## Deliverables (must include)
+
+1. Updated runnable multi-file codebase.
+2. DB migration/init logic extended to include Membership table.
+3. Minimal PHP views for each major HTML page listed in this requirement.
+4. JSON responses for all `/api` endpoints in this requirement.
+5. Clear folder structure showing MVC separation.
+6. A short README update with:
+
+   * how membership and course roles work
+   * example curl commands for key API calls in this requirement
+
+## Output format (MUST follow exactly)
+
+A) Repository folder structure
+B) Full contents of all changed/new source files
+C) Database schema / init changes
+D) Run instructions
+E) Example curl commands
+F) Zip file includes all files
+

@@ -1,0 +1,154 @@
+
+# Requirement-Level Prompt (EduCollab, Python/Flask/SQLite/Jinja2 + MVC) — Requirement 01: Bootstrapping + Auth + User + Course (Function-Only)
+
+You are a senior Python engineer. Build or update a minimal but WORKING Python web application using an MVC-style architecture. Implement ONLY the functional requirements below and keep everything else minimal and runnable.
+
+## Hard constraints
+
+* This is a requirement-level generation task. Produce a complete runnable repository if starting from scratch, or a runnable incremental update if a repository already exists.
+* The app must start with `python app.py` or `flask run`.
+* Keep dependencies minimal and standard.
+* Use SQLite for persistence.
+* Do not introduce external services.
+* Do not use first-person plural pronouns (e.g., “we”, “our”) in comments or documentation.
+* Keep the implementation function-only. Do not add extra modules beyond what is required here.
+* If a repo already exists, preserve existing working behavior and extend it without breaking earlier functionality.
+* HTML pages and JSON API under `/api` MUST use the SAME database and the SAME session/auth logic.
+* Do not rename existing routes, tables, or session keys unless explicitly required below.
+* Do not rewrite previously implemented modules.
+* Only add the minimum code needed for this requirement.
+* Keep all previously implemented pages and APIs working.
+
+## Language/Framework
+
+* Python 3.11+
+* Flask
+* SQLite: use `sqlite3` from the standard library
+* Sessions: Flask session
+* Server-rendered templates: Jinja2
+
+## Architecture requirement (MVC, function-only; no fixed file paths)
+
+* Model/Repository: DB access only
+* Controller: Flask route handlers calling repositories
+* View: server-rendered templates
+* Minimal app entry that wires controllers/routes and middleware-like guards
+
+## Scope for this requirement
+
+* Bootstrapping
+* Auth / User v0
+* Course v0
+
+## Minimum data model to implement in this requirement
+
+* User(user_id, username, password_hash, display_name, created_at)
+* Course(course_id, title, description, created_by, created_at)
+
+## Functional Requirements (function-only)
+
+### A) Bootstrapping
+
+* FR-A1 init_db()
+
+  * Create all tables needed by this requirement if not exists.
+* FR-A2 seed_admin()
+
+  * Ensure a default admin user exists on first run.
+  * Choose deterministic default credentials and document them in README.
+
+### B) Auth / User (User v0)
+
+* FR-U1 register_student()
+
+  * HTML: GET /register, POST /register
+  * API:  POST /api/auth/register {username, password, display_name}
+  * Default registration creates a normal user account.
+* FR-U2 login()
+
+  * HTML: GET /login, POST /login
+  * API:  POST /api/auth/login {username, password}
+* FR-U3 logout()
+
+  * HTML: POST /logout
+  * API:  POST /api/auth/logout
+* FR-U4 me()
+
+  * HTML: GET /me
+  * API:  GET /api/auth/me
+* FR-U5 list_users()
+
+  * HTML: GET /admin/users (optional but preferred)
+  * API:  GET /api/users
+
+### C) Courses (Course v0)
+
+* FR-C1 create_course()
+
+  * HTML: GET /courses/new, POST /courses
+  * API:  POST /api/courses {title, description}
+* FR-C2 list_courses()
+
+  * HTML: GET /courses
+  * API:  GET /api/courses
+* FR-C3 get_course()
+
+  * HTML: GET /courses/:course_id
+  * API:  GET /api/courses/:course_id
+* FR-C4 update_course()
+
+  * HTML: GET /courses/:course_id/edit, POST /courses/:course_id
+  * API:  PUT /api/courses/:course_id {title, description}
+* FR-C5 delete_or_archive_course()
+
+  * Choose one behavior and implement it consistently.
+  * HTML: POST /courses/:course_id/delete
+  * API:  DELETE /api/courses/:course_id
+
+## Behavior and implementation rules
+
+* Use Flask session for login state.
+* Use a consistent session key for current user.
+* Protect authenticated pages and APIs where needed.
+* Keep route naming exactly as specified above.
+* Use the same auth/session logic for HTML and `/api`.
+* HTML routes may redirect after successful form submission.
+* `/api` routes must return JSON responses with success/error information.
+* Keep all views minimal.
+* Keep validation minimal but enough to avoid obvious crashes.
+* Do not implement membership, posts, comments, assignments, uploads, questions, quizzes, or attempts in this requirement.
+
+## Suggested implementation details
+
+* Use `werkzeug.security.generate_password_hash` and `check_password_hash` for password handling.
+* Use `sqlite3` consistently for all DB access.
+* Use a simple Flask app entry such as `app.py`.
+* Route all requests through Flask routes and keep controllers thin.
+* Auto-run DB initialization and admin seeding on startup, or provide a small script under `scripts/`.
+* For API `PUT` and `DELETE` routes, parse JSON request bodies consistently.
+* Persist SQLite database in a local file such as `data/app.db`.
+
+## Deliverables (must include)
+
+1. A runnable multi-file codebase.
+2. DB init + seed logic (auto-run on server start OR a script under `scripts/`).
+3. Minimal Jinja2 templates for each major HTML page listed in this requirement.
+4. JSON responses for all `/api` endpoints in this requirement.
+5. Clear folder structure showing MVC separation.
+6. A short README with:
+
+   * install steps
+   * run steps
+   * admin default credentials
+   * example curl commands for key API calls in this requirement
+
+## Output format (MUST follow exactly)
+
+A) Repository folder structure
+B) Full contents of all source files
+C) Database schema / init logic
+D) Run instructions
+E) Example curl commands
+F) Zip file includes all files
+
+
