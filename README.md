@@ -16,8 +16,9 @@ Each artifact is paired with executable functional tests and targeted security t
 
 # Test enviroments for Windows:
 For JS artifacts:
+```
 npm install
-
+```
 For PHP and Python, please install the test environment before running the tests.
 ```
 python -m venv .venv
